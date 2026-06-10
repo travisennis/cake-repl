@@ -1,0 +1,389 @@
+package app
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/ui"
+)
+
+// eventMsg delivers one decoded cake stream event.
+type eventMsg struct{ ev cake.Event }
+
+// runDoneMsg delivers the terminal state of a cake subprocess.
+type runDoneMsg struct{ res cake.Result }
+
+// waitForRun pulls the next event from a run, or its final result once the
+// event stream is closed. It is re-issued after every event.
+func waitForRun(run *cake.Run) tea.Cmd {
+	return func() tea.Msg {
+		if ev, ok := <-run.Events; ok {
+			return eventMsg{ev}
+		}
+		return runDoneMsg{res: <-run.Result}
+	}
+}
+
+// Update implements tea.Model.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.layout()
+		return m, nil
+
+	case spinner.TickMsg:
+		if !m.running {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
+
+	case eventMsg:
+		m.applyEvent(msg.ev)
+		return m, waitForRun(m.run)
+
+	case runDoneMsg:
+		return m.finishRun(msg.res)
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.CancelQuit):
+		if m.running {
+			m.run.Cancel()
+			return m, nil
+		}
+		return m, tea.Quit
+
+	case key.Matches(msg, m.keys.Submit):
+		return m.submit()
+
+	case key.Matches(msg, m.keys.ClearInput):
+		m.input.Reset()
+		m.layout()
+		return m, nil
+
+	case key.Matches(msg, m.keys.PageUp), key.Matches(msg, m.keys.PageDown):
+		var cmd tea.Cmd
+		m.timeline, cmd = m.timeline.Update(msg)
+		return m, cmd
+	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.layout() // input height tracks line count
+	return m, cmd
+}
+
+func (m Model) submit() (tea.Model, tea.Cmd) {
+	text := strings.TrimSpace(m.input.Value())
+	if text == "" {
+		return m, nil
+	}
+
+	if cmd, ok, err := ParseCommand(text); ok {
+		m.input.Reset()
+		m.layout()
+		if err != nil {
+			m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
+			return m, nil
+		}
+		return m.execCommand(cmd)
+	}
+
+	if m.running {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "a task is already running — Ctrl+C cancels it"})
+		return m, nil
+	}
+	return m.startRun(text)
+}
+
+func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
+	switch cmd.Kind {
+	case CmdHelp:
+		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: HelpText})
+
+	case CmdExit:
+		if m.running {
+			m.exitAfter = true
+			m.run.Cancel()
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling task, then exiting…"})
+			return m, nil
+		}
+		return m, tea.Quit
+
+	case CmdNew:
+		m.session.Reset()
+		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt starts a fresh cake session"})
+
+	case CmdContinue:
+		m.session.UseContinue()
+		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt continues cake's latest session"})
+
+	case CmdResume:
+		m.session.UseResume(cmd.Arg)
+		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt resumes session " + cmd.Arg})
+
+	case CmdSession:
+		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.sessionInfo()})
+
+	case CmdClear:
+		m.items = nil
+		// Indices in pendingCalls point into items; they are invalid now.
+		// Late outputs will be appended as standalone blocks instead.
+		m.pendingCalls = map[string]int{}
+		m.refreshTimeline()
+	}
+	return m, nil
+}
+
+func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
+	mode, resumeID := m.session.RunOptions()
+	run, err := cake.Start(cake.Options{
+		Bin:      m.cfg.CakeBin,
+		Cwd:      m.cfg.Cwd,
+		Prompt:   prompt,
+		Mode:     mode,
+		ResumeID: resumeID,
+		Model:    m.cfg.Model,
+		Profile:  m.cfg.Profile,
+		DebugLog: m.cfg.DebugLog,
+	})
+	if err != nil {
+		m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
+		return m, nil
+	}
+
+	m.run = run
+	m.running = true
+	m.sawComplete = false
+	m.appendItem(ui.Item{Kind: ui.KindUser, Text: prompt})
+	m.input.Reset()
+	m.layout()
+	return m, tea.Batch(m.spin.Tick, waitForRun(run))
+}
+
+func (m *Model) applyEvent(ev cake.Event) {
+	switch e := ev.(type) {
+	case cake.TaskStart:
+		m.session.OnTaskStart(e)
+		m.appendItem(ui.Item{Kind: ui.KindTaskStart, Text: "task started · session " + ui.ShortID(e.SessionID)})
+
+	case cake.Message:
+		switch e.Role {
+		case "assistant":
+			if strings.TrimSpace(e.Content) != "" {
+				m.appendItem(ui.Item{Kind: ui.KindAssistant, Text: e.Content})
+			}
+		case "user":
+			// The submitted prompt is already on the timeline.
+		default:
+			m.appendDebug(fmt.Sprintf("%s message: %s", e.Role, e.Content))
+		}
+
+	case cake.Reasoning:
+		text := strings.TrimSpace(strings.Join(e.Summary, "\n"))
+		if text != "" {
+			m.appendItem(ui.Item{Kind: ui.KindReasoning, Text: text})
+		}
+
+	case cake.FunctionCall:
+		idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
+			Name:      e.Name,
+			Arguments: e.Arguments,
+		}})
+		m.pendingCalls[e.CallID] = idx
+
+	case cake.FunctionCallOutput:
+		if idx, ok := m.pendingCalls[e.CallID]; ok && idx < len(m.items) && m.items[idx].Tool != nil {
+			m.items[idx].Tool.Output = e.Output
+			m.items[idx].Tool.Done = true
+			delete(m.pendingCalls, e.CallID)
+			m.refreshTimeline()
+		} else {
+			m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
+				Name:      "(tool output)",
+				Arguments: "{}",
+				Output:    e.Output,
+				Done:      true,
+			}})
+		}
+
+	case cake.HookEvent:
+		if line, show := describeHook(e); show {
+			m.appendItem(ui.Item{Kind: ui.KindHook, Text: line})
+		} else {
+			m.appendDebug("hook " + line)
+		}
+
+	case cake.TaskComplete:
+		m.session.OnTaskComplete(e)
+		m.sawComplete = true
+		if e.IsError {
+			text := "task failed"
+			if e.Error != "" {
+				text += ": " + e.Error
+			}
+			m.appendItem(ui.Item{Kind: ui.KindError, Text: text})
+		} else {
+			m.appendItem(ui.Item{Kind: ui.KindComplete, Text: completionSummary(e)})
+		}
+
+	case cake.ParseError:
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "malformed stream line: " + e.Line})
+
+	case cake.Unknown:
+		m.appendDebug("unknown event type: " + e.Type)
+	}
+}
+
+// appendDebug records low-value diagnostics; they are only shown when a
+// debug log is enabled.
+func (m *Model) appendDebug(text string) {
+	if m.cfg.DebugLog != nil {
+		m.appendItem(ui.Item{Kind: ui.KindDebug, Text: text})
+	}
+}
+
+func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
+	m.running = false
+	m.run = nil
+
+	// Any tool call still waiting for output will never get one.
+	for callID, idx := range m.pendingCalls {
+		if idx < len(m.items) && m.items[idx].Tool != nil {
+			m.items[idx].Tool.Done = true
+			m.items[idx].Tool.Output = "(no output — task ended)"
+		}
+		delete(m.pendingCalls, callID)
+	}
+
+	switch {
+	case res.Canceled:
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceled"})
+	case res.Err != nil:
+		m.appendItem(ui.Item{Kind: ui.KindError, Text: "cake failed: " + res.Err.Error()})
+	case res.ExitCode != 0:
+		text := fmt.Sprintf("cake exited with code %d", res.ExitCode)
+		if res.Stderr != "" {
+			text += "\n" + ui.TruncateOutput(res.Stderr, ui.DefaultOutputLimit)
+		}
+		m.appendItem(ui.Item{Kind: ui.KindError, Text: text})
+	case !m.sawComplete:
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "cake exited before completing the task"})
+	default:
+		m.refreshTimeline()
+	}
+
+	if m.exitAfter {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m Model) sessionInfo() string {
+	orNone := func(s string) string {
+		if s == "" {
+			return "(none)"
+		}
+		return s
+	}
+	mode, resumeID := m.session.RunOptions()
+	modeText := mode.String()
+	if mode == cake.RunResume {
+		modeText += " " + resumeID
+	}
+	lines := []string{
+		"session:  " + orNone(m.session.SessionID),
+		"task:     " + orNone(m.session.TaskID),
+		"cwd:      " + m.cfg.Cwd,
+		"next run: " + modeText,
+	}
+	if m.cfg.Model != "" {
+		lines = append(lines, "model:    "+m.cfg.Model)
+	}
+	if m.cfg.Profile != "" {
+		lines = append(lines, "profile:  "+m.cfg.Profile)
+	}
+	if c := m.session.LastComplete; c != nil {
+		outcome := "success"
+		if c.IsError {
+			outcome = "error"
+		}
+		lines = append(lines, "last:     "+outcome+" · "+completionSummary(*c))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// describeHook returns a one-line summary and whether it deserves timeline
+// visibility. Successful hook noise stays hidden; denials, errors, and
+// non-zero exits are shown.
+func describeHook(e cake.HookEvent) (string, bool) {
+	decision := e.ResolvedDecision
+	if decision == "" {
+		decision = e.Decision
+	}
+	var b strings.Builder
+	b.WriteString("hook " + e.Event)
+	if e.ToolName != "" {
+		b.WriteString(" [" + e.ToolName + "]")
+	}
+	if decision != "" {
+		b.WriteString(" → " + decision)
+	}
+	if e.ExitCode != nil && *e.ExitCode != 0 {
+		fmt.Fprintf(&b, " (exit %d)", *e.ExitCode)
+	}
+	if stderr := strings.TrimSpace(e.Stderr); stderr != "" {
+		lines := strings.SplitN(stderr, "\n", 2)
+		b.WriteString(": " + lines[0])
+	}
+
+	benign := decision == "" || decision == "allow" || decision == "ok" ||
+		decision == "none" || decision == "success" || decision == "continue"
+	failed := e.ExitCode != nil && *e.ExitCode != 0
+	return b.String(), !benign || failed
+}
+
+func completionSummary(e cake.TaskComplete) string {
+	return fmt.Sprintf("done in %s · %d turn%s · %d tool call%s · %s tokens · session %s",
+		humanDuration(e.DurationMS),
+		e.TurnCount, pluralize(e.TurnCount),
+		e.ToolCallCount, pluralize(e.ToolCallCount),
+		fmt.Sprintf("%d in / %d out", e.Usage.InputTokens, e.Usage.OutputTokens),
+		ui.ShortID(e.SessionID))
+}
+
+func humanDuration(ms int64) string {
+	d := time.Duration(ms) * time.Millisecond
+	switch {
+	case d < time.Second:
+		return fmt.Sprintf("%dms", ms)
+	case d < time.Minute:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	default:
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+}
+
+func pluralize(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}

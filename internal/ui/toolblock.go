@@ -1,0 +1,174 @@
+package ui
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// DefaultOutputLimit is how many characters of tool output are shown before
+// truncation.
+const DefaultOutputLimit = 2000
+
+// unknownArgsLimit caps the JSON summary shown for unrecognized tools.
+const unknownArgsLimit = 160
+
+// maxEditPreviews caps how many edit pairs are summarized for the edit tool.
+const maxEditPreviews = 3
+
+// SummarizeToolArgs renders a concise, single-purpose summary of a tool
+// call's arguments. Tool names are matched case-insensitively; the original
+// name is left untouched by callers.
+func SummarizeToolArgs(name, argsJSON string) string {
+	switch strings.ToLower(name) {
+	case "bash":
+		return summarizeBash(argsJSON)
+	case "read":
+		return summarizeRead(argsJSON)
+	case "edit":
+		return summarizeEdit(argsJSON)
+	case "write":
+		return summarizeWrite(argsJSON)
+	default:
+		return compactJSON(argsJSON, unknownArgsLimit)
+	}
+}
+
+func summarizeBash(argsJSON string) string {
+	var args struct {
+		Command string `json:"command"`
+		Cwd     string `json:"cwd"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Command == "" {
+		return compactJSON(argsJSON, unknownArgsLimit)
+	}
+	s := "$ " + firstLineOf(args.Command, 200)
+	if args.Cwd != "" {
+		s += "  (cwd: " + args.Cwd + ")"
+	}
+	return s
+}
+
+func summarizeRead(argsJSON string) string {
+	var args struct {
+		Path      string `json:"path"`
+		StartLine *int   `json:"start_line"`
+		EndLine   *int   `json:"end_line"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Path == "" {
+		return compactJSON(argsJSON, unknownArgsLimit)
+	}
+	switch {
+	case args.StartLine != nil && args.EndLine != nil:
+		return fmt.Sprintf("%s (lines %d-%d)", args.Path, *args.StartLine, *args.EndLine)
+	case args.StartLine != nil:
+		return fmt.Sprintf("%s (from line %d)", args.Path, *args.StartLine)
+	case args.EndLine != nil:
+		return fmt.Sprintf("%s (through line %d)", args.Path, *args.EndLine)
+	default:
+		return args.Path
+	}
+}
+
+func summarizeEdit(argsJSON string) string {
+	var args struct {
+		Path  string `json:"path"`
+		Edits []struct {
+			OldText string `json:"old_text"`
+			NewText string `json:"new_text"`
+		} `json:"edits"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Path == "" {
+		return compactJSON(argsJSON, unknownArgsLimit)
+	}
+	lines := []string{fmt.Sprintf("%s (%d edit%s)", args.Path, len(args.Edits), plural(len(args.Edits)))}
+	for i, e := range args.Edits {
+		if i == maxEditPreviews {
+			lines = append(lines, fmt.Sprintf("  … %d more", len(args.Edits)-maxEditPreviews))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("  - %s → %s", firstLineOf(e.OldText, 60), firstLineOf(e.NewText, 60)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func summarizeWrite(argsJSON string) string {
+	var args struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Path == "" {
+		return compactJSON(argsJSON, unknownArgsLimit)
+	}
+	lineCount := strings.Count(args.Content, "\n")
+	if args.Content != "" && !strings.HasSuffix(args.Content, "\n") {
+		lineCount++
+	}
+	s := fmt.Sprintf("%s (%d line%s, %d bytes)", args.Path, lineCount, plural(lineCount), len(args.Content))
+	if first := firstNonEmptyLine(args.Content); first != "" {
+		s += fmt.Sprintf(" %q", truncateString(first, 60))
+	}
+	return s
+}
+
+// TruncateOutput limits s to roughly limit characters, preferring to cut at a
+// line boundary, and appends a marker with the original size.
+func TruncateOutput(s string, limit int) string {
+	s = strings.TrimRight(s, "\n")
+	if len(s) <= limit {
+		return s
+	}
+	original := len(s)
+	cut := s[:limit]
+	// Prefer a line boundary if one exists in the back half of the cut.
+	if i := strings.LastIndexByte(cut, '\n'); i > limit/2 {
+		cut = cut[:i]
+	}
+	return cut + fmt.Sprintf("\n… truncated (%d bytes total)", original)
+}
+
+func compactJSON(s string, limit int) string {
+	var buf strings.Builder
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err == nil {
+		if b, err := json.Marshal(v); err == nil {
+			buf.Write(b)
+		}
+	}
+	out := buf.String()
+	if out == "" {
+		out = strings.TrimSpace(s)
+	}
+	return truncateString(strings.ReplaceAll(out, "\n", " "), limit)
+}
+
+func truncateString(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+func firstLineOf(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i] + "…"
+	}
+	return truncateString(s, n)
+}
+
+func firstNonEmptyLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
