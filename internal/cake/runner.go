@@ -110,7 +110,7 @@ const stderrLimit = 8 * 1024
 func Start(opts Options) (*Run, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	cmd := exec.CommandContext(ctx, opts.Bin, opts.Args()...)
+	cmd := exec.CommandContext(ctx, opts.Bin, opts.Args()...) // #nosec G204 -- opts.Bin intentionally comes from --cake-bin/config.
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

@@ -1,0 +1,44 @@
+repos:
+  - repo: local
+    hooks:
+      - id: go-fmt-check
+        name: go fmt check
+        entry: just fmt-check
+        language: system
+        pass_filenames: false
+
+      - id: go-mod-tidy-check
+        name: go mod tidy check
+        entry: just tidy-check
+        language: system
+        pass_filenames: false
+
+      - id: go-test
+        name: go test
+        entry: just test
+        language: system
+        pass_filenames: false
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: just lint
+        language: system
+        pass_filenames: false
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args:
+          - feat
+          - fix
+          - docs
+          - style
+          - refactor
+          - perf
+          - test
+          - build
+          - ci
+          - chore
+          - revert

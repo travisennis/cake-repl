@@ -14,13 +14,15 @@ session files. The only contract is cake's stream-json NDJSON output and its
 
 ## Requirements
 
-- Go 1.26 or newer to build.
+- Go 1.26.3 or newer to build.
 - `cake` installed and on `PATH`, or point at a binary with `--cake-bin`.
 
 ## Build
 
 ```bash
 go build ./cmd/cake-repl
+# or
+just build
 ```
 
 ## Install
@@ -29,6 +31,8 @@ From this checkout:
 
 ```bash
 go install ./cmd/cake-repl
+# or
+just install
 ```
 
 This installs `cake-repl` into `GOBIN`, or `GOPATH/bin` when `GOBIN` is unset.
@@ -55,6 +59,7 @@ Flags:
 | `--cwd <path>` | run cake from this directory (default: current directory) |
 | `--no-color` | disable styling |
 | `--debug-log <path>` | append cake-repl diagnostics (raw stream lines, exits) to a file |
+| `--version` | print version and exit |
 
 ## Keybindings
 
@@ -91,6 +96,8 @@ Flags:
 
 ```bash
 go test ./...
+# or
+just test
 ```
 
 Integration tests drive the subprocess runner with fake cake shell scripts
@@ -102,13 +109,21 @@ run without a real cake binary.
 This repo includes a `justfile` for common development commands:
 
 ```bash
-just build      # go build ./cmd/cake-repl
-just install    # go install ./cmd/cake-repl
-just test       # go test ./...
-just fmt        # gofmt -w cmd internal
-just vet        # go vet ./...
-just release    # optimized local release binary
-just run        # go run ./cmd/cake-repl
+just build          # go build -trimpath -o bin/cake-repl ./cmd/cake-repl
+just install        # go install -trimpath ./cmd/cake-repl
+just test           # go test ./...
+just test-race      # go test -race -cover ./...
+just fmt            # go fmt ./...
+just fmt-check      # fail if gofmt would change files
+just tidy-check     # fail if go mod tidy would change files
+just vet            # go vet ./...
+just lint           # golangci-lint run
+just vuln           # govulncheck ./...
+just release-check  # GoReleaser config check and snapshot build
+just ci             # full local/CI gate
+just install-tools  # install pinned lint, vuln, and release tools
+just release        # optimized local release binary at ./cake-repl
+just run            # go run ./cmd/cake-repl
 ```
 
 ## Release build
@@ -116,6 +131,9 @@ just run        # go run ./cmd/cake-repl
 ```bash
 go build -trimpath -ldflags="-s -w" -o cake-repl ./cmd/cake-repl
 ```
+
+Tagged releases are built by GoReleaser through GitHub Actions. Local release
+validation is available with `just release-check`.
 
 ## Known limitations
 

@@ -15,6 +15,7 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/travisennis/cake-repl/internal/app"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/version"
 )
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -26,7 +27,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (err error) {
 	cakeBin := flag.String("cake-bin", "cake", "cake executable to run")
 	continueFlag := flag.Bool("continue", false, "continue cake's latest session on the first prompt")
 	resume := flag.String("resume", "", "resume a specific cake session uuid on the first prompt")
@@ -35,8 +36,13 @@ func run() error {
 	cwd := flag.String("cwd", "", "working directory to run cake from (default: current directory)")
 	noColor := flag.Bool("no-color", false, "disable styling")
 	debugLog := flag.String("debug-log", "", "write cake-repl debug output to this file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
+	if *showVersion {
+		fmt.Fprintln(os.Stdout, version.Binary)
+		return nil
+	}
 	if flag.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q (prompts are entered inside the REPL)", flag.Arg(0))
 	}
@@ -53,13 +59,12 @@ func run() error {
 
 	dir := *cwd
 	if dir == "" {
-		var err error
 		dir, err = os.Getwd()
 		if err != nil {
 			return fmt.Errorf("determining working directory: %w", err)
 		}
 	}
-	dir, err := filepath.Abs(dir)
+	dir, err = filepath.Abs(dir)
 	if err != nil {
 		return fmt.Errorf("resolving --cwd: %w", err)
 	}
@@ -82,11 +87,15 @@ func run() error {
 	}
 
 	if *debugLog != "" {
-		f, err := os.OpenFile(*debugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		f, err := os.OpenFile(*debugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return fmt.Errorf("opening --debug-log: %w", err)
 		}
-		defer f.Close()
+		defer func() {
+			if closeErr := f.Close(); err == nil && closeErr != nil {
+				err = fmt.Errorf("closing --debug-log: %w", closeErr)
+			}
+		}()
 		cfg.DebugLog = f
 	}
 

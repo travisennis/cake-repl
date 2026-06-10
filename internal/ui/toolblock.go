@@ -30,7 +30,7 @@ func SummarizeToolArgs(name, argsJSON string) string {
 	case "write":
 		return summarizeWrite(argsJSON)
 	default:
-		return compactJSON(argsJSON, unknownArgsLimit)
+		return compactJSON(argsJSON)
 	}
 }
 
@@ -40,7 +40,7 @@ func summarizeBash(argsJSON string) string {
 		Cwd     string `json:"cwd"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Command == "" {
-		return compactJSON(argsJSON, unknownArgsLimit)
+		return compactJSON(argsJSON)
 	}
 	s := "$ " + firstLineOf(args.Command, 200)
 	if args.Cwd != "" {
@@ -56,7 +56,7 @@ func summarizeRead(argsJSON string) string {
 		EndLine   *int   `json:"end_line"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Path == "" {
-		return compactJSON(argsJSON, unknownArgsLimit)
+		return compactJSON(argsJSON)
 	}
 	switch {
 	case args.StartLine != nil && args.EndLine != nil:
@@ -79,7 +79,7 @@ func summarizeEdit(argsJSON string) string {
 		} `json:"edits"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Path == "" {
-		return compactJSON(argsJSON, unknownArgsLimit)
+		return compactJSON(argsJSON)
 	}
 	lines := []string{fmt.Sprintf("%s (%d edit%s)", args.Path, len(args.Edits), plural(len(args.Edits)))}
 	for i, e := range args.Edits {
@@ -98,7 +98,7 @@ func summarizeWrite(argsJSON string) string {
 		Content string `json:"content"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Path == "" {
-		return compactJSON(argsJSON, unknownArgsLimit)
+		return compactJSON(argsJSON)
 	}
 	lineCount := strings.Count(args.Content, "\n")
 	if args.Content != "" && !strings.HasSuffix(args.Content, "\n") {
@@ -127,7 +127,7 @@ func TruncateOutput(s string, limit int) string {
 	return cut + fmt.Sprintf("\n… truncated (%d bytes total)", original)
 }
 
-func compactJSON(s string, limit int) string {
+func compactJSON(s string) string {
 	var buf strings.Builder
 	var v any
 	if err := json.Unmarshal([]byte(s), &v); err == nil {
@@ -139,7 +139,7 @@ func compactJSON(s string, limit int) string {
 	if out == "" {
 		out = strings.TrimSpace(s)
 	}
-	return truncateString(strings.ReplaceAll(out, "\n", " "), limit)
+	return truncateString(strings.ReplaceAll(out, "\n", " "), unknownArgsLimit)
 }
 
 func truncateString(s string, n int) string {

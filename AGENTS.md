@@ -16,13 +16,21 @@ This is a Go CLI project for `cake-repl`, a terminal REPL frontend for `cake`.
 Prefer the `justfile` targets when available:
 
 ```bash
-just build      # go build ./cmd/cake-repl
-just test       # go test ./...
-just fmt        # gofmt -w cmd internal
-just vet        # go vet ./...
-just run        # go run ./cmd/cake-repl
-just install    # go install ./cmd/cake-repl
-just release    # optimized local binary at ./cake-repl
+just build          # go build -trimpath -o bin/cake-repl ./cmd/cake-repl
+just test           # go test ./...
+just test-race      # go test -race -cover ./...
+just fmt            # go fmt ./...
+just fmt-check      # fail if gofmt would change files
+just tidy-check     # fail if go mod tidy would change files
+just vet            # go vet ./...
+just lint           # golangci-lint run
+just vuln           # govulncheck ./...
+just release-check  # GoReleaser config check and snapshot build
+just ci             # full local/CI gate
+just install-tools  # install pinned lint, vuln, and release tools
+just run            # go run ./cmd/cake-repl
+just install        # go install -trimpath ./cmd/cake-repl
+just release        # optimized local binary at ./cake-repl
 ```
 
 Without `just`, run the underlying `go` commands directly. The project requires Go `1.26.3` or newer.
@@ -35,13 +43,12 @@ Name tests after behavior, for example `TestParseEvent...` or `TestRunner...`. K
 
 ## Testing Guidelines
 
-Run `just test` before handing off changes. Tests use Go's standard `testing` package. Runner tests use fake shell scripts, so they should not require a real `cake` binary. Add focused tests next to changed code, especially for parser behavior, session transitions, command parsing, and UI formatting.
+Run `just test` for focused changes and `just ci` before handing off broader changes. Tests use Go's standard `testing` package. Runner tests use fake shell scripts, so they should not require a real `cake` binary. Add focused tests next to changed code, especially for parser behavior, session transitions, command parsing, and UI formatting.
 
 For broader changes, also run:
 
 ```bash
-just fmt
-just vet
+just ci
 ```
 
 ## Commit & Pull Request Guidelines
