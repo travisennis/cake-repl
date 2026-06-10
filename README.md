@@ -23,6 +23,17 @@ session files. The only contract is cake's stream-json NDJSON output and its
 go build ./cmd/cake-repl
 ```
 
+## Install
+
+From this checkout:
+
+```bash
+go install ./cmd/cake-repl
+```
+
+This installs `cake-repl` into `GOBIN`, or `GOPATH/bin` when `GOBIN` is unset.
+Make sure that directory is on your `PATH`.
+
 ## Run
 
 ```bash
@@ -85,6 +96,20 @@ go test ./...
 Integration tests drive the subprocess runner with fake cake shell scripts
 (successful streams, malformed lines, non-zero exits, cancellation), so they
 run without a real cake binary.
+
+## Common commands
+
+This repo includes a `justfile` for common development commands:
+
+```bash
+just build      # go build ./cmd/cake-repl
+just install    # go install ./cmd/cake-repl
+just test       # go test ./...
+just fmt        # gofmt -w cmd internal
+just vet        # go vet ./...
+just release    # optimized local release binary
+just run        # go run ./cmd/cake-repl
+```
 
 ## Release build
 
