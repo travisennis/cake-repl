@@ -188,6 +188,37 @@ exit 1
 	}
 }
 
+func TestTailBuffer(t *testing.T) {
+	tests := []struct {
+		name   string
+		limit  int
+		writes []string
+		want   string
+	}{
+		{"under limit", 8, []string{"  hi\n"}, "hi"},
+		{"rolls across writes", 8, []string{"aaaa", "bbbb", "cccc"}, "…bbbbcccc"},
+		{"single write over limit", 4, []string{"0123456789"}, "…6789"},
+		{"empty", 8, nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &tailBuffer{limit: tt.limit}
+			for _, w := range tt.writes {
+				n, err := b.Write([]byte(w))
+				if n != len(w) || err != nil {
+					t.Fatalf("Write(%q) = (%d, %v), want (%d, nil)", w, n, err, len(w))
+				}
+			}
+			if got := b.String(); got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+			if len(b.buf) > tt.limit {
+				t.Errorf("retained %d bytes, limit %d", len(b.buf), tt.limit)
+			}
+		})
+	}
+}
+
 func TestOptionsArgs(t *testing.T) {
 	tests := []struct {
 		name string

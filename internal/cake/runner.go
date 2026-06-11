@@ -2,7 +2,6 @@ package cake
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -103,8 +102,42 @@ func (r *Run) Cancel() {
 	}
 }
 
-// stderrLimit bounds how much captured stderr is kept for error display.
+// stderrLimit bounds how much stderr is retained for error display; older
+// output is dropped as it arrives so a chatty process cannot grow memory
+// without bound.
 const stderrLimit = 8 * 1024
+
+// tailBuffer is an io.Writer that keeps only the last limit bytes written.
+type tailBuffer struct {
+	limit     int
+	buf       []byte
+	truncated bool
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	if n > b.limit {
+		b.truncated = true
+		p = p[n-b.limit:]
+	}
+	b.buf = append(b.buf, p...)
+	if overflow := len(b.buf) - b.limit; overflow > 0 {
+		b.truncated = true
+		copy(b.buf, b.buf[overflow:])
+		b.buf = b.buf[:b.limit]
+	}
+	return n, nil
+}
+
+// String returns the retained tail, trimmed, with an ellipsis marking any
+// dropped output.
+func (b *tailBuffer) String() string {
+	s := strings.TrimSpace(string(b.buf))
+	if b.truncated {
+		return "…" + s
+	}
+	return s
+}
 
 // Start launches one cake process for the given options. It returns an error
 // only when the process cannot be started at all (for example, the binary is
@@ -134,8 +167,8 @@ func Start(opts Options) (*Run, error) {
 		cancel()
 		return nil, fmt.Errorf("opening stdout pipe: %w", err)
 	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	stderr := &tailBuffer{limit: stderrLimit}
+	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -174,7 +207,7 @@ func Start(opts Options) (*Run, error) {
 		waitErr := cmd.Wait()
 		res := Result{
 			Canceled: ctx.Err() != nil,
-			Stderr:   tail(stderr.String(), stderrLimit),
+			Stderr:   stderr.String(),
 		}
 		var exitErr *exec.ExitError
 		switch {
@@ -200,15 +233,6 @@ func snippet(s string, n int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
 	if len(s) > n {
 		return s[:n] + "…"
-	}
-	return s
-}
-
-// tail returns the last n bytes of s, trimmed.
-func tail(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) > n {
-		return "…" + s[len(s)-n:]
 	}
 	return s
 }
