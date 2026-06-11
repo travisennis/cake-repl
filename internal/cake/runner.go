@@ -179,6 +179,9 @@ func Start(opts Options) (*Run, error) {
 	result := make(chan Result, 1)
 
 	go func() {
+		// Release the context once the run is over; Run.Cancel is the only
+		// other caller and a normal completion never invokes it.
+		defer cancel()
 		defer close(events)
 		// bufio.Reader instead of Scanner: tool outputs can produce very
 		// long single lines and must not abort the stream.
