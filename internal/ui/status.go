@@ -23,10 +23,11 @@ func StatusLine(th Theme, width int, segments ...string) string {
 	return th.StatusBar.MaxWidth(width).Render(line)
 }
 
-// ShortID trims a UUID-ish string for status display.
+// ShortID trims a UUID-ish string to its first 8 runes for status display.
 func ShortID(id string) string {
-	if len(id) > 8 {
-		return id[:8]
+	runes := []rune(id)
+	if len(runes) > 8 {
+		return string(runes[:8])
 	}
 	return id
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // RunMode selects which session flag a cake invocation uses.
@@ -132,7 +133,15 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 // String returns the retained tail, trimmed, with an ellipsis marking any
 // dropped output.
 func (b *tailBuffer) String() string {
-	s := strings.TrimSpace(string(b.buf))
+	buf := b.buf
+	if b.truncated {
+		// The byte cut can land mid-rune; drop continuation bytes so the
+		// kept tail starts on a rune boundary.
+		for len(buf) > 0 && !utf8.RuneStart(buf[0]) {
+			buf = buf[1:]
+		}
+	}
+	s := strings.TrimSpace(string(buf))
 	if b.truncated {
 		return "…" + s
 	}
@@ -238,11 +247,15 @@ func Start(opts Options) (*Run, error) {
 	return &Run{Events: events, Result: result, cancel: cancel}, nil
 }
 
-// snippet returns at most n characters of s with newlines flattened.
+// snippet returns at most n bytes of s with newlines flattened, never
+// splitting a multibyte rune.
 func snippet(s string, n int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
-	if len(s) > n {
-		return s[:n] + "…"
+	if len(s) <= n {
+		return s
 	}
-	return s
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }

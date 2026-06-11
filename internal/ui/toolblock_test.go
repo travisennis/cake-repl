@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestSummarizeBash(t *testing.T) {
@@ -88,6 +89,28 @@ func TestSummarizeBadArgsFallsBack(t *testing.T) {
 func TestTruncateOutputShortUnchanged(t *testing.T) {
 	if got := TruncateOutput("short", 100); got != "short" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestTruncateStringIsCellAware(t *testing.T) {
+	// 8 CJK runes = 16 cells; a budget of 8 cells fits three runes plus the
+	// one-cell ellipsis.
+	if got := truncateString("日本語のテキスト", 8); got != "日本語…" {
+		t.Errorf("got %q", got)
+	}
+	if got := truncateString("hello", 8); got != "hello" {
+		t.Errorf("short string should be unchanged, got %q", got)
+	}
+}
+
+func TestTruncateOutputDoesNotSplitRunes(t *testing.T) {
+	in := strings.Repeat("é", 100) // 200 bytes, no newlines
+	got := TruncateOutput(in, 7)   // 7 lands mid-rune
+	if !utf8.ValidString(got) {
+		t.Fatalf("output is not valid UTF-8: %q", got)
+	}
+	if !strings.HasPrefix(got, "ééé\n") {
+		t.Errorf("expected cut after 3 full runes, got %q", got)
 	}
 }
 

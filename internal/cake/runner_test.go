@@ -226,6 +226,13 @@ exit 1
 	}
 }
 
+func TestSnippetDoesNotSplitRunes(t *testing.T) {
+	got := snippet(strings.Repeat("é", 10), 5) // 20 bytes; 5 lands mid-rune
+	if got != "éé…" {
+		t.Errorf("got %q, want %q", got, "éé…")
+	}
+}
+
 func TestTailBuffer(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -237,6 +244,9 @@ func TestTailBuffer(t *testing.T) {
 		{"rolls across writes", 8, []string{"aaaa", "bbbb", "cccc"}, "…bbbbcccc"},
 		{"single write over limit", 4, []string{"0123456789"}, "…6789"},
 		{"empty", 8, nil, ""},
+		// "aé日本" is 9 bytes; keeping the last 5 lands mid-rune inside 日,
+		// whose continuation bytes must be dropped.
+		{"utf8 boundary", 5, []string{"aé日本"}, "…本"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

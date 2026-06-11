@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // DefaultOutputLimit is how many characters of tool output are shown before
@@ -111,7 +114,7 @@ func summarizeWrite(argsJSON string) string {
 	return s
 }
 
-// TruncateOutput limits s to roughly limit characters, preferring to cut at a
+// TruncateOutput limits s to roughly limit bytes, preferring to cut at a
 // line boundary, and appends a marker with the original size.
 func TruncateOutput(s string, limit int) string {
 	s = strings.TrimRight(s, "\n")
@@ -119,12 +122,24 @@ func TruncateOutput(s string, limit int) string {
 		return s
 	}
 	original := len(s)
-	cut := s[:limit]
+	cut := cutRuneSafe(s, limit)
 	// Prefer a line boundary if one exists in the back half of the cut.
 	if i := strings.LastIndexByte(cut, '\n'); i > limit/2 {
 		cut = cut[:i]
 	}
 	return cut + fmt.Sprintf("\n… truncated (%d bytes total)", original)
+}
+
+// cutRuneSafe returns at most n leading bytes of s without splitting a
+// multibyte rune.
+func cutRuneSafe(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func compactJSON(s string) string {
@@ -142,11 +157,11 @@ func compactJSON(s string) string {
 	return truncateString(strings.ReplaceAll(out, "\n", " "), unknownArgsLimit)
 }
 
+// truncateString limits s to n terminal cells, ellipsized. Counting cells
+// rather than bytes keeps multibyte runes intact and makes width-based
+// limits honest for wide (CJK, emoji) characters.
 func truncateString(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
+	return ansi.Truncate(s, n, "…")
 }
 
 func firstLineOf(s string, n int) string {
