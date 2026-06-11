@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -117,8 +118,13 @@ func Start(opts Options) (*Run, error) {
 		cmd.Dir = opts.Cwd
 	}
 	// Prefer a graceful stop so cake can finish writing session records, but
-	// fall back to SIGKILL if it does not exit promptly.
+	// fall back to SIGKILL if it does not exit promptly. Windows cannot
+	// deliver SIGTERM (Process.Signal returns an error, which would stall
+	// cancellation for the full WaitDelay), so kill outright there.
 	cmd.Cancel = func() error {
+		if runtime.GOOS == "windows" {
+			return cmd.Process.Kill()
+		}
 		return cmd.Process.Signal(syscall.SIGTERM)
 	}
 	cmd.WaitDelay = 3 * time.Second
