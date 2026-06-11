@@ -163,6 +163,44 @@ sleep 30
 	}
 }
 
+func TestRunnerCancelGracefulExit(t *testing.T) {
+	// cake may handle SIGTERM and exit 0; that is still a cancellation, but
+	// not an error. sleep runs in the background with stdout redirected so
+	// the trap fires immediately and nothing holds the pipe open.
+	bin := writeFakeCake(t, `
+trap 'exit 0' TERM
+echo '{"type":"task_start","session_id":"s","task_id":"t","timestamp":"2026-06-09T12:00:00Z"}'
+sleep 30 > /dev/null 2>&1 &
+wait $!
+`)
+	run, err := Start(Options{Bin: bin, Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	select {
+	case ev := <-run.Events:
+		if _, ok := ev.(TaskStart); !ok {
+			t.Fatalf("got %T, want TaskStart", ev)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for task_start")
+	}
+
+	run.Cancel()
+	_, res := collect(t, run)
+
+	if !res.Canceled {
+		t.Errorf("result not marked canceled: %+v", res)
+	}
+	if res.Err != nil {
+		t.Errorf("graceful exit after cancel should not be an error, got %v", res.Err)
+	}
+	if res.ExitCode != 0 {
+		t.Errorf("exit code = %d, want 0", res.ExitCode)
+	}
+}
+
 func TestRunnerMissingBinary(t *testing.T) {
 	_, err := Start(Options{Bin: filepath.Join(t.TempDir(), "nope"), Prompt: "hi"})
 	if err == nil {

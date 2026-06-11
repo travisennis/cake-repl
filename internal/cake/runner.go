@@ -205,16 +205,23 @@ func Start(opts Options) (*Run, error) {
 		}
 
 		waitErr := cmd.Wait()
-		res := Result{
-			Canceled: ctx.Err() != nil,
-			Stderr:   stderr.String(),
-		}
+		// Classify cancellation from Wait's error, not from ctx directly: a
+		// Ctrl+C landing between the process exiting and this point must not
+		// relabel a finished run as canceled. exec resolves that ordering —
+		// a cancel that arrives after exit leaves Wait's error untouched.
+		res := Result{Stderr: stderr.String()}
 		var exitErr *exec.ExitError
 		switch {
 		case waitErr == nil:
 			res.ExitCode = 0
+		case errors.Is(waitErr, context.Canceled):
+			// The cancel interrupted the command and it then exited cleanly
+			// (cake handled SIGTERM); exec reports ctx.Err() in that case.
+			res.Canceled = true
+			res.ExitCode = cmd.ProcessState.ExitCode()
 		case errors.As(waitErr, &exitErr):
 			res.ExitCode = exitErr.ExitCode()
+			res.Canceled = ctx.Err() != nil
 		default:
 			res.ExitCode = -1
 			res.Err = waitErr
