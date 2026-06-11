@@ -23,9 +23,11 @@ func (s *sessionState) OnTaskStart(e cake.TaskStart) {
 	s.TaskID = e.TaskID
 }
 
-// OnTaskComplete records the outcome. A successful task means future prompts
-// continue the same session via --continue; a failed task does not advance
-// the run mode.
+// OnTaskComplete records the outcome. A successful task pins future prompts
+// to the same session via --resume <id>, so a newer session created by
+// another cake process in the same cwd cannot hijack the conversation. If no
+// session id was ever reported, it falls back to --continue. A failed task
+// does not advance the run mode.
 func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 	s.LastComplete = &e
 	if e.SessionID != "" {
@@ -35,8 +37,13 @@ func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 		s.TaskID = e.TaskID
 	}
 	if !e.IsError {
-		s.NextMode = cake.RunContinue
-		s.ResumeID = ""
+		if s.SessionID != "" {
+			s.NextMode = cake.RunResume
+			s.ResumeID = s.SessionID
+		} else {
+			s.NextMode = cake.RunContinue
+			s.ResumeID = ""
+		}
 	}
 }
 

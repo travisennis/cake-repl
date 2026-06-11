@@ -86,11 +86,16 @@ Flags:
 ## Session behavior
 
 - A fresh start uses no session flag.
-- After a successful task, future prompts default to `--continue`.
+- After a successful task, future prompts are pinned to that session via
+  `--resume <id>`, so another cake process creating a newer session in the
+  same directory cannot hijack the conversation. If cake never reported a
+  session id, the fallback is `--continue`.
 - A failed or canceled task does not advance the run mode.
 - `/new` clears local session state; the next prompt starts fresh.
+- `/continue` explicitly targets cake's latest session for the directory on
+  the next prompt; once it succeeds, later prompts pin to that session.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts
-  default back to `--continue`.
+  stay pinned to the same session.
 
 ## Tests
 
