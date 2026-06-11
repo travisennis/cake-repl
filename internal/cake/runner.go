@@ -64,7 +64,9 @@ func (o Options) Args() []string {
 	if o.Profile != "" {
 		args = append(args, "--profile", o.Profile)
 	}
-	return append(args, o.Prompt)
+	// "--" ends flag parsing so a prompt starting with "-" (or matching a
+	// cake subcommand name) is always treated as the prompt.
+	return append(args, "--", o.Prompt)
 }
 
 // Result is the terminal state of one cake invocation.

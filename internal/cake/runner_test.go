@@ -197,22 +197,27 @@ func TestOptionsArgs(t *testing.T) {
 		{
 			name: "fresh",
 			opts: Options{Prompt: "hi", Mode: RunFresh},
-			want: []string{"--output-format", "stream-json", "hi"},
+			want: []string{"--output-format", "stream-json", "--", "hi"},
 		},
 		{
 			name: "continue",
 			opts: Options{Prompt: "hi", Mode: RunContinue},
-			want: []string{"--output-format", "stream-json", "--continue", "hi"},
+			want: []string{"--output-format", "stream-json", "--continue", "--", "hi"},
 		},
 		{
 			name: "resume",
 			opts: Options{Prompt: "hi", Mode: RunResume, ResumeID: "abc"},
-			want: []string{"--output-format", "stream-json", "--resume", "abc", "hi"},
+			want: []string{"--output-format", "stream-json", "--resume", "abc", "--", "hi"},
 		},
 		{
 			name: "passthrough",
 			opts: Options{Prompt: "hi", Model: "gpt-x", Profile: "fast"},
-			want: []string{"--output-format", "stream-json", "--model", "gpt-x", "--profile", "fast", "hi"},
+			want: []string{"--output-format", "stream-json", "--model", "gpt-x", "--profile", "fast", "--", "hi"},
+		},
+		{
+			name: "flag-like prompt",
+			opts: Options{Prompt: "-v means what in grep?", Mode: RunFresh},
+			want: []string{"--output-format", "stream-json", "--", "-v means what in grep?"},
 		},
 	}
 	for _, tt := range tests {
