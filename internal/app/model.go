@@ -5,6 +5,7 @@ package app
 
 import (
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -54,6 +55,11 @@ type Model struct {
 	session      sessionState
 	pendingCalls map[string]int // call_id -> index into items
 	items        []ui.Item
+
+	// rendered caches one rendered string per item at renderedWidth, so
+	// appends and single-item updates do not re-render the whole timeline.
+	rendered      []string
+	renderedWidth int
 }
 
 // New builds the initial model.
@@ -89,28 +95,55 @@ func (m Model) Init() tea.Cmd {
 	return textarea.Blink
 }
 
-// appendItem adds a timeline item and returns its index.
+// appendItem adds a timeline item, renders it into the cache, and returns
+// its index.
 func (m *Model) appendItem(it ui.Item) int {
 	m.items = append(m.items, it)
-	m.refreshTimeline()
+	if m.ready {
+		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth))
+		m.syncViewport()
+	}
 	return len(m.items) - 1
 }
 
-// refreshTimeline re-renders all items into the viewport, keeping the view
-// pinned to the bottom if it was there already.
-func (m *Model) refreshTimeline() {
+// rerenderItem refreshes one item's cached rendering after it mutated in
+// place (a tool block receiving its output).
+func (m *Model) rerenderItem(idx int) {
+	if !m.ready || idx < 0 || idx >= len(m.rendered) {
+		return
+	}
+	m.rendered[idx] = ui.RenderItem(m.theme, m.items[idx], m.renderedWidth)
+	m.syncViewport()
+}
+
+// rebuildTimeline re-renders every item at the current viewport width. Only
+// width changes (and /clear) need this; everything else updates the cache
+// incrementally.
+func (m *Model) rebuildTimeline() {
 	if !m.ready {
 		return
 	}
+	m.renderedWidth = m.timeline.Width
+	m.rendered = m.rendered[:0]
+	for _, it := range m.items {
+		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth))
+	}
+	m.syncViewport()
+}
+
+// syncViewport pushes the cached renderings into the viewport, keeping the
+// view pinned to the bottom if it was there already.
+func (m *Model) syncViewport() {
 	atBottom := m.timeline.AtBottom()
-	m.timeline.SetContent(ui.RenderItems(m.theme, m.items, m.timeline.Width))
+	m.timeline.SetContent(strings.Join(m.rendered, "\n\n"))
 	if atBottom {
 		m.timeline.GotoBottom()
 	}
 }
 
 // layout recomputes component sizes from the terminal size and input
-// contents.
+// contents. The timeline is re-rendered only when its width changes; height
+// changes just resize the viewport window.
 func (m *Model) layout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
@@ -126,11 +159,20 @@ func (m *Model) layout() {
 	if !m.ready {
 		m.timeline = viewport.New(m.width, vpHeight)
 		m.ready = true
-	} else {
-		m.timeline.Width = m.width
-		m.timeline.Height = vpHeight
+		m.rebuildTimeline()
+		return
 	}
-	m.refreshTimeline()
+
+	atBottom := m.timeline.AtBottom()
+	m.timeline.Height = vpHeight
+	if m.timeline.Width != m.width {
+		m.timeline.Width = m.width
+		m.rebuildTimeline()
+		return
+	}
+	if atBottom {
+		m.timeline.GotoBottom()
+	}
 }
 
 func clamp(v, lo, hi int) int {

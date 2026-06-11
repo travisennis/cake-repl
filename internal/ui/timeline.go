@@ -42,17 +42,19 @@ type ToolBlock struct {
 // RenderItems renders the whole timeline to a single string at the given
 // width.
 func RenderItems(th Theme, items []Item, width int) string {
-	if width < 8 {
-		width = 8
-	}
 	parts := make([]string, 0, len(items))
 	for _, it := range items {
-		parts = append(parts, renderItem(th, it, width))
+		parts = append(parts, RenderItem(th, it, width))
 	}
 	return strings.Join(parts, "\n\n")
 }
 
-func renderItem(th Theme, it Item, width int) string {
+// RenderItem renders one timeline item at the given width. Items render
+// independently of each other, so callers can cache results per item.
+func RenderItem(th Theme, it Item, width int) string {
+	if width < 8 {
+		width = 8
+	}
 	wrap := func(style lipgloss.Style, s string) string {
 		return style.Width(width).Render(s)
 	}

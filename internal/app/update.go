@@ -147,7 +147,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		// Indices in pendingCalls point into items; they are invalid now.
 		// Late outputs will be appended as standalone blocks instead.
 		m.pendingCalls = map[string]int{}
-		m.refreshTimeline()
+		m.rebuildTimeline()
 	}
 	return m, nil
 }
@@ -214,7 +214,7 @@ func (m *Model) applyEvent(ev cake.Event) {
 			m.items[idx].Tool.Output = e.Output
 			m.items[idx].Tool.Done = true
 			delete(m.pendingCalls, e.CallID)
-			m.refreshTimeline()
+			m.rerenderItem(idx)
 		} else {
 			m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
 				Name:      "(tool output)",
@@ -269,6 +269,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 		if idx < len(m.items) && m.items[idx].Tool != nil {
 			m.items[idx].Tool.Done = true
 			m.items[idx].Tool.Output = "(no output — task ended)"
+			m.rerenderItem(idx)
 		}
 		delete(m.pendingCalls, callID)
 	}
@@ -286,8 +287,6 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: text})
 	case !m.sawComplete:
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "cake exited before completing the task"})
-	default:
-		m.refreshTimeline()
 	}
 
 	if m.exitAfter {
