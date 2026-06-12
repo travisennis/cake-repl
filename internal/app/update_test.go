@@ -249,6 +249,92 @@ func TestSubmitStartsRun(t *testing.T) {
 	}
 }
 
+func TestSubmitRecordsHistory(t *testing.T) {
+	m := newLaidOutModel()
+	m.cfg.CakeBin = writeFakeCake(t, "exit 0\n")
+	m.input.SetValue("do the thing")
+	tm, _ := m.submit()
+	got := tm.(Model)
+	t.Cleanup(func() { drainRun(t, got.run) })
+	if len(got.history.entries) != 1 || got.history.entries[0] != "do the thing" {
+		t.Errorf("history = %v, want the submitted prompt", got.history.entries)
+	}
+
+	got.input.SetValue("/help")
+	tm, _ = got.submit()
+	got = tm.(Model)
+	if entries := got.history.entries; len(entries) != 2 || entries[1] != "/help" {
+		t.Errorf("history = %v, want the command recorded too", entries)
+	}
+}
+
+func TestSubmitStartFailureNotRecordedInHistory(t *testing.T) {
+	m := newLaidOutModel()
+	m.cfg.CakeBin = filepath.Join(t.TempDir(), "missing-cake")
+	m.input.SetValue("hello")
+	tm, _ := m.submit()
+	got := tm.(Model)
+	if len(got.history.entries) != 0 {
+		t.Errorf("history = %v, want empty — the prompt is still in the input", got.history.entries)
+	}
+}
+
+func TestHandleKeyHistoryRecall(t *testing.T) {
+	m := newLaidOutModel()
+	m.history.Add("first prompt")
+	m.history.Add("/help")
+	up := tea.KeyMsg{Type: tea.KeyUp}
+	down := tea.KeyMsg{Type: tea.KeyDown}
+
+	m.input.SetValue("draft")
+	steps := []struct {
+		key  tea.KeyMsg
+		want string
+	}{
+		{up, "/help"},
+		{up, "first prompt"},
+		{up, "first prompt"}, // at the oldest entry the input is left alone
+		{down, "/help"},
+		{down, "draft"}, // walking back down restores the draft
+	}
+	for i, s := range steps {
+		tm, _ := m.handleKey(s.key)
+		m = tm.(Model)
+		if got := m.input.Value(); got != s.want {
+			t.Fatalf("step %d: input = %q, want %q", i, got, s.want)
+		}
+	}
+}
+
+func TestHandleKeyHistoryOnlyAtInputEdges(t *testing.T) {
+	m := newLaidOutModel()
+	m.history.Add("old prompt")
+
+	// The cursor starts on the last line; up must move the cursor, not recall.
+	m.input.SetValue("line one\nline two")
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = tm.(Model)
+	if m.input.Value() != "line one\nline two" {
+		t.Fatalf("up mid-input replaced the value: %q", m.input.Value())
+	}
+
+	// Now on the first line but not the last; down must not recall either.
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = tm.(Model)
+	if m.input.Value() != "line one\nline two" {
+		t.Fatalf("down mid-input replaced the value: %q", m.input.Value())
+	}
+
+	// Back on the first line; up recalls.
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = tm.(Model)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = tm.(Model)
+	if m.input.Value() != "old prompt" {
+		t.Errorf("input = %q, want recalled entry", m.input.Value())
+	}
+}
+
 func TestExecCommandHelp(t *testing.T) {
 	m := newLaidOutModel()
 	tm, cmd := m.execCommand(Command{Kind: CmdHelp})

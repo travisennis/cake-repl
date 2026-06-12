@@ -53,6 +53,7 @@ type Model struct {
 	exitAfter   bool
 
 	session      sessionState
+	history      promptHistory
 	pendingCalls map[string]int // call_id -> index into items
 	items        []ui.Item
 

@@ -69,6 +69,7 @@ Flags:
 | `Ctrl+S` | submit prompt |
 | `Ctrl+C` | cancel running cake task; quit when idle |
 | `Ctrl+U` | clear input |
+| `Up` / `Down` | recall prompt history (at the input's first/last line) |
 | `PgUp` / `PgDn` | scroll timeline |
 
 ## Slash commands
@@ -148,3 +149,4 @@ validation is available with `just release-check`.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (visible with `--debug-log`).
 - One cake process at a time; submitting while a task runs is rejected.
+- Prompt history is in-memory only; it does not persist across restarts.

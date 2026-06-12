@@ -82,6 +82,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.timeline, cmd = m.timeline.Update(msg)
 		return m, cmd
+
+	// Up/down recall prompt history only at the input's edge; inside a
+	// multi-line input they keep moving the cursor.
+	case key.Matches(msg, m.keys.HistoryPrev):
+		if m.input.Line() == 0 {
+			if text, ok := m.history.Prev(m.input.Value()); ok {
+				m.input.SetValue(text)
+				m.layout()
+				return m, nil
+			}
+		}
+
+	case key.Matches(msg, m.keys.HistoryNext):
+		if m.input.Line() == m.input.LineCount()-1 {
+			if text, ok := m.history.Next(); ok {
+				m.input.SetValue(text)
+				m.layout()
+				return m, nil
+			}
+		}
 	}
 
 	var cmd tea.Cmd
@@ -97,6 +117,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	}
 
 	if cmd, ok, err := ParseCommand(text); ok {
+		m.history.Add(text)
 		m.input.Reset()
 		m.layout()
 		if err != nil {
@@ -172,6 +193,7 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	m.run = run
 	m.running = true
 	m.sawComplete = false
+	m.history.Add(prompt)
 	m.appendItem(ui.Item{Kind: ui.KindUser, Text: prompt})
 	m.input.Reset()
 	m.layout()

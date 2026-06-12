@@ -86,4 +86,5 @@ keybindings
   ctrl+s           submit prompt
   ctrl+c           cancel running task; quit when idle
   ctrl+u           clear input
+  up/down          recall prompt history (at the input's first/last line)
   pgup/pgdn        scroll timeline`
