@@ -56,13 +56,17 @@ func drainRun(t *testing.T, run *cake.Run) {
 }
 
 func TestDescribeHookDecisionVisibility(t *testing.T) {
-	for _, decision := range []string{"", "allow", "ok", "none", "success", "continue"} {
+	// Cake's full vocabulary (hooks.rs): none|deny|stop|error, plus allow
+	// for resolved_decision. Only the benign two (and an absent field) are
+	// hidden; everything else — including values cake does not emit today —
+	// must be shown.
+	for _, decision := range []string{"", "allow", "none"} {
 		ev := cake.HookEvent{Event: "PreToolUse", Decision: decision}
 		if line, show := describeHook(ev); show {
 			t.Errorf("decision %q should stay hidden, got line %q", decision, line)
 		}
 	}
-	for _, decision := range []string{"deny", "block", "ask"} {
+	for _, decision := range []string{"deny", "stop", "error", "ok", "success", "continue"} {
 		ev := cake.HookEvent{Event: "PreToolUse", Decision: decision}
 		if line, show := describeHook(ev); !show {
 			t.Errorf("decision %q should be shown, got line %q", decision, line)
@@ -98,9 +102,9 @@ func TestDescribeHook(t *testing.T) {
 		},
 		{
 			name:     "resolved denial overrides benign decision",
-			event:    cake.HookEvent{Event: "PreToolUse", Decision: "allow", ResolvedDecision: "block"},
+			event:    cake.HookEvent{Event: "PreToolUse", Decision: "allow", ResolvedDecision: "stop"},
 			wantShow: true,
-			wantLine: "hook PreToolUse → block",
+			wantLine: "hook PreToolUse → stop",
 		},
 		{
 			name:     "non-zero exit forces a benign decision visible",
@@ -110,9 +114,9 @@ func TestDescribeHook(t *testing.T) {
 		},
 		{
 			name:     "explicit zero exit stays hidden and unprinted",
-			event:    cake.HookEvent{Event: "PostToolUse", Decision: "ok", ExitCode: exit(0)},
+			event:    cake.HookEvent{Event: "PostToolUse", Decision: "none", ExitCode: exit(0)},
 			wantShow: false,
-			wantLine: "hook PostToolUse → ok",
+			wantLine: "hook PostToolUse → none",
 		},
 		{
 			name:     "stderr keeps only its first line",

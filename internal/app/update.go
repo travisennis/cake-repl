@@ -375,8 +375,11 @@ func describeHook(e cake.HookEvent) (string, bool) {
 		b.WriteString(": " + lines[0])
 	}
 
-	benign := decision == "" || decision == "allow" || decision == "ok" ||
-		decision == "none" || decision == "success" || decision == "continue"
+	// Cake's decision vocabulary is a closed set built in hooks.rs:
+	// decision is none|deny|stop|error and resolved_decision adds allow.
+	// Only the two benign values are hidden, so an unknown future value
+	// shows up as timeline noise instead of a silently dropped denial.
+	benign := decision == "" || decision == "allow" || decision == "none"
 	failed := e.ExitCode != nil && *e.ExitCode != 0
 	return b.String(), !benign || failed
 }
