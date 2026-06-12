@@ -1,7 +1,7 @@
 package app
 
 import (
-	"io"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -479,14 +479,14 @@ func TestApplyEventMessages(t *testing.T) {
 		t.Error("other-role message should be skipped without a debug log")
 	}
 
-	m.cfg.DebugLog = io.Discard
+	var debug bytes.Buffer
+	m.cfg.DebugLog = &debug
 	m.applyEvent(cake.Message{Role: "developer", Content: "instructions"})
-	if len(m.items) != base+2 {
-		t.Fatal("other-role message should surface as debug when a debug log is set")
+	if len(m.items) != base+1 {
+		t.Error("other-role message should stay off the timeline even with a debug log")
 	}
-	it = lastItem(t, m)
-	if it.Kind != ui.KindDebug || !strings.Contains(it.Text, "developer message: instructions") {
-		t.Errorf("got kind=%v text=%q, want developer debug item", it.Kind, it.Text)
+	if got := debug.String(); !strings.Contains(got, "developer message: instructions") {
+		t.Errorf("debug log missing developer message, got %q", got)
 	}
 	assertCacheMatchesFullRender(t, &m, "after message events")
 }

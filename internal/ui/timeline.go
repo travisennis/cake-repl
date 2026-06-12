@@ -20,7 +20,6 @@ const (
 	KindError
 	KindWarning
 	KindInfo
-	KindDebug
 )
 
 // Item is one structured timeline entry. Items are stored as data, not

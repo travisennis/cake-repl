@@ -215,7 +215,7 @@ func (m *Model) applyEvent(ev cake.Event) {
 		case "user":
 			// The submitted prompt is already on the timeline.
 		default:
-			m.appendDebug(fmt.Sprintf("%s message: %s", e.Role, e.Content))
+			m.logDebug(fmt.Sprintf("%s message: %s", e.Role, e.Content))
 		}
 
 	case cake.Reasoning:
@@ -250,7 +250,7 @@ func (m *Model) applyEvent(ev cake.Event) {
 		if line, show := describeHook(e); show {
 			m.appendItem(ui.Item{Kind: ui.KindHook, Text: line})
 		} else {
-			m.appendDebug("hook " + line)
+			m.logDebug("hook " + line)
 		}
 
 	case cake.TaskComplete:
@@ -270,15 +270,15 @@ func (m *Model) applyEvent(ev cake.Event) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "malformed stream line: " + e.Line})
 
 	case cake.Unknown:
-		m.appendDebug("unknown event type: " + e.Type)
+		m.logDebug("unknown event type: " + e.Type)
 	}
 }
 
-// appendDebug records low-value diagnostics; they are only shown when a
-// debug log is enabled.
-func (m *Model) appendDebug(text string) {
+// logDebug records low-value diagnostics in the debug log; they never reach
+// the timeline.
+func (m *Model) logDebug(text string) {
 	if m.cfg.DebugLog != nil {
-		m.appendItem(ui.Item{Kind: ui.KindDebug, Text: text})
+		fmt.Fprintf(m.cfg.DebugLog, "repl: %s\n", text)
 	}
 }
 

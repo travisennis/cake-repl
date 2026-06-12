@@ -58,7 +58,7 @@ Flags:
 | `--profile <name>` | passed through to cake |
 | `--cwd <path>` | run cake from this directory (default: current directory) |
 | `--no-color` | disable styling |
-| `--debug-log <path>` | append cake-repl diagnostics (raw stream lines, exits) to a file |
+| `--debug-log <path>` | append cake-repl diagnostics (raw stream lines, skipped events, exits) to a file |
 | `--version` | print version and exit |
 
 ## Keybindings
@@ -147,6 +147,6 @@ validation is available with `just release-check`.
 - Tool output is truncated at 2,000 characters with no expansion control yet.
 - Markdown in assistant messages is wrapped as plain text, not rendered.
 - Hook events are shown only when they deny, stop, or fail; successful hook
-  noise is hidden (visible with `--debug-log`).
+  noise is hidden (recorded in the `--debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
 - Prompt history is in-memory only; it does not persist across restarts.
