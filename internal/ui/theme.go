@@ -20,7 +20,6 @@ type Theme struct {
 	Debug      lipgloss.Style
 	Rule       lipgloss.Style
 	StatusBar  lipgloss.Style
-	StatusDim  lipgloss.Style
 }
 
 // DefaultTheme returns the standard color scheme. Styling degrades to plain
@@ -42,6 +41,5 @@ func DefaultTheme() Theme {
 		Debug:      lipgloss.NewStyle().Faint(true),
 		Rule:       lipgloss.NewStyle().Faint(true),
 		StatusBar:  lipgloss.NewStyle().Reverse(true),
-		StatusDim:  lipgloss.NewStyle().Reverse(true).Faint(true),
 	}
 }

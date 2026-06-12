@@ -1,6 +1,6 @@
 # cake-repl
 
-A standalone terminal REPL for the [`cake`](../cake) CLI.
+A standalone terminal REPL for the [`cake`](https://github.com/travisennis/cake) CLI.
 
 `cake-repl` treats cake as the engine: each submitted prompt spawns one
 `cake --output-format stream-json` process and renders its event stream live —

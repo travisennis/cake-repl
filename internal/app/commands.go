@@ -27,6 +27,12 @@ type Command struct {
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
+// IsSessionID reports whether s looks like a cake session uuid. It backs both
+// the /resume command and main's --resume flag validation.
+func IsSessionID(s string) bool {
+	return uuidRe.MatchString(s)
+}
+
 // ParseCommand parses input as a slash command. ok is false when the input is
 // not a slash command at all (a normal prompt). An error means the input
 // looked like a command but was invalid.
@@ -52,7 +58,7 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 		if len(args) != 1 {
 			return Command{}, true, fmt.Errorf("usage: /resume <uuid>")
 		}
-		if !uuidRe.MatchString(args[0]) {
+		if !IsSessionID(args[0]) {
 			return Command{}, true, fmt.Errorf("invalid session uuid: %s", args[0])
 		}
 		return Command{Kind: CmdResume, Arg: strings.ToLower(args[0])}, true, nil

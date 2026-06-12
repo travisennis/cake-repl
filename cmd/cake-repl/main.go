@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -17,8 +16,6 @@ import (
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/version"
 )
-
-var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func main() {
 	if err := run(); err != nil {
@@ -49,7 +46,7 @@ func run() (err error) {
 	if *continueFlag && *resume != "" {
 		return fmt.Errorf("--continue and --resume are mutually exclusive")
 	}
-	if *resume != "" && !uuidRe.MatchString(*resume) {
+	if *resume != "" && !app.IsSessionID(*resume) {
 		return fmt.Errorf("invalid --resume uuid: %s", *resume)
 	}
 
