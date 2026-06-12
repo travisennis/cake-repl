@@ -6,11 +6,28 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  goreleaser:
+  ci:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: extractions/setup-just@v3
+      - name: Install tools
+        run: just install-tools
+      - name: CI
+        run: just ci
+
+  goreleaser:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
