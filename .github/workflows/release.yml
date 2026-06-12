@@ -19,7 +19,12 @@ jobs:
           cache: true
       - uses: extractions/setup-just@v3
       - name: Install tools
-        run: just install-tools
+        run: just install-tools-ci
+      - name: Install goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: v2.16.0
+          install-only: true
       - name: CI
         run: just ci
 
