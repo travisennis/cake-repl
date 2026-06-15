@@ -1,68 +1,90 @@
-# Repository Guidelines
+# Agent Instructions
 
-## Project Structure & Module Organization
+## Project
 
-This is a Go CLI project for `cake-repl`, a terminal REPL frontend for `cake`.
+`cake-repl` is a single-binary Go terminal REPL (Bubble Tea TUI) that drives the
+external [`cake`](https://github.com/travisennis/cake) CLI as an engine: each
+prompt spawns one `cake --output-format stream-json` process and renders its
+NDJSON event stream live.
 
-- `cmd/cake-repl/main.go` contains the executable entry point.
-- `internal/app/` owns Bubble Tea state, updates, commands, sessions, and keys.
-- `internal/cake/` wraps the external `cake` process and parses stream-json NDJSON events.
-- `internal/ui/` contains rendering helpers, timeline/status views, theme, and tool block formatting.
-- Tests live beside implementation files as `*_test.go`.
-- `README.md` documents user-facing behavior; `plan.md` holds planning context.
+Compatibility surfaces — preserve unless the task explicitly changes them:
 
-## Build, Test, and Development Commands
+- **cake contract**: run cake only as `--output-format stream-json` with
+  `--continue`/`--resume`/`--model`/`--profile`; never read cake session files,
+  parse its human text, or import its internals.
+- **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
+- **CLI flags, slash commands, key bindings** (mirrored in `README.md` + `HelpText`).
+- **Session run-mode behavior** pins to `--resume` to prevent hijack.
+- **Secrets**: raw stream content goes only to `--debug-log` (`0o600`).
+- **Go MSRV** `1.26.3`+ and the pinned lint/vuln/release tools.
 
-Prefer the `justfile` targets when available:
+## Operating Loop
 
-```bash
-just build          # go build -trimpath -o bin/cake-repl ./cmd/cake-repl
-just test           # go test ./...
-just test-race      # go test -race -cover ./...
-just fmt            # go fmt ./...
-just fmt-check      # fail if gofmt would change files
-just tidy-check     # fail if go mod tidy would change files
-just vet            # go vet ./...
-just lint           # golangci-lint run
-just vuln           # govulncheck ./...
-just release-check  # GoReleaser config check and snapshot build
-just ci             # full local/CI gate
-just install-tools  # install pinned lint, vuln, and release tools
-just run            # go run ./cmd/cake-repl
-just install        # go install -trimpath ./cmd/cake-repl
-just release        # optimized local binary at ./cake-repl
-```
+1. Classify the request before editing.
+2. Load only the routed docs needed for that request.
+3. Preserve compatibility surfaces unless explicitly changed.
+4. Keep edits surgical and verify according to risk (see the testing route).
+5. Hand off with changes, checks, and remaining risk.
 
-Without `just`, run the underlying `go` commands directly. The project requires Go `1.26.3` or newer.
+When this file conflicts with a specialized doc for that workflow, the
+specialized doc wins.
 
-## Coding Style & Naming Conventions
+## Workflow Routing
 
-Use standard Go style: tabs from `gofmt`, short package-local names, and explicit error handling. Keep package boundaries clear: app behavior in `internal/app`, cake process/event concerns in `internal/cake`, and terminal rendering in `internal/ui`. Avoid speculative abstractions.
+### cake Integration And Stream-JSON
 
-Name tests after behavior, for example `TestParseEvent...` or `TestRunner...`. Keep command and flag names aligned with README examples and the `cake` CLI contract.
+Use for changes to `internal/cake/` (events, parser, runner), cake CLI args, or
+how `app` consumes events. Consult
+[`docs/guardrails/cake-integration-and-stream-json.md`](docs/guardrails/cake-integration-and-stream-json.md)
+and [`ARCHITECTURE.md`](ARCHITECTURE.md). Decode forward-compatibly; never cross the engine-isolation boundary.
 
-## Testing Guidelines
+### CLI, Slash Commands, And Output
 
-Run `just test` for focused changes and `just ci` before handing off broader changes. Tests use Go's standard `testing` package. Runner tests use fake shell scripts, so they should not require a real `cake` binary. Add focused tests next to changed code, especially for parser behavior, session transitions, command parsing, and UI formatting.
+Use for flags, slash commands, key bindings, or `internal/ui/` rendering.
+Consult [`docs/guardrails/cli-and-user-output.md`](docs/guardrails/cli-and-user-output.md).
+Update `README.md`, `HelpText`, and this file together; keep `--no-color` usable.
 
-For broader changes, also run:
+### Sessions, Security, And Subprocess Lifecycle
 
-```bash
-just ci
-```
+Use for the run-mode state machine, subprocess start/cancel, or `--debug-log`.
+Consult [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
+Preserve session-hijack prevention and never leak raw stream content.
 
-## Commit & Pull Request Guidelines
+### Core Runtime, UI, And Implementation Quality
 
-Recent history uses concise Conventional Commit-style prefixes such as `feat:` and `docs:`. Continue that pattern:
+Use for `internal/app` state/logic, `internal/ui` rendering, and code style.
+Consult [`ARCHITECTURE.md`](ARCHITECTURE.md) (boundaries) and [`CONTRIBUTING.md`](CONTRIBUTING.md) (style).
+Keep `internal/ui` side-effect-free and the one-way dependency direction intact.
 
-```text
-feat: add session status command
-fix: handle malformed stream-json lines
-docs: update install instructions
-```
+### Tests And Verification
 
-Pull requests should include a short problem/solution summary, verification commands, and screenshots or terminal captures when UI output changes. Link related issues when applicable. Keep PRs scoped; do not mix refactors with behavior changes unless required.
+Use when adding tests or deciding what to run. Consult
+[`docs/guardrails/testing-and-verification.md`](docs/guardrails/testing-and-verification.md).
+Runner tests must not require a real `cake`; run `just test-race` for the runner, `just ci` before handoff.
 
-## Security & Configuration Tips
+### Dependencies, Build, CI, And Release
 
-Do not depend on `cake` internals or session files. The integration contract is the `cake --output-format stream-json` NDJSON stream plus `--continue` and `--resume` flags. Avoid logging secrets in `--debug-log`; raw stream lines may include prompt or tool output.
+Use for `go.mod`, the `justfile`, workflows, `.goreleaser.yaml`, or linters.
+Consult [`docs/guardrails/dependencies-build-ci-release.md`](docs/guardrails/dependencies-build-ci-release.md)
+and [`CONTRIBUTING.md`](CONTRIBUTING.md). Keep pinned tool versions and the Go
+MSRV consistent across `go.mod`, docs, and CI.
+
+### Documentation
+
+Docs-only changes: keep `README.md`, `HelpText`, and routing in sync, and move
+detailed rules into the right guardrail rather than growing this file.
+
+## Repository Rules
+
+- Do not commit or push unless explicitly asked.
+- Assume uncommitted changes may belong to the user (e.g. untracked `review.md`,
+  `plan.md`).
+- Do not revert, overwrite, or clean files you did not intentionally change.
+- Inspect `git status --short` before broad edits.
+- Report relevant remaining changes before handoff.
+
+## Handoff
+
+End with what changed, the exact checks you ran, remaining risks or skipped
+checks, and actionable next steps. For commits, include the hash, worktree
+cleanliness, and any leftover changes.
