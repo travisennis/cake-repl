@@ -91,6 +91,19 @@ func New(cfg Config) Model {
 	return m
 }
 
+// SessionData returns the current session ID and working directory for
+// display after the TUI exits. If no task has run yet it falls back to the
+// resume ID when one was provided via --resume.
+func (m Model) SessionData() (sessionID, cwd string) {
+	if m.session.SessionID != "" {
+		return m.session.SessionID, m.cfg.Cwd
+	}
+	if m.session.ResumeID != "" {
+		return m.session.ResumeID, m.cfg.Cwd
+	}
+	return "", m.cfg.Cwd
+}
+
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
 	return textarea.Blink

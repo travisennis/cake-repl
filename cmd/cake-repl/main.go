@@ -14,6 +14,7 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/travisennis/cake-repl/internal/app"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/ui"
 	"github.com/travisennis/cake-repl/internal/version"
 )
 
@@ -97,6 +98,16 @@ func run() (err error) {
 	}
 
 	p := tea.NewProgram(app.New(cfg), tea.WithAltScreen())
-	_, err = p.Run()
-	return err
+	m, err := p.Run()
+	if err != nil {
+		return err
+	}
+	if mod, ok := m.(app.Model); ok {
+		if sessionID, cwd := mod.SessionData(); sessionID != "" {
+			fmt.Fprintf(os.Stderr, "\ncake session: %s\n", ui.ShortID(sessionID))
+			fmt.Fprintf(os.Stderr, "     data: %s\n",
+				filepath.Join(cwd, ".cake", "sessions", sessionID))
+		}
+	}
+	return nil
 }
