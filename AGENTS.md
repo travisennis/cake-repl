@@ -71,8 +71,13 @@ MSRV consistent across `go.mod`, docs, and CI.
 
 ### Documentation
 
-Docs-only changes: keep `README.md`, `HelpText`, and routing in sync, and move
-detailed rules into the right guardrail rather than growing this file.
+For doc work, read `.agents/DOCS.md` and `docs/guardrails/documentation.md` first. Also use them when behavior, config, architecture, workflow, or compatibility changes require doc updates.
+
+Docs-only changes: keep `README.md`, `HelpText`, and routing in sync, and move detailed rules into the right guardrail rather than growing this file.
+
+### Workflow Overlays
+
+When asked to create, choose, update, or work on a task, read `.agents/TASKS.md`. When a task, workflow doc, or user request calls for an ExecPlan, read `.agents/PLANS.md`. When one calls for an ADR, read [docs/adr/README.md](docs/adr/README.md). When asked to create, update, organize, or use research, read `.agents/RESEARCH.md`, then use `.agents/.research/index.md` as the map.
 
 ## Repository Rules
 
