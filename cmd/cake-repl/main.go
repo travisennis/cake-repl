@@ -103,10 +103,12 @@ func run() (err error) {
 		return err
 	}
 	if mod, ok := m.(app.Model); ok {
-		if sessionID, cwd := mod.SessionData(); sessionID != "" {
-			fmt.Fprintf(os.Stderr, "\ncake session: %s\n", ui.ShortID(sessionID))
-			fmt.Fprintf(os.Stderr, "     data: %s\n",
-				filepath.Join(cwd, ".cake", "sessions", sessionID))
+		if sessionID, _ := mod.SessionData(); sessionID != "" {
+			home, _ := os.UserHomeDir()
+			fmt.Fprintf(os.Stderr, "\ncake\n")
+			fmt.Fprintf(os.Stderr, "session id: %s\n", ui.ShortID(sessionID))
+			fmt.Fprintf(os.Stderr, "file: %s\n",
+				filepath.Join(home, ".local", "cake", "sessions", sessionID))
 		}
 	}
 	return nil
