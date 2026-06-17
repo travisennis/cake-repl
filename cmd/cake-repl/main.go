@@ -34,6 +34,7 @@ func run() (err error) {
 	cwd := flag.String("cwd", "", "working directory to run cake from (default: current directory)")
 	noColor := flag.Bool("no-color", false, "disable styling")
 	debugLog := flag.String("debug-log", "", "write cake-repl debug output to this file")
+	historyFile := flag.String("history-file", "", "path to persist prompt history across restarts (default: no persistence)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -71,10 +72,11 @@ func run() (err error) {
 	}
 
 	cfg := app.Config{
-		CakeBin: *cakeBin,
-		Cwd:     dir,
-		Model:   *model,
-		Profile: *profile,
+		CakeBin:     *cakeBin,
+		Cwd:         dir,
+		Model:       *model,
+		Profile:     *profile,
+		HistoryFile: *historyFile,
 	}
 	switch {
 	case *resume != "":

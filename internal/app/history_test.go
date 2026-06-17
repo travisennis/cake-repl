@@ -14,14 +14,24 @@ func TestPromptHistoryEmpty(t *testing.T) {
 
 func TestPromptHistoryAddFiltering(t *testing.T) {
 	h := promptHistory{}
-	h.Add("one")
-	h.Add("two")
-	h.Add("two") // consecutive duplicate dropped
-	h.Add("")    // empty dropped
+	if !h.Add("one") {
+		t.Error("Add(one) should return true")
+	}
+	if !h.Add("two") {
+		t.Error("Add(two) should return true")
+	}
+	if h.Add("two") { // consecutive duplicate dropped
+		t.Error("Add(two) duplicate should return false")
+	}
+	if h.Add("") { // empty dropped
+		t.Error("Add(empty) should return false")
+	}
 	if len(h.entries) != 2 {
 		t.Fatalf("entries = %v, want [one two]", h.entries)
 	}
-	h.Add("one") // non-consecutive repeat is kept
+	if !h.Add("one") { // non-consecutive repeat is kept
+		t.Error("Add(one) non-consecutive should return true")
+	}
 	if len(h.entries) != 3 {
 		t.Errorf("entries = %v, want [one two one]", h.entries)
 	}

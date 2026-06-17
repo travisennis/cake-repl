@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -117,7 +118,9 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	}
 
 	if cmd, ok, err := ParseCommand(text); ok {
-		m.history.Add(text)
+		if m.history.Add(text) {
+			m.persistHistory(text)
+		}
 		m.input.Reset()
 		m.layout()
 		if err != nil {
@@ -173,6 +176,20 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// persistHistory appends one entry to the history file when configured.
+// Write errors are silently ignored so a bad path never breaks the REPL.
+func (m Model) persistHistory(text string) {
+	if m.cfg.HistoryFile == "" {
+		return
+	}
+	f, err := os.OpenFile(m.cfg.HistoryFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close() //nolint:errcheck // best-effort on close
+	_, _ = f.WriteString(text + "\n")
+}
+
 func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	mode, resumeID := m.session.RunOptions()
 	run, err := cake.Start(cake.Options{
@@ -193,7 +210,9 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	m.run = run
 	m.running = true
 	m.sawComplete = false
-	m.history.Add(prompt)
+	if m.history.Add(prompt) {
+		m.persistHistory(prompt)
+	}
 	m.appendItem(ui.Item{Kind: ui.KindUser, Text: prompt})
 	m.input.Reset()
 	m.layout()

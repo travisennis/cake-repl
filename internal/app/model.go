@@ -4,7 +4,9 @@
 package app
 
 import (
+	"bufio"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -24,13 +26,15 @@ type Config struct {
 	InitialMode cake.RunMode
 	ResumeID    string
 	DebugLog    io.Writer
+	HistoryFile string
 }
 
 const (
-	minInputHeight = 3
-	maxInputHeight = 8
-	statusHeight   = 1
-	ruleHeight     = 1
+	minInputHeight    = 3
+	maxInputHeight    = 8
+	statusHeight      = 1
+	ruleHeight        = 1
+	maxHistoryEntries = 1000
 )
 
 // Model is the Bubble Tea model for the whole REPL.
@@ -88,7 +92,40 @@ func New(cfg Config) Model {
 		},
 	}
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "cake-repl — /help for commands"})
+
+	if cfg.HistoryFile != "" {
+		m.loadHistory(cfg.HistoryFile)
+	}
+
 	return m
+}
+
+// loadHistory reads a newline-terminated history file into the prompt history
+// state machine. Entries beyond maxHistoryEntries are trimmed on load.
+func (m *Model) loadHistory(path string) {
+	f, err := os.Open(path) //nolint:gosec // user-provided path from --history-file
+	if err != nil {
+		return
+	}
+	defer f.Close() //nolint:errcheck // best-effort on close
+
+	var entries []string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		if line := sc.Text(); line != "" {
+			entries = append(entries, line)
+		}
+	}
+
+	if len(entries) > maxHistoryEntries {
+		entries = entries[len(entries)-maxHistoryEntries:]
+		// Rewrite the file to stay under the cap. Errors are best-effort.
+		data := strings.Join(entries, "\n") + "\n"
+		_ = os.WriteFile(path, []byte(data), 0o600)
+	}
+
+	m.history.entries = entries
+	m.history.idx = len(entries)
 }
 
 // SessionData returns the current session ID and working directory for

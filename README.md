@@ -59,6 +59,7 @@ Flags:
 | `--cwd <path>` | run cake from this directory (default: current directory) |
 | `--no-color` | disable styling |
 | `--debug-log <path>` | append cake-repl diagnostics (raw stream lines, skipped events, exits) to a file |
+| `--history-file <path>` | persist prompt history across restarts into this file |
 | `--version` | print version and exit |
 
 ## Keybindings
@@ -149,4 +150,3 @@ validation is available with `just release-check`.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `--debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
-- Prompt history is in-memory only; it does not persist across restarts.

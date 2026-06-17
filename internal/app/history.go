@@ -12,13 +12,16 @@ type promptHistory struct {
 }
 
 // Add records a submitted input and ends any navigation. Empty inputs and
-// consecutive duplicates are not recorded.
-func (h *promptHistory) Add(text string) {
-	if text != "" && (len(h.entries) == 0 || h.entries[len(h.entries)-1] != text) {
+// consecutive duplicates are not recorded. It returns whether the entry was
+// appended (false for empty or consecutive duplicate inputs).
+func (h *promptHistory) Add(text string) bool {
+	added := text != "" && (len(h.entries) == 0 || h.entries[len(h.entries)-1] != text)
+	if added {
 		h.entries = append(h.entries, text)
 	}
 	h.idx = len(h.entries)
 	h.draft = ""
+	return added
 }
 
 // Prev steps to the previous entry, stashing the current input as the draft
