@@ -33,3 +33,27 @@ func TestSessionFilePathEmptyCAKEDATADIRFallsBack(t *testing.T) {
 		t.Errorf("sessionFilePath(\"home\", \"uuid-456\") = %q, want %q", got, want)
 	}
 }
+
+func TestDisplayPathReplacesHomeWithTilde(t *testing.T) {
+	got := displayPath("/Users/alice", "/Users/alice/.local/share/cake/sessions/abc")
+	want := "~/.local/share/cake/sessions/abc"
+	if got != want {
+		t.Errorf("displayPath = %q, want %q", got, want)
+	}
+}
+
+func TestDisplayPathLeavesNonHomePathUnchanged(t *testing.T) {
+	got := displayPath("/Users/alice", "/custom/data/sessions/abc")
+	want := "/custom/data/sessions/abc"
+	if got != want {
+		t.Errorf("displayPath = %q, want %q", got, want)
+	}
+}
+
+func TestDisplayPathEmptyHomeReturnsPathUnchanged(t *testing.T) {
+	got := displayPath("", "/some/path")
+	want := "/some/path"
+	if got != want {
+		t.Errorf("displayPath = %q, want %q", got, want)
+	}
+}

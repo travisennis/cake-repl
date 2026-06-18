@@ -108,7 +108,7 @@ func New(cfg Config) Model {
 // loadHistory reads a newline-terminated history file into the prompt history
 // state machine. Entries beyond maxHistoryEntries are trimmed on load.
 func (m *Model) loadHistory(path string) {
-	f, err := os.Open(path) //nolint:gosec // user-provided path from --history-file
+	f, err := os.Open(path) //nolint:gosec // user-provided path from -history-file
 	if err != nil {
 		return
 	}
@@ -135,7 +135,7 @@ func (m *Model) loadHistory(path string) {
 
 // SessionData returns the current session ID and working directory for
 // display after the TUI exits. If no task has run yet it falls back to the
-// resume ID when one was provided via --resume.
+// resume ID when one was provided via -resume.
 func (m Model) SessionData() (sessionID, cwd string) {
 	if m.session.SessionID != "" {
 		return m.session.SessionID, m.cfg.Cwd

@@ -23,7 +23,7 @@ type Theme struct {
 }
 
 // DefaultTheme returns the standard color scheme. Styling degrades to plain
-// text automatically when the color profile is Ascii (see --no-color).
+// text automatically when the color profile is Ascii (see -no-color).
 func DefaultTheme() Theme {
 	return Theme{
 		UserLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true),

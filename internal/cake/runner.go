@@ -155,7 +155,7 @@ func (b *tailBuffer) String() string {
 func Start(opts Options) (*Run, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	cmd := exec.CommandContext(ctx, opts.Bin, opts.Args()...) // #nosec G204 -- opts.Bin intentionally comes from --cake-bin/config.
+	cmd := exec.CommandContext(ctx, opts.Bin, opts.Args()...) // #nosec G204 -- opts.Bin intentionally comes from -cake-bin/config.
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

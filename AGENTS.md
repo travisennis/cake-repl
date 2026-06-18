@@ -15,7 +15,7 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags, slash commands, key bindings** (mirrored in `README.md` + `HelpText`).
 - **Session run-mode behavior** pins to `--resume` to prevent hijack.
-- **Secrets**: raw stream content goes only to `--debug-log` (`0o600`).
+- **Secrets**: raw stream content goes only to `-debug-log` (`0o600`).
 - **Go MSRV** `1.26.3`+ and the pinned lint/vuln/release tools.
 
 ## Operating Loop
@@ -42,11 +42,11 @@ and [`ARCHITECTURE.md`](ARCHITECTURE.md). Decode forward-compatibly; never cross
 
 Use for flags, slash commands, key bindings, or `internal/ui/` rendering.
 Consult [`docs/guardrails/cli-and-user-output.md`](docs/guardrails/cli-and-user-output.md).
-Update `README.md`, `HelpText`, and this file together; keep `--no-color` usable.
+Update `README.md`, `HelpText`, and this file together; keep `-no-color` usable.
 
 ### Sessions, Security, And Subprocess Lifecycle
 
-Use for the run-mode state machine, subprocess start/cancel, or `--debug-log`.
+Use for the run-mode state machine, subprocess start/cancel, or `-debug-log`.
 Consult [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 Preserve session-hijack prevention and never leak raw stream content.
 

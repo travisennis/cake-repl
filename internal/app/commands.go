@@ -28,7 +28,7 @@ type Command struct {
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // IsSessionID reports whether s looks like a cake session uuid. It backs both
-// the /resume command and main's --resume flag validation.
+// the /resume command and main's -resume flag validation.
 func IsSessionID(s string) bool {
 	return uuidRe.MatchString(s)
 }

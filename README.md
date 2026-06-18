@@ -15,7 +15,7 @@ session files. The only contract is cake's stream-json NDJSON output and its
 ## Requirements
 
 - Go 1.26.3 or newer to build.
-- `cake` installed and on `PATH`, or point at a binary with `--cake-bin`.
+- `cake` installed and on `PATH`, or point at a binary with `-cake-bin`.
 
 ## Build
 
@@ -42,25 +42,25 @@ Make sure that directory is on your `PATH`.
 
 ```bash
 cake-repl                                     # fresh session on first prompt
-cake-repl --continue                          # continue latest session for this directory
-cake-repl --resume <uuid>                     # resume a specific session
-cake-repl --cake-bin ../cake/target/debug/cake
+cake-repl -continue                          # continue latest session for this directory
+cake-repl -resume <uuid>                     # resume a specific session
+cake-repl -cake-bin ../cake/target/debug/cake
 ```
 
 Flags:
 
 | Flag | Meaning |
 |---|---|
-| `--cake-bin <path>` | cake executable to run (default `cake`) |
-| `--continue` | continue cake's latest session on the first prompt |
-| `--resume <uuid>` | resume a specific cake session on the first prompt |
-| `--model <name>` | passed through to cake |
-| `--profile <name>` | passed through to cake |
-| `--cwd <path>` | run cake from this directory (default: current directory) |
-| `--no-color` | disable styling |
-| `--debug-log <path>` | append cake-repl diagnostics (raw stream lines, skipped events, exits) to a file |
-| `--history-file <path>` | persist prompt history across restarts into this file |
-| `--version` | print version and exit |
+| `-cake-bin <path>` | cake executable to run (default `cake`) |
+| `-continue` | continue cake's latest session on the first prompt |
+| `-resume <uuid>` | resume a specific cake session on the first prompt |
+| `-model <name>` | passed through to cake |
+| `-profile <name>` | passed through to cake |
+| `-cwd <path>` | run cake from this directory (default: current directory) |
+| `-no-color` | disable styling |
+| `-debug-log <path>` | append cake-repl diagnostics (raw stream lines, skipped events, exits) to a file |
+| `-history-file <path>` | persist prompt history across restarts into this file |
+| `-version` | print version and exit |
 
 ## Keybindings
 
@@ -149,5 +149,5 @@ validation is available with `just release-check`.
 - Tool output is truncated at 2,000 characters with no expansion control yet.
 - Markdown in assistant messages is wrapped as plain text, not rendered.
 - Hook events are shown only when they deny, stop, or fail; successful hook
-  noise is hidden (recorded in the `--debug-log` file when one is set).
+  noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.

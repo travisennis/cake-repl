@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/travisennis/cake-repl/internal/app"
 	"github.com/travisennis/cake-repl/internal/cake"
-	"github.com/travisennis/cake-repl/internal/ui"
 	"github.com/travisennis/cake-repl/internal/version"
 )
 
@@ -26,6 +26,16 @@ func sessionFilePath(home, sessionID string) string {
 		return filepath.Join(d, "sessions", sessionID)
 	}
 	return filepath.Join(home, ".local", "share", "cake", "sessions", sessionID)
+}
+
+// displayPath replaces a leading home directory prefix with ~ for compact
+// display. Paths not under home (e.g. a custom $CAKE_DATA_DIR) are returned
+// unchanged.
+func displayPath(home, path string) string {
+	if home != "" && strings.HasPrefix(path, home) {
+		return "~" + strings.TrimPrefix(path, home)
+	}
+	return path
 }
 
 func main() {
@@ -56,10 +66,10 @@ func run() (err error) {
 		return fmt.Errorf("unexpected argument %q (prompts are entered inside the REPL)", flag.Arg(0))
 	}
 	if *continueFlag && *resume != "" {
-		return fmt.Errorf("--continue and --resume are mutually exclusive")
+		return fmt.Errorf("-continue and -resume are mutually exclusive")
 	}
 	if *resume != "" && !app.IsSessionID(*resume) {
-		return fmt.Errorf("invalid --resume uuid: %s", *resume)
+		return fmt.Errorf("invalid -resume uuid: %s", *resume)
 	}
 
 	if *noColor {
@@ -75,10 +85,10 @@ func run() (err error) {
 	}
 	dir, err = filepath.Abs(dir)
 	if err != nil {
-		return fmt.Errorf("resolving --cwd: %w", err)
+		return fmt.Errorf("resolving -cwd: %w", err)
 	}
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return fmt.Errorf("--cwd is not a directory: %s", dir)
+		return fmt.Errorf("-cwd is not a directory: %s", dir)
 	}
 
 	cfg := app.Config{
@@ -99,11 +109,11 @@ func run() (err error) {
 	if *debugLog != "" {
 		f, err := os.OpenFile(*debugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
-			return fmt.Errorf("opening --debug-log: %w", err)
+			return fmt.Errorf("opening -debug-log: %w", err)
 		}
 		defer func() {
 			if closeErr := f.Close(); err == nil && closeErr != nil {
-				err = fmt.Errorf("closing --debug-log: %w", closeErr)
+				err = fmt.Errorf("closing -debug-log: %w", closeErr)
 			}
 		}()
 		cfg.DebugLog = f
@@ -117,10 +127,10 @@ func run() (err error) {
 	if mod, ok := m.(app.Model); ok {
 		if sessionID, _ := mod.SessionData(); sessionID != "" {
 			home, _ := os.UserHomeDir()
-			fmt.Fprintf(os.Stderr, "\ncake\n")
-			fmt.Fprintf(os.Stderr, "session id: %s\n", ui.ShortID(sessionID))
+			fmt.Fprintf(os.Stderr, "\nResume this session with:\n")
+			fmt.Fprintf(os.Stderr, "cake-repl -resume %s\n", sessionID)
 			fmt.Fprintf(os.Stderr, "file: %s\n",
-				sessionFilePath(home, sessionID))
+				displayPath(home, sessionFilePath(home, sessionID)))
 		}
 	}
 	return nil

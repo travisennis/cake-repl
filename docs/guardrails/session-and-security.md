@@ -2,7 +2,7 @@
 
 **Scope.** Read before changing the run-mode state machine
 (`internal/app/session.go`), subprocess start/cancel (`internal/cake/runner.go`),
-or anything touching `--debug-log` or what is written to disk/terminal.
+or anything touching `-debug-log` or what is written to disk/terminal.
 
 ## Compatibility surfaces
 
@@ -15,7 +15,7 @@ or anything touching `--debug-log` or what is written to disk/terminal.
   to fresh; `/continue` and `/resume` set the next mode explicitly. Keep these a
   pure, I/O-free state machine so they stay testable.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
-  secrets. They go **only** to `--debug-log` (opened `0o600`), never to the
+  secrets. They go **only** to `-debug-log` (opened `0o600`), never to the
   timeline or stdout. Do not add logging that leaks raw stream content elsewhere.
 - **Process lifecycle.** One cake process at a time. Cancel = SIGTERM then
   SIGKILL after `WaitDelay` (kill outright on Windows). stderr retained as a
@@ -33,7 +33,7 @@ or anything touching `--debug-log` or what is written to disk/terminal.
 - **Reintroducing the hijack.** Falling back to `--continue` after a success
   that _did_ report a session id, or advancing run mode on a failed task.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
-  world-readable file; widening `--debug-log` permissions.
+  world-readable file; widening `-debug-log` permissions.
 - **Cancellation races.** Treating a finished run as canceled because Ctrl+C
   arrived late — classify from `Wait`'s error, not the context.
 - **Zombie / runaway processes.** Removing the SIGKILL fallback or `WaitDelay`,
@@ -43,4 +43,4 @@ or anything touching `--debug-log` or what is written to disk/terminal.
 
 - [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) — invariants.
 - [`cake-integration-and-stream-json.md`](cake-integration-and-stream-json.md) — flags and stream.
-- [`cli-and-user-output.md`](cli-and-user-output.md) — `--debug-log` flag, session commands.
+- [`cli-and-user-output.md`](cli-and-user-output.md) — `-debug-log` flag, session commands.
