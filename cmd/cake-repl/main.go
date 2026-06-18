@@ -18,6 +18,16 @@ import (
 	"github.com/travisennis/cake-repl/internal/version"
 )
 
+// sessionFilePath returns the path where cake stores the session file for the
+// given session ID. It respects $CAKE_DATA_DIR when set, otherwise uses
+// ~/.local/share/cake/sessions/<id>.
+func sessionFilePath(home, sessionID string) string {
+	if d := os.Getenv("CAKE_DATA_DIR"); d != "" {
+		return filepath.Join(d, "sessions", sessionID)
+	}
+	return filepath.Join(home, ".local", "share", "cake", "sessions", sessionID)
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cake-repl:", err)
@@ -110,7 +120,7 @@ func run() (err error) {
 			fmt.Fprintf(os.Stderr, "\ncake\n")
 			fmt.Fprintf(os.Stderr, "session id: %s\n", ui.ShortID(sessionID))
 			fmt.Fprintf(os.Stderr, "file: %s\n",
-				filepath.Join(home, ".local", "cake", "sessions", sessionID))
+				sessionFilePath(home, sessionID))
 		}
 	}
 	return nil
