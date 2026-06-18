@@ -65,6 +65,11 @@ type Model struct {
 	// appends and single-item updates do not re-render the whole timeline.
 	rendered      []string
 	renderedWidth int
+
+	// completion state for Tab cycling; zero values mean no active cycle.
+	completionPrefix  string
+	completionMatches []string
+	completionIdx     int
 }
 
 // New builds the initial model.

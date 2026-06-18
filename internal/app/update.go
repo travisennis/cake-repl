@@ -84,6 +84,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.timeline, cmd = m.timeline.Update(msg)
 		return m, cmd
 
+	case key.Matches(msg, m.keys.TabComplete):
+		return m.handleTabComplete()
+
 	// Up/down recall prompt history only at the input's edge; inside a
 	// multi-line input they keep moving the cursor.
 	case key.Matches(msg, m.keys.HistoryPrev):
@@ -105,10 +108,72 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Any key that reaches here modifies the input — reset the completion cycle.
+	m.completionPrefix = ""
+	m.completionMatches = nil
+	m.completionIdx = 0
+
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.layout() // input height tracks line count
 	return m, cmd
+}
+
+// handleTabComplete implements Tab key completion with cycling.
+func (m Model) handleTabComplete() (tea.Model, tea.Cmd) {
+	input := m.input.Value()
+
+	// If the input changed since the last Tab press, start a fresh cycle.
+	if m.completionPrefix != "" && input != m.completionPrefix {
+		m.completionPrefix = ""
+		m.completionMatches = nil
+		m.completionIdx = 0
+	}
+
+	known := []string{}
+	if m.session.SessionID != "" {
+		known = append(known, m.session.SessionID)
+	}
+	if m.session.ResumeID != "" {
+		known = append(known, m.session.ResumeID)
+	}
+
+	// No active cycle — compute matches from scratch.
+	if m.completionPrefix == "" {
+		matches, ok := completeSlash(input, known)
+		if !ok {
+			return m, nil
+		}
+		if len(matches) == 1 {
+			// Single match: complete directly, no cycle needed.
+			m.input.SetValue(matches[0])
+			m.layout()
+			return m, nil
+		}
+		// Multiple matches: start cycling.
+		m.completionPrefix = input
+		m.completionMatches = matches
+		m.completionIdx = 0
+		m.input.SetValue(matches[0])
+		m.layout()
+		return m, nil
+	}
+
+	// Advance the existing cycle.
+	m.completionIdx++
+	if m.completionIdx >= len(m.completionMatches) {
+		// Wrap around: restore the original prefix and end the cycle.
+		m.input.SetValue(m.completionPrefix)
+		m.completionPrefix = ""
+		m.completionMatches = nil
+		m.completionIdx = 0
+		m.layout()
+		return m, nil
+	}
+
+	m.input.SetValue(m.completionMatches[m.completionIdx])
+	m.layout()
+	return m, nil
 }
 
 func (m Model) submit() (tea.Model, tea.Cmd) {

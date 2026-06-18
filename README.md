@@ -67,6 +67,7 @@ Flags:
 | Key | Action |
 |---|---|
 | `Enter` | insert newline |
+| `Tab` | complete slash commands |
 | `Ctrl+S` | submit prompt |
 | `Ctrl+C` | cancel running cake task; quit when idle |
 | `Ctrl+U` | clear input |

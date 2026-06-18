@@ -10,6 +10,7 @@ type keyMap struct {
 	PageDown    key.Binding
 	HistoryPrev key.Binding
 	HistoryNext key.Binding
+	TabComplete key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -21,5 +22,6 @@ func defaultKeyMap() keyMap {
 		PageDown:    key.NewBinding(key.WithKeys("pgdown")),
 		HistoryPrev: key.NewBinding(key.WithKeys("up")),
 		HistoryNext: key.NewBinding(key.WithKeys("down")),
+		TabComplete: key.NewBinding(key.WithKeys("tab")),
 	}
 }
