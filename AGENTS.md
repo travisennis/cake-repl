@@ -26,6 +26,9 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 4. Keep edits surgical and verify according to risk (see the testing route).
 5. Hand off with changes, checks, and remaining risk.
 
+When choosing build, test, lint, verification, or commit-prep commands, read
+[`CONTRIBUTING.md`](CONTRIBUTING.md) — it is the canonical command catalog.
+
 When this file conflicts with a specialized doc for that workflow, the
 specialized doc wins.
 
@@ -41,7 +44,8 @@ and [`ARCHITECTURE.md`](ARCHITECTURE.md). Decode forward-compatibly; never cross
 ### CLI, Slash Commands, And Output
 
 Use for flags, slash commands, key bindings, or `internal/ui/` rendering.
-Consult [`docs/guardrails/cli-and-user-output.md`](docs/guardrails/cli-and-user-output.md).
+Consult [`docs/guardrails/cli-and-user-output.md`](docs/guardrails/cli-and-user-output.md)
+and [`CONTRIBUTING.md`](CONTRIBUTING.md) for verification commands.
 Update `README.md`, `HelpText`, and this file together; keep `-no-color` usable.
 
 ### Sessions, Security, And Subprocess Lifecycle
@@ -53,21 +57,25 @@ Preserve session-hijack prevention and never leak raw stream content.
 ### Core Runtime, UI, And Implementation Quality
 
 Use for `internal/app` state/logic, `internal/ui` rendering, and code style.
-Consult [`ARCHITECTURE.md`](ARCHITECTURE.md) (boundaries) and [`CONTRIBUTING.md`](CONTRIBUTING.md) (style).
+Consult [`ARCHITECTURE.md`](ARCHITECTURE.md) (boundaries) and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for code style, verification, and local
+commands.
 Keep `internal/ui` side-effect-free and the one-way dependency direction intact.
 
 ### Tests And Verification
 
 Use when adding tests or deciding what to run. Consult
-[`docs/guardrails/testing-and-verification.md`](docs/guardrails/testing-and-verification.md).
+[`docs/guardrails/testing-and-verification.md`](docs/guardrails/testing-and-verification.md)
+and [`CONTRIBUTING.md`](CONTRIBUTING.md) for the command catalog.
 Runner tests must not require a real `cake`; run `just test-race` for the runner, `just ci` before handoff.
 
 ### Dependencies, Build, CI, And Release
 
 Use for `go.mod`, the `justfile`, workflows, `.goreleaser.yaml`, or linters.
 Consult [`docs/guardrails/dependencies-build-ci-release.md`](docs/guardrails/dependencies-build-ci-release.md)
-and [`CONTRIBUTING.md`](CONTRIBUTING.md). Keep pinned tool versions and the Go
-MSRV consistent across `go.mod`, docs, and CI.
+and [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, verification, commands, PR
+workflow, and commit conventions. Keep pinned tool versions and the Go MSRV
+consistent across `go.mod`, docs, and CI.
 
 ### Documentation
 

@@ -21,7 +21,8 @@ just install-tools   # golangci-lint, govulncheck, goreleaser (versions pinned i
 
 ## Command catalog
 
-Prefer `justfile` targets:
+Prefer `justfile` targets. The `just ci` gate is the contract for "broadly
+verified" before handoff; a `just verify` alias is also available.
 
 ```bash
 just build          # go build -trimpath -o bin/cake-repl ./cmd/cake-repl
@@ -41,9 +42,29 @@ just vuln           # govulncheck ./...
 just release-check  # goreleaser check + snapshot build
 just fix            # tidy + fmt
 just ci             # full gate: fmt-check tidy-check vet test-race lint vuln build release-check
+just verify         # alias for ci
 ```
 
-Without `just`, run the underlying `go` commands shown above.
+Without `just`, run the underlying `go` commands:
+
+```bash
+# Build everything (fast compile check)
+go build ./...
+# Build just the binary
+go build ./cmd/cake-repl
+# Run all tests
+go test ./...
+# Run focused package tests (example)
+go test ./internal/app/...
+# Run race-detector tests with coverage
+go test -race -cover ./...
+# Format
+go fmt ./...
+# Tidy
+go mod tidy
+# Vet
+go vet ./...
+```
 
 ## Code style
 
@@ -68,6 +89,21 @@ Without `just`, run the underlying `go` commands shown above.
 Details on the test layout and the fake-cake harness live in
 [`docs/guardrails/testing-and-verification.md`](docs/guardrails/testing-and-verification.md).
 
+## Project-specific command pitfalls
+
+- **Runner tests must not require a real `cake` binary.** The test harness uses
+  fake shell scripts so the suite stays hermetic. If you add a runner test,
+  keep it that way unless the task explicitly says otherwise.
+- **Preserve the cake engine contract.** Only run cake as
+  `--output-format stream-json` with `--continue`/`--resume`/`--model`/
+  `--profile`. Never read cake session files, parse its human text, or import
+  cake internals. The REPL drives cake purely through the NDJSON event stream.
+- **`just ci` is the final pre-handoff gate.** For code, config, or dependency
+  changes, run `just ci` before calling the work done. For doc-only changes,
+  skip it and explain the skip.
+- **Use `go test ./...` for broad coverage; narrow to packages when iterating.**
+  For example, `go test ./internal/app/...` skips runner and parser tests.
+
 ## Commit & PR workflow
 
 - Use Conventional Commit prefixes: `feat`, `fix`, `docs`, `style`, `refactor`,
@@ -83,6 +119,15 @@ Details on the test layout and the fake-cake harness live in
 - PRs should include a short problem/solution summary, the verification
   commands you ran, and a terminal capture when UI output changes. Keep PRs
   scoped; do not mix refactors with behavior changes unless required.
+- For multiline commit messages, use a heredoc — not command substitution
+  inside `git commit -m`:
+  ```bash
+  git commit -F - <<'EOF'
+  feat: short summary
+
+  Body paragraph with detail.
+  EOF
+  ```
 - A local `pre-commit` config is provided (`.pre-commit-config.yaml`): it runs
   `fmt-check`, `tidy-check`, `test`, and `lint`.
 
