@@ -1,0 +1,127 @@
+package app
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLoadHistoryNormal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history")
+
+	content := "first\nsecond\nthird\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(Config{HistoryFile: path})
+	want := []string{"first", "second", "third"}
+	if len(m.history.entries) != len(want) {
+		t.Fatalf("len(entries) = %d, want %d", len(m.history.entries), len(want))
+	}
+	for i, e := range m.history.entries {
+		if e != want[i] {
+			t.Errorf("entries[%d] = %q, want %q", i, e, want[i])
+		}
+	}
+	if m.history.idx != len(want) {
+		t.Errorf("idx = %d, want %d", m.history.idx, len(want))
+	}
+}
+
+func TestLoadHistoryOverCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history")
+
+	// Write maxHistoryEntries + 5 entries with distinguishable names so we can
+	// verify the *last* N survive trimming, not just the count.
+	var lines []string
+	for i := range maxHistoryEntries + 5 {
+		lines = append(lines, fmt.Sprintf("entry-%d", i))
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(Config{HistoryFile: path})
+
+	if len(m.history.entries) != maxHistoryEntries {
+		t.Fatalf("len(entries) = %d, want %d", len(m.history.entries), maxHistoryEntries)
+	}
+
+	// The first 5 entries (entry-0 … entry-4) should have been trimmed.
+	if m.history.entries[0] != "entry-5" {
+		t.Fatalf("first entry = %q, want %q (expected trim of oldest 5)",
+			m.history.entries[0], "entry-5")
+	}
+
+	// Verify the file was rewritten with exactly maxHistoryEntries and the
+	// same surviving suffix.
+	rewritten, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotLines := strings.Split(strings.TrimSuffix(string(rewritten), "\n"), "\n")
+	if len(gotLines) != maxHistoryEntries {
+		t.Fatalf("rewritten file has %d lines, want %d", len(gotLines), maxHistoryEntries)
+	}
+	if gotLines[0] != "entry-5" {
+		t.Fatalf("rewritten first line = %q, want %q", gotLines[0], "entry-5")
+	}
+}
+
+func TestLoadHistoryEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history")
+
+	// Write an empty file.
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(Config{HistoryFile: path})
+	if len(m.history.entries) != 0 {
+		t.Errorf("entries = %v, want empty", m.history.entries)
+	}
+	if m.history.idx != 0 {
+		t.Errorf("idx = %d, want 0", m.history.idx)
+	}
+}
+
+func TestLoadHistoryNonexistentFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nonexistent")
+
+	m := New(Config{HistoryFile: path})
+	if len(m.history.entries) != 0 {
+		t.Errorf("entries = %v, want empty", m.history.entries)
+	}
+	if m.history.idx != 0 {
+		t.Errorf("idx = %d, want 0", m.history.idx)
+	}
+}
+
+func TestLoadHistorySkipsBlankLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history")
+
+	content := "first\n\nsecond\n\n\nthird\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(Config{HistoryFile: path})
+	want := []string{"first", "second", "third"}
+	if len(m.history.entries) != len(want) {
+		t.Fatalf("len(entries) = %d, want %d", len(m.history.entries), len(want))
+	}
+	for i, e := range m.history.entries {
+		if e != want[i] {
+			t.Errorf("entries[%d] = %q, want %q", i, e, want[i])
+		}
+	}
+}
