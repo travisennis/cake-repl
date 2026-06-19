@@ -25,6 +25,24 @@ type Command struct {
 	Arg  string
 }
 
+// commandTable is the single source of truth for slash command names.
+// Canonical names first; aliases follow so completion prefers the canonical form.
+// Both ParseCommand and completeSlash reference this table.
+var commandTable = []struct {
+	name string
+	kind CommandKind
+}{
+	{"/help", CmdHelp},
+	{"/exit", CmdExit},
+	{"/new", CmdNew},
+	{"/continue", CmdContinue},
+	{"/resume", CmdResume},
+	{"/session", CmdSession},
+	{"/clear", CmdClear},
+	{"/quit", CmdExit},
+	{"/q", CmdExit},
+}
+
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // IsSessionID reports whether s looks like a cake session uuid. It backs both
@@ -45,30 +63,22 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 	name := strings.ToLower(fields[0])
 	args := fields[1:]
 
-	switch name {
-	case "/help":
-		return Command{Kind: CmdHelp}, true, nil
-	case "/exit", "/quit", "/q":
-		return Command{Kind: CmdExit}, true, nil
-	case "/new":
-		return Command{Kind: CmdNew}, true, nil
-	case "/continue":
-		return Command{Kind: CmdContinue}, true, nil
-	case "/resume":
-		if len(args) != 1 {
-			return Command{}, true, fmt.Errorf("usage: /resume <uuid>")
+	for _, entry := range commandTable {
+		if entry.name == name {
+			if entry.kind == CmdResume {
+				if len(args) != 1 {
+					return Command{}, true, fmt.Errorf("usage: /resume <uuid>")
+				}
+				if !IsSessionID(args[0]) {
+					return Command{}, true, fmt.Errorf("invalid session uuid: %s", args[0])
+				}
+				return Command{Kind: CmdResume, Arg: strings.ToLower(args[0])}, true, nil
+			}
+			return Command{Kind: entry.kind}, true, nil
 		}
-		if !IsSessionID(args[0]) {
-			return Command{}, true, fmt.Errorf("invalid session uuid: %s", args[0])
-		}
-		return Command{Kind: CmdResume, Arg: strings.ToLower(args[0])}, true, nil
-	case "/session":
-		return Command{Kind: CmdSession}, true, nil
-	case "/clear":
-		return Command{Kind: CmdClear}, true, nil
-	default:
-		return Command{}, true, fmt.Errorf("unknown command: %s (try /help)", name)
 	}
+
+	return Command{}, true, fmt.Errorf("unknown command: %s (try /help)", name)
 }
 
 // HelpText lists commands and keybindings for /help.

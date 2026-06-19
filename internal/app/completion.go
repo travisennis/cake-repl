@@ -2,27 +2,12 @@ package app
 
 import "strings"
 
-// knownCommands is the ordered list of completable slash command names.
-// Canonical names come first; aliases follow so the first Tab press shows the
-// preferred form. Keep this in sync with ParseCommand.
-var knownCommands = []string{
-	"/help",
-	"/exit",
-	"/new",
-	"/continue",
-	"/resume",
-	"/session",
-	"/clear",
-	"/quit",
-	"/q",
-}
-
 // completeSlash returns all matching completions for the given input.
 // ok is false when input is not a slash command or has no matches.
 //
 // For a bare "/" it returns all known commands (cycling from first to last).
 // For "/resume <partial>" it matches against known session IDs.
-// For any other slash prefix it matches against knownCommands.
+// For any other slash prefix it matches against commandTable.
 func completeSlash(input string, knownSessions []string) (matches []string, ok bool) {
 	if !strings.HasPrefix(input, "/") {
 		return nil, false
@@ -48,9 +33,9 @@ func completeSlash(input string, knownSessions []string) (matches []string, ok b
 		return nil, false
 	}
 
-	for _, cmd := range knownCommands {
-		if strings.HasPrefix(cmd, input) {
-			matches = append(matches, cmd)
+	for _, entry := range commandTable {
+		if strings.HasPrefix(entry.name, input) {
+			matches = append(matches, entry.name)
 		}
 	}
 
