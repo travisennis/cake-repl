@@ -116,10 +116,15 @@ func (m *Model) loadHistory(path string) {
 
 	var entries []string
 	sc := bufio.NewScanner(f)
+	buf := make([]byte, 64*1024)
+	sc.Buffer(buf, 1024*1024)
 	for sc.Scan() {
 		if line := sc.Text(); line != "" {
 			entries = append(entries, line)
 		}
+	}
+	if err := sc.Err(); err != nil {
+		return // best-effort
 	}
 
 	if len(entries) > maxHistoryEntries {

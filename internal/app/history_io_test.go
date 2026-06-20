@@ -105,6 +105,33 @@ func TestLoadHistoryNonexistentFile(t *testing.T) {
 	}
 }
 
+func TestLoadHistoryLongLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history")
+
+	// Generate a line larger than bufio.Scanner's default 64KB buffer.
+	longLine := strings.Repeat("x", 80*1024)
+	content := longLine + "\nshort\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(Config{HistoryFile: path})
+
+	if len(m.history.entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(m.history.entries))
+	}
+	if len(m.history.entries[0]) != 80*1024 {
+		t.Fatalf("long entry length = %d, want %d", len(m.history.entries[0]), 80*1024)
+	}
+	if m.history.entries[1] != "short" {
+		t.Fatalf("entries[1] = %q, want %q", m.history.entries[1], "short")
+	}
+	if m.history.idx != 2 {
+		t.Errorf("idx = %d, want 2", m.history.idx)
+	}
+}
+
 func TestLoadHistorySkipsBlankLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "history")
