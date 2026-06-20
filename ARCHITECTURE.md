@@ -76,5 +76,4 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
 - [`README.md`](README.md) — user-facing behavior and flags.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, commands, style, verification.
 - [`AGENTS.md`](AGENTS.md) — agent routing.
-- [`plan.md`](plan.md) — original planning context.
 - [`docs/guardrails/`](docs/guardrails/) — agent-facing rules by risk surface.

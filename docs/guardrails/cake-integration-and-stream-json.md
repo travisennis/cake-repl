@@ -46,4 +46,3 @@ consumes cake events. This is the project's core external contract.
 - [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) — system boundary and invariants.
 - [`session-and-security.md`](session-and-security.md) — run-mode + secrets.
 - [`cli-and-user-output.md`](cli-and-user-output.md) — how events render.
-- [`../../plan.md`](../../plan.md) — original integration rationale.
