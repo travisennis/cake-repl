@@ -38,6 +38,47 @@ func displayPath(home, path string) string {
 	return path
 }
 
+// validateFlags checks the mutually exclusive / incompatible flag combinations
+// and returns an error when validation fails. When showVersion is true it
+// short-circuits and returns nil so the caller handles --version separately.
+func validateFlags(showVersion bool, continueFlag bool, resume string, args []string) error {
+	if showVersion {
+		return nil
+	}
+	if len(args) > 0 {
+		return fmt.Errorf("unexpected argument %q (prompts are entered inside the REPL)", args[0])
+	}
+	if continueFlag && resume != "" {
+		return fmt.Errorf("-continue and -resume are mutually exclusive")
+	}
+	if resume != "" && !app.IsSessionID(resume) {
+		return fmt.Errorf("invalid -resume uuid: %s", resume)
+	}
+	return nil
+}
+
+// resolveCwd resolves the -cwd flag value to an absolute directory path.
+// When cwd is empty it falls back to os.Getwd. It errors when the path
+// cannot be resolved or does not exist as a directory.
+func resolveCwd(cwd string) (string, error) {
+	dir := cwd
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("determining working directory: %w", err)
+		}
+	}
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolving -cwd: %w", err)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("-cwd is not a directory: %s", dir)
+	}
+	return dir, nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cake-repl:", err)
@@ -58,37 +99,22 @@ func run() (err error) {
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
+	if err := validateFlags(*showVersion, *continueFlag, *resume, flag.Args()); err != nil {
+		return err
+	}
 	if *showVersion {
 		fmt.Fprintln(os.Stdout, version.Binary)
 		return nil
-	}
-	if flag.NArg() > 0 {
-		return fmt.Errorf("unexpected argument %q (prompts are entered inside the REPL)", flag.Arg(0))
-	}
-	if *continueFlag && *resume != "" {
-		return fmt.Errorf("-continue and -resume are mutually exclusive")
-	}
-	if *resume != "" && !app.IsSessionID(*resume) {
-		return fmt.Errorf("invalid -resume uuid: %s", *resume)
 	}
 
 	if *noColor {
 		lipgloss.SetColorProfile(termenv.Ascii)
 	}
 
-	dir := *cwd
-	if dir == "" {
-		dir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("determining working directory: %w", err)
-		}
-	}
-	dir, err = filepath.Abs(dir)
+	var dir string
+	dir, err = resolveCwd(*cwd)
 	if err != nil {
-		return fmt.Errorf("resolving -cwd: %w", err)
-	}
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return fmt.Errorf("-cwd is not a directory: %s", dir)
+		return err
 	}
 
 	cfg := app.Config{
