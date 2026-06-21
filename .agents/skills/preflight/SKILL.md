@@ -44,9 +44,11 @@ Required context items, in priority order:
 
 - repo root `AGENTS.md`
 - nested `AGENTS.md` files for the changed areas
-- `ahm context task`, `ahm task show <id>` output, and the active task file
-  when the work came from a task; use `.agents/.tasks/index.md` only as a
-  fallback queue artifact when `ahm` is unavailable
+- `ahm context task`, `ahm task show <id>` output when the work came from a
+  task; open the active task file only when `ahm` is unavailable or when
+  reviewing manual edits to the task file itself; use
+  `.agents/.tasks/index.md` only as a fallback queue artifact when `ahm` is
+  unavailable
 - the relevant active exec plan when one exists for the current work
   (see `.agents/exec-plans/active/`)
 - `ahm context plan` and `docs/design-docs/index.md` for L/XL changes
