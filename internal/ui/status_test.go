@@ -1,9 +1,63 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
+
+func TestStatusLine_EmptySegments(t *testing.T) {
+	th := DefaultTheme()
+	got := StatusLine(th, 10)
+	// nonEmpty is empty → line = "  " (2 spaces), padded to 10.
+	want := th.StatusBar.MaxWidth(10).Render(strings.Repeat(" ", 10))
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestStatusLine_SingleSegment(t *testing.T) {
+	th := DefaultTheme()
+	got := StatusLine(th, 20, "hello")
+	// line = " hello " (7 visible cells), padded to 20.
+	padded := " hello " + strings.Repeat(" ", 20-7)
+	want := th.StatusBar.MaxWidth(20).Render(padded)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestStatusLine_MultipleSegments(t *testing.T) {
+	th := DefaultTheme()
+	got := StatusLine(th, 30, "a", "b", "c")
+	// line = " a │ b │ c " (11 visible cells), padded to 30.
+	padded := " a │ b │ c " + strings.Repeat(" ", 30-11)
+	want := th.StatusBar.MaxWidth(30).Render(padded)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestStatusLine_Truncation(t *testing.T) {
+	th := DefaultTheme()
+	got := StatusLine(th, 5, "abcdefghij")
+	// line = " abcdefghij " (12 cells) exceeds width=5, MaxWidth truncates.
+	want := th.StatusBar.MaxWidth(5).Render(" abcdefghij ")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestStatusLine_ExcludeEmpty(t *testing.T) {
+	th := DefaultTheme()
+	got := StatusLine(th, 20, "a", "", "b")
+	// nonEmpty = ["a","b"], line = " a │ b " (7 cells), padded to 20.
+	padded := " a │ b " + strings.Repeat(" ", 20-7)
+	want := th.StatusBar.MaxWidth(20).Render(padded)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
 
 func TestShortID(t *testing.T) {
 	if got := ShortID("11111111-2222-3333-4444-555555555555"); got != "11111111" {

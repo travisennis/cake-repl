@@ -209,3 +209,71 @@ func TestRenderItemTool(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderItem_NonToolKinds(t *testing.T) {
+	th := DefaultTheme()
+
+	tests := []struct {
+		name    string
+		kind    Kind
+		text    string
+		wantSub string
+	}{
+		{"user", KindUser, "hello", "❯"},
+		{"assistant", KindAssistant, "world", "world"},
+		{"reasoning", KindReasoning, "thinking", "·"},
+		{"hook", KindHook, "hook msg", "⚑"},
+		{"task_start", KindTaskStart, "task info", "—"},
+		{"complete", KindComplete, "done", "✓"},
+		{"error", KindError, "boom", "✗"},
+		{"warning", KindWarning, "caution", "!"},
+		{"info", KindInfo, "info text", "info text"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderItem(th, Item{Kind: tt.kind, Text: tt.text}, 80)
+			if got == "" {
+				t.Errorf("RenderItem(%v) returned empty", tt.kind)
+			}
+			if !strings.Contains(got, tt.wantSub) {
+				t.Errorf("RenderItem(%v) = %q, want it to contain %q", tt.kind, got, tt.wantSub)
+			}
+		})
+	}
+}
+
+func TestRenderItems_JoinsWithDoubleNewline(t *testing.T) {
+	th := DefaultTheme()
+	items := []Item{
+		{Kind: KindInfo, Text: "first"},
+		{Kind: KindInfo, Text: "second"},
+	}
+	got := RenderItems(th, items, 80)
+	if !strings.Contains(got, "\n\n") {
+		t.Errorf("expected items joined by double newline, got %q", got)
+	}
+}
+
+func TestRenderItem_NarrowWidth(t *testing.T) {
+	th := DefaultTheme()
+	item := Item{Kind: KindInfo, Text: "hello"}
+	got := RenderItem(th, item, 3) // width < 8, should clamp to 8
+	want := th.Info.Width(8).Render("hello")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRenderItem_DefaultBranch(t *testing.T) {
+	th := DefaultTheme()
+	// Use a Kind value outside the known range to hit the default branch,
+	// which renders with the Debug style.
+	got := RenderItem(th, Item{Kind: Kind(99), Text: "fallback"}, 80)
+	if got == "" {
+		t.Errorf("default branch returned empty")
+	}
+	if !strings.Contains(got, "fallback") {
+		t.Errorf("default branch should contain text, got %q", got)
+	}
+}
