@@ -20,12 +20,12 @@ import (
 
 // sessionFilePath returns the path where cake stores the session file for the
 // given session ID. It respects $CAKE_DATA_DIR when set, otherwise uses
-// ~/.local/share/cake/sessions/<id>.
+// ~/.local/share/cake/sessions/<id>.jsonl.
 func sessionFilePath(home, sessionID string) string {
 	if d := os.Getenv("CAKE_DATA_DIR"); d != "" {
-		return filepath.Join(d, "sessions", sessionID)
+		return filepath.Join(d, "sessions", sessionID+".jsonl")
 	}
-	return filepath.Join(home, ".local", "share", "cake", "sessions", sessionID)
+	return filepath.Join(home, ".local", "share", "cake", "sessions", sessionID+".jsonl")
 }
 
 // displayPath replaces a leading home directory prefix with ~ for compact
