@@ -39,6 +39,7 @@ internal/app/            Bubble Tea state machine (the REPL itself).
   update.go              Event/key/command handling (the Update loop).
   session.go             sessionState: pure run-mode state machine.
   commands.go            Slash-command parsing + HelpText.
+  completion.go          Tab completion for slash commands.
   keys.go                Key bindings.
   history.go             In-memory prompt history.
   view.go                Top-level View composition.
