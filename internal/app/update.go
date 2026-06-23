@@ -481,8 +481,8 @@ func describeHook(e cake.HookEvent) (string, bool) {
 func completionSummary(e cake.TaskComplete) string {
 	return fmt.Sprintf("done in %s · %d turn%s · %d tool call%s · %s tokens · session %s",
 		humanDuration(e.DurationMS),
-		e.TurnCount, pluralize(e.TurnCount),
-		e.ToolCallCount, pluralize(e.ToolCallCount),
+		e.TurnCount, plural(e.TurnCount),
+		e.ToolCallCount, plural(e.ToolCallCount),
 		fmt.Sprintf("%d in / %d out", e.Usage.InputTokens, e.Usage.OutputTokens),
 		ui.ShortID(e.SessionID))
 }
@@ -499,7 +499,7 @@ func humanDuration(ms int64) string {
 	}
 }
 
-func pluralize(n int) string {
+func plural(n int) string {
 	if n == 1 {
 		return ""
 	}
