@@ -53,6 +53,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case runDoneMsg:
 		return m.finishRun(msg.res)
 
+	case tea.MouseMsg:
+		// Only forward wheel events to the timeline viewport; let other mouse
+		// events (clicks in the input area) fall through to the default handler.
+		if msg.Action == tea.MouseActionPress &&
+			(msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
+			var cmd tea.Cmd
+			m.timeline, cmd = m.timeline.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}

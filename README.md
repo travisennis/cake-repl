@@ -73,6 +73,7 @@ Flags:
 | `Ctrl+U` | clear input |
 | `Up` / `Down` | recall prompt history (at the input's first/last line) |
 | `PgUp` / `PgDn` | scroll timeline |
+| `Mouse wheel` | scroll timeline |
 
 ## Slash commands
 

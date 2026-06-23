@@ -145,7 +145,7 @@ func run() (err error) {
 		cfg.DebugLog = f
 	}
 
-	p := tea.NewProgram(app.New(cfg), tea.WithAltScreen())
+	p := tea.NewProgram(app.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	m, err := p.Run()
 	if err != nil {
 		return err

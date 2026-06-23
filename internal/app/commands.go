@@ -98,4 +98,5 @@ keybindings
   ctrl+u           clear input
   tab              complete slash commands
   up/down          recall prompt history (at the input's first/last line)
-  pgup/pgdn        scroll timeline`
+  pgup/pgdn        scroll timeline
+  mouse wheel       scroll timeline`
