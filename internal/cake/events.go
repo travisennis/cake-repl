@@ -3,15 +3,30 @@
 // newline-delimited JSON on stdout and exposed as typed Go values.
 package cake
 
+import "encoding/json"
+
 // Event is implemented by every decoded stream-json record.
 type Event interface {
 	EventType() string
 }
 
-// StreamEnvelope holds only the type discriminator and is used to pick a
-// concrete event type before fully decoding a line.
+// StreamEnvelope captures the type discriminator and the raw JSON of a
+// line in one pass, so the concrete event decode can reuse the raw bytes.
 type StreamEnvelope struct {
-	Type string `json:"type"`
+	Type string
+	Raw  json.RawMessage
+}
+
+func (e *StreamEnvelope) UnmarshalJSON(data []byte) error {
+	e.Raw = data
+	var tmp struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	e.Type = tmp.Type
+	return nil
 }
 
 // TaskStart marks the beginning of one cake task.
