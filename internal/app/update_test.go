@@ -451,6 +451,33 @@ func TestExecCommandSessionInfo(t *testing.T) {
 // in-progress message records exist). The model therefore appends messages
 // without deduplicating by ID; these tests pin the filtering that does
 // happen per event.
+func TestHumanDuration(t *testing.T) {
+	tests := []struct {
+		ms   int64
+		want string
+	}{
+		{0, "0ms"},
+		{50, "50ms"},
+		{500, "500ms"},
+		{1500, "1.5s"},
+		{59000, "59.0s"},
+		{60000, "1m00s"},
+		{90000, "1m30s"},
+		{3600000, "1h00m00s"},
+		{3661000, "1h01m01s"},
+		{7200000, "2h00m00s"},
+		{73845000, "20h30m45s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := humanDuration(tt.ms)
+			if got != tt.want {
+				t.Errorf("humanDuration(%d) = %q, want %q", tt.ms, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplyEventMessages(t *testing.T) {
 	m := newLaidOutModel()
 	base := len(m.items)

@@ -88,8 +88,12 @@ func renderTool(th Theme, tool *ToolBlock, width int) string {
 		return ""
 	}
 	summary := SummarizeToolArgs(tool.Name, tool.Arguments)
-	header := th.ToolHeader.Render("⚙ "+strings.ToLower(tool.Name)) + " " +
-		th.ToolArgs.Render(firstLineOf(summary, width))
+	prefix := th.ToolHeader.Render("⚙ "+strings.ToLower(tool.Name)) + " "
+	avail := width - lipgloss.Width(prefix)
+	if avail < 1 {
+		avail = 1
+	}
+	header := prefix + th.ToolArgs.Render(firstLineOf(summary, avail))
 	lines := []string{header}
 	// Multi-line argument summaries (edit previews) follow the header.
 	if rest := strings.SplitN(summary, "\n", 2); len(rest) == 2 {

@@ -494,8 +494,13 @@ func humanDuration(ms int64) string {
 		return fmt.Sprintf("%dms", ms)
 	case d < time.Minute:
 		return fmt.Sprintf("%.1fs", d.Seconds())
-	default:
+	case d < time.Hour:
 		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		h := int(d.Hours())
+		m := int(d.Minutes()) % 60
+		s := int(d.Seconds()) % 60
+		return fmt.Sprintf("%dh%02dm%02ds", h, m, s)
 	}
 }
 

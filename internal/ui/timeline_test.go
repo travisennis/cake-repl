@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestRenderItemTool(t *testing.T) {
@@ -197,6 +199,32 @@ func TestRenderItemTool(t *testing.T) {
 				}
 				if !strings.Contains(got, "2500 bytes") {
 					t.Errorf("expected original byte count in truncation, got: %q", got)
+				}
+			},
+		},
+		{
+			name: "long tool argument at narrow width does not overflow",
+			item: Item{
+				Kind: KindTool,
+				Tool: &ToolBlock{
+					Name:      "read",
+					Arguments: `{"path":"/a/very/long/path/that/exceeds/the/available/width/in/the/header/because/the/prefix/needs/room/toooo.txt"}`,
+					Output:    "some content\n",
+					Done:      true,
+				},
+			},
+			width: 30,
+			checks: func(t *testing.T, got string) {
+				// Header line must fit within width cells. lipgloss.Width
+				// measures the rendered string's visual width after stripping
+				// ANSI codes.
+				for _, line := range strings.Split(got, "\n") {
+					if lipgloss.Width(line) > 30 {
+						t.Errorf("line %q has width %d, exceeds 30", line, lipgloss.Width(line))
+					}
+				}
+				if !strings.Contains(got, "⚙ read") {
+					t.Errorf("missing read header: %q", got)
 				}
 			},
 		},
