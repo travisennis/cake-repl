@@ -148,6 +148,9 @@ func run() (err error) {
 	p := tea.NewProgram(app.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	m, err := p.Run()
 	if err != nil {
+		if mod, ok := m.(app.Model); ok {
+			mod.CancelRunning()
+		}
 		return err
 	}
 	if mod, ok := m.(app.Model); ok {

@@ -89,6 +89,38 @@ func TestFinishRunRerendersOrphanedToolCalls(t *testing.T) {
 	assertCacheMatchesFullRender(t, &got, "after finishRun")
 }
 
+func TestCancelRunningNoopWhenNotRunning(t *testing.T) {
+	var m Model
+	m.CancelRunning() // must not panic or hang
+}
+
+func TestCancelRunningCancelsActiveRun(t *testing.T) {
+	bin := writeFakeCake(t, `
+cat <<'EOF'
+{"type":"task_start","session_id":"11111111-2222-3333-4444-555555555555","task_id":"t-1","timestamp":"2026-06-09T12:00:00Z"}
+EOF
+sleep 30
+exit 0
+`)
+	run, err := cake.Start(cake.Options{Bin: bin, Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Consume the one event so the goroutine lands in stdout reads.
+	<-run.Events
+
+	m := Model{run: run, running: true}
+	m.CancelRunning()
+
+	// The result should indicate cancellation.
+	res := <-run.Result
+	if !res.Canceled {
+		t.Errorf("expected canceled run, got exit_code=%d canceled=%v err=%v",
+			res.ExitCode, res.Canceled, res.Err)
+	}
+}
+
 func TestClearResetsRenderCache(t *testing.T) {
 	m := newLaidOutModel()
 	m.applyEvent(cake.Message{Role: "assistant", Content: "hello"})

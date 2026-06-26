@@ -138,6 +138,14 @@ func (m *Model) loadHistory(path string) {
 	m.history.idx = len(entries)
 }
 
+// CancelRunning cancels any active cake subprocess. Safe to call when
+// nothing is running.
+func (m Model) CancelRunning() {
+	if m.run != nil {
+		m.run.Cancel()
+	}
+}
+
 // SessionData returns the current session ID and working directory for
 // display after the TUI exits. If no task has run yet it falls back to the
 // resume ID when one was provided via -resume.
