@@ -26,6 +26,9 @@ func assertCacheMatchesFullRender(t *testing.T, m *Model, step string) {
 	if got != want {
 		t.Fatalf("%s: cached render diverged from full render\ngot:\n%s\nwant:\n%s", step, got, want)
 	}
+	if m.timelineContent != want {
+		t.Fatalf("%s: timeline content diverged from full render\ngot:\n%s\nwant:\n%s", step, m.timelineContent, want)
+	}
 }
 
 func TestTimelineCacheMatchesFullRender(t *testing.T) {
@@ -71,6 +74,45 @@ func TestHeightOnlyLayoutDoesNotRerender(t *testing.T) {
 	if m.rendered[0] == "sentinel" {
 		t.Error("width change should re-render items")
 	}
+}
+
+func TestAppendItemExtendsTimelineContentWithoutFullJoin(t *testing.T) {
+	m := newLaidOutModel()
+	before := m.timelineContent
+	rendered := ui.RenderItem(m.theme, ui.Item{Kind: ui.KindAssistant, Text: "hello"}, m.renderedWidth)
+
+	m.rendered[0] = "sentinel"
+	m.appendItem(ui.Item{Kind: ui.KindAssistant, Text: "hello"})
+
+	want := before + "\n\n" + rendered
+	if m.timelineContent != want {
+		t.Fatalf("append rebuilt content from rendered cache\ngot:\n%s\nwant:\n%s", m.timelineContent, want)
+	}
+}
+
+func TestToolOutputRerenderPreservesBottomPinning(t *testing.T) {
+	m := New(Config{})
+	m.width, m.height = 40, 8
+	m.layout()
+
+	for range 8 {
+		m.applyEvent(cake.Message{Role: "assistant", Content: "line one\nline two\nline three"})
+	}
+	m.applyEvent(cake.FunctionCall{CallID: "c-1", Name: "bash", Arguments: `{"command":"printf hi"}`})
+	m.timeline.GotoBottom()
+	if !m.timeline.AtBottom() {
+		t.Fatal("test setup did not reach bottom")
+	}
+
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "hi"})
+
+	if !m.timeline.AtBottom() {
+		t.Fatal("tool output rerender should preserve bottom pinning")
+	}
+	if !strings.Contains(m.timelineContent, "hi") {
+		t.Fatal("tool output rerender did not update timeline content")
+	}
+	assertCacheMatchesFullRender(t, &m, "after pinned tool output rerender")
 }
 
 func TestFinishRunRerendersOrphanedToolCalls(t *testing.T) {
@@ -130,6 +172,9 @@ func TestClearResetsRenderCache(t *testing.T) {
 
 	if len(got.items) != 0 || len(got.rendered) != 0 {
 		t.Errorf("clear left items=%d rendered=%d", len(got.items), len(got.rendered))
+	}
+	if got.timelineContent != "" {
+		t.Errorf("clear left timelineContent=%q", got.timelineContent)
 	}
 	assertCacheMatchesFullRender(t, &got, "after /clear")
 }

@@ -61,10 +61,12 @@ type Model struct {
 	pendingCalls map[string]int // call_id -> index into items
 	items        []ui.Item
 
-	// rendered caches one rendered string per item at renderedWidth, so
-	// appends and single-item updates do not re-render the whole timeline.
-	rendered      []string
-	renderedWidth int
+	// rendered caches one rendered string per item at renderedWidth.
+	// timelineContent caches the viewport payload so appends do not join the
+	// full rendered slice on the hot path.
+	rendered        []string
+	renderedWidth   int
+	timelineContent string
 
 	// completion state for Tab cycling; zero values mean no active cycle.
 	completionPrefix  string
@@ -169,7 +171,9 @@ func (m Model) Init() tea.Cmd {
 func (m *Model) appendItem(it ui.Item) int {
 	m.items = append(m.items, it)
 	if m.ready {
-		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth))
+		rendered := ui.RenderItem(m.theme, it, m.renderedWidth)
+		m.rendered = append(m.rendered, rendered)
+		m.appendTimelineContent(rendered)
 		m.syncViewport()
 	}
 	return len(m.items) - 1
@@ -182,6 +186,7 @@ func (m *Model) rerenderItem(idx int) {
 		return
 	}
 	m.rendered[idx] = ui.RenderItem(m.theme, m.items[idx], m.renderedWidth)
+	m.rebuildTimelineContent()
 	m.syncViewport()
 }
 
@@ -197,14 +202,26 @@ func (m *Model) rebuildTimeline() {
 	for _, it := range m.items {
 		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth))
 	}
+	m.rebuildTimelineContent()
 	m.syncViewport()
 }
 
-// syncViewport pushes the cached renderings into the viewport, keeping the
-// view pinned to the bottom if it was there already.
+func (m *Model) appendTimelineContent(rendered string) {
+	if m.timelineContent != "" {
+		m.timelineContent += "\n\n"
+	}
+	m.timelineContent += rendered
+}
+
+func (m *Model) rebuildTimelineContent() {
+	m.timelineContent = strings.Join(m.rendered, "\n\n")
+}
+
+// syncViewport pushes the cached timeline content into the viewport, keeping
+// the view pinned to the bottom if it was there already.
 func (m *Model) syncViewport() {
 	atBottom := m.timeline.AtBottom()
-	m.timeline.SetContent(strings.Join(m.rendered, "\n\n"))
+	m.timeline.SetContent(m.timelineContent)
 	if atBottom {
 		m.timeline.GotoBottom()
 	}
