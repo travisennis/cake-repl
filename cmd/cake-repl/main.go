@@ -6,9 +6,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -17,6 +19,21 @@ import (
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/version"
 )
+
+// syncWriter serializes writes to an underlying io.Writer. The debug log is
+// written from both the cake runner goroutine and the Bubble Tea update
+// goroutine, so the writer that reaches both paths must be safe for concurrent
+// use rather than relying on the underlying *os.File behavior.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
+}
 
 // sessionFilePath returns the path where cake stores the session file for the
 // given session ID. It respects $CAKE_DATA_DIR when set, otherwise uses
@@ -142,7 +159,7 @@ func run() (err error) {
 				err = fmt.Errorf("closing -debug-log: %w", closeErr)
 			}
 		}()
-		cfg.DebugLog = f
+		cfg.DebugLog = &syncWriter{w: f}
 	}
 
 	p := tea.NewProgram(app.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
