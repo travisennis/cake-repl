@@ -13,7 +13,8 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   `--continue`/`--resume`/`--model`/`--profile`; never read cake session files,
   parse its human text, or import its internals.
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
-- **CLI flags, slash commands, key bindings** (mirrored in `README.md` + `HelpText`).
+- **CLI flags, config shape, slash commands, key bindings** (mirrored in
+  `README.md`, guardrails, and `HelpText` where applicable).
 - **Session run-mode behavior** pins to `--resume` to prevent hijack.
 - **Secrets**: raw stream content goes only to `-debug-log` (`0o600`).
 - **Go MSRV** `1.26.3`+ and the pinned lint/vuln/release tools.
@@ -77,7 +78,8 @@ and [`ARCHITECTURE.md`](ARCHITECTURE.md). Decode forward-compatibly; never cross
 Use for flags, slash commands, key bindings, or `internal/ui/` rendering.
 Consult [`docs/guardrails/cli-and-user-output.md`](docs/guardrails/cli-and-user-output.md)
 and [`CONTRIBUTING.md`](CONTRIBUTING.md) for verification commands.
-Update `README.md`, `HelpText`, and this file together; keep `-no-color` usable.
+Update `README.md`, `HelpText`, guardrails, and this file as applicable; keep
+`-no-color` usable.
 
 ### Sessions, Security, And Subprocess Lifecycle
 

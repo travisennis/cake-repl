@@ -8,10 +8,17 @@ commands or help text (`internal/app/commands.go`), key bindings
 ## Compatibility surfaces
 
 - **CLI flags.** `-cake-bin`, `-continue`, `-resume <uuid>`, `-model`,
-  `-profile`, `-cwd`, `-no-color`, `-debug-log`, `-version`. Names,
-  defaults, and validation (mutually exclusive `-continue`/`-resume`, uuid
-  shape, positional args rejected) are user-facing. `-continue`/`-profile`
+  `-profile`, `-cwd`, `-no-color`, `-debug-log`, `-history-file`,
+  `-config <path>`, `-no-config`, `-output-limit <n>`,
+  `-max-timeline-items <n>`, `-version`. Names, defaults, and validation
+  (mutually exclusive `-continue`/`-resume`, uuid shape, positional args
+  rejected) are user-facing. `-continue`, `-resume`, `-model`, and `-profile`
   pass-through must stay aligned with the cake contract.
+- **Config file shape.** TOML config supports only stable REPL defaults:
+  `cake-bin`, `model`, `profile`, `output-limit`, and
+  `max-timeline-items`. Merge order is hardcoded defaults < XDG config <
+  project-local config < CLI flags. Session-specific values must stay out of
+  config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/continue`,
   `/resume <uuid>`, `/session`, `/clear`. Keep parsing, behavior, and names
   stable.
@@ -20,7 +27,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   (scroll).
 - **Output rendering.** Timeline item kinds, status line, and tool-block format.
   `-no-color` / `DefaultTheme` must keep producing usable ASCII output; tool
-  output truncates at `DefaultOutputLimit` (2000 bytes) on rune boundaries.
+  output truncates at the configured output limit (default 2000 bytes) on rune
+  boundaries.
 
 ## Required checks / test focus
 
@@ -31,9 +39,10 @@ commands or help text (`internal/app/commands.go`), key bindings
 
 ## Common failure modes
 
-- **Docs drift.** Flags, slash commands, and key bindings appear in three
-  places that must agree: `README.md`, the `HelpText` constant in
-  `commands.go`, and `AGENTS.md`/routing. Update all of them together.
+- **Docs drift.** Flags and config behavior must agree across `README.md`, this
+  guardrail, `AGENTS.md`, and any relevant ADR. Slash commands and key bindings
+  must agree across `README.md`, the `HelpText` constant in `commands.go`, and
+  `AGENTS.md`/routing. Update the applicable surfaces together.
 - **Color assumptions.** Don't hardcode escape codes; go through `internal/ui`
   theme/lipgloss so `-no-color` (termenv `Ascii`) still works.
 - **Width/layout regressions.** The timeline caches per-item renders; only width
@@ -44,4 +53,5 @@ commands or help text (`internal/app/commands.go`), key bindings
 
 - [`cake-integration-and-stream-json.md`](cake-integration-and-stream-json.md) — event source.
 - [`session-and-security.md`](session-and-security.md) — `/new` `/continue` `/resume`, `-debug-log`.
+- [`../adr/002-config-file-for-repl-defaults.md`](../adr/002-config-file-for-repl-defaults.md) — config file decision.
 - [`../../README.md`](../../README.md) — the user-facing reference these mirror.

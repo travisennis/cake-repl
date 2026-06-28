@@ -30,6 +30,7 @@ scope unless the cake contract itself has changed. See
 
 ```
 cmd/cake-repl/main.go    Entry point: flag parsing, validation, Bubble Tea program startup.
+internal/config/         TOML config-file loading for REPL startup defaults.
 internal/cake/           cake-as-engine: subprocess lifecycle + stream-json decoding.
   events.go              Typed event structs and the Event interface (the wire schema).
   parser.go              ParseLine: one NDJSON line -> typed Event (forward-compatible).
@@ -65,6 +66,10 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   hijack-prevention behavior testable. After a successful task it pins future
   prompts to `--resume <session-id>`. See
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
+- **Config is startup-only.** Config files set stable REPL defaults before the
+  TUI starts, using hardcoded defaults < XDG config < project-local config <
+  CLI flags. Session-specific values stay outside the persisted config shape.
+  See [`docs/adr/002-config-file-for-repl-defaults.md`](docs/adr/002-config-file-for-repl-defaults.md).
 - **One cake process at a time.** Submitting while a task runs is rejected; the
   model tracks a single live `*cake.Run`.
 - **Graceful cancellation.** Cancel sends SIGTERM then SIGKILL after a grace

@@ -398,7 +398,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	case res.ExitCode != 0:
 		text := fmt.Sprintf("cake exited with code %d", res.ExitCode)
 		if res.Stderr != "" {
-			text += "\n" + ui.TruncateOutput(res.Stderr, ui.DefaultOutputLimit)
+			text += "\n" + ui.TruncateOutput(res.Stderr, m.cfg.OutputLimit)
 		}
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: text})
 	case !m.sawComplete:

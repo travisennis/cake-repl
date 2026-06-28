@@ -39,20 +39,27 @@ type ToolBlock struct {
 }
 
 // RenderItems renders the whole timeline to a single string at the given
-// width.
-func RenderItems(th Theme, items []Item, width int) string {
+// width and output limit.
+func RenderItems(th Theme, items []Item, width int, outputLimit int) string {
+	if outputLimit <= 0 {
+		outputLimit = DefaultOutputLimit
+	}
 	parts := make([]string, 0, len(items))
 	for _, it := range items {
-		parts = append(parts, RenderItem(th, it, width))
+		parts = append(parts, RenderItem(th, it, width, outputLimit))
 	}
 	return strings.Join(parts, "\n\n")
 }
 
-// RenderItem renders one timeline item at the given width. Items render
-// independently of each other, so callers can cache results per item.
-func RenderItem(th Theme, it Item, width int) string {
+// RenderItem renders one timeline item at the given width and output limit.
+// Items render independently of each other, so callers can cache results per
+// item.
+func RenderItem(th Theme, it Item, width int, outputLimit int) string {
 	if width < 8 {
 		width = 8
+	}
+	if outputLimit <= 0 {
+		outputLimit = DefaultOutputLimit
 	}
 	wrap := func(style lipgloss.Style, s string) string {
 		return style.Width(width).Render(s)
@@ -65,7 +72,7 @@ func RenderItem(th Theme, it Item, width int) string {
 	case KindReasoning:
 		return wrap(th.Reasoning, "· "+it.Text)
 	case KindTool:
-		return renderTool(th, it.Tool, width)
+		return renderTool(th, it.Tool, width, outputLimit)
 	case KindHook:
 		return wrap(th.Hook, "⚑ "+it.Text)
 	case KindTaskStart:
@@ -83,9 +90,12 @@ func RenderItem(th Theme, it Item, width int) string {
 	}
 }
 
-func renderTool(th Theme, tool *ToolBlock, width int) string {
+func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int) string {
 	if tool == nil {
 		return ""
+	}
+	if outputLimit <= 0 {
+		outputLimit = DefaultOutputLimit
 	}
 	summary := SummarizeToolArgs(tool.Name, tool.Arguments)
 	prefix := th.ToolHeader.Render("⚙ "+strings.ToLower(tool.Name)) + " "
@@ -105,7 +115,7 @@ func renderTool(th Theme, tool *ToolBlock, width int) string {
 	case strings.TrimSpace(tool.Output) == "":
 		lines = append(lines, th.ToolOutput.Render("  (no output)"))
 	default:
-		out := TruncateOutput(tool.Output, DefaultOutputLimit)
+		out := TruncateOutput(tool.Output, outputLimit)
 		lines = append(lines, indent(th.ToolOutput.Width(width-2).Render(out), "  "))
 	}
 	return strings.Join(lines, "\n")

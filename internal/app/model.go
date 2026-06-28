@@ -17,16 +17,18 @@ import (
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
-// Config is everything main passes in from CLI flags.
+// Config is everything main passes in from CLI flags and config files.
 type Config struct {
-	CakeBin     string
-	Cwd         string
-	Model       string
-	Profile     string
-	InitialMode cake.RunMode
-	ResumeID    string
-	DebugLog    io.Writer
-	HistoryFile string
+	CakeBin          string
+	Cwd              string
+	Model            string
+	Profile          string
+	InitialMode      cake.RunMode
+	ResumeID         string
+	DebugLog         io.Writer
+	HistoryFile      string
+	OutputLimit      int
+	MaxTimelineItems int
 }
 
 const (
@@ -170,8 +172,14 @@ func (m Model) Init() tea.Cmd {
 // its index.
 func (m *Model) appendItem(it ui.Item) int {
 	m.items = append(m.items, it)
+	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
+		over := len(m.items) - m.cfg.MaxTimelineItems
+		m.items = m.items[over:]
+		m.rendered = m.rendered[over:]
+		m.rebuildTimelineContent()
+	}
 	if m.ready {
-		rendered := ui.RenderItem(m.theme, it, m.renderedWidth)
+		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit)
 		m.rendered = append(m.rendered, rendered)
 		m.appendTimelineContent(rendered)
 		m.syncViewport()
@@ -185,7 +193,7 @@ func (m *Model) rerenderItem(idx int) {
 	if !m.ready || idx < 0 || idx >= len(m.rendered) {
 		return
 	}
-	m.rendered[idx] = ui.RenderItem(m.theme, m.items[idx], m.renderedWidth)
+	m.rendered[idx] = ui.RenderItem(m.theme, m.items[idx], m.renderedWidth, m.cfg.OutputLimit)
 	m.rebuildTimelineContent()
 	m.syncViewport()
 }
@@ -200,7 +208,7 @@ func (m *Model) rebuildTimeline() {
 	m.renderedWidth = m.timeline.Width
 	m.rendered = m.rendered[:0]
 	for _, it := range m.items {
-		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth))
+		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit))
 	}
 	m.rebuildTimelineContent()
 	m.syncViewport()

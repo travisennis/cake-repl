@@ -60,6 +60,10 @@ Flags:
 | `-no-color` | disable styling |
 | `-debug-log <path>` | append cake-repl diagnostics (raw stream lines, skipped events, exits) to a file |
 | `-history-file <path>` | persist prompt history across restarts into this file |
+| `-config <path>` | path to config file (overrides default paths) |
+| `-no-config` | skip loading config file |
+| `-output-limit <n>` | truncate tool output after `<n>` characters (default: 2000) |
+| `-max-timeline-items <n>` | limit timeline to `<n>` entries (default: no limit) |
 | `-version` | print version and exit |
 
 ## Keybindings
@@ -100,6 +104,49 @@ Flags:
   the next prompt; once it succeeds, later prompts pin to that session.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts
   stay pinned to the same session.
+
+## Config file
+
+Persistent defaults can be set in a TOML config file. Values from the config
+file are overridden by CLI flags.
+
+### Paths
+
+Config files are loaded from two locations, with project-local values taking
+precedence over XDG-level values:
+
+| Path | Priority |
+|---|---|
+| `$XDG_CONFIG_HOME/cake-repl/config.toml` (default: `~/.config/cake-repl/config.toml`) | lower |
+| `.cake-repl.toml` in the current directory | higher |
+
+Pass `--config <path>` to use a single custom config file instead of the
+default paths. Pass `--no-config` to skip config file loading entirely.
+
+### Format
+
+```toml
+# Path to the cake binary (default: "cake")
+cake-bin = "/usr/local/bin/cake"
+
+# Model name passed through to cake
+model = "gpt-4"
+
+# Behavior profile passed through to cake
+profile = "fast"
+
+# Truncate tool output after this many characters (default: 2000)
+output-limit = 5000
+
+# Maximum number of timeline entries to keep (default: no limit)
+max-timeline-items = 200
+```
+
+### Merge order
+
+Hardcoded defaults < config file < CLI flags. Every layer overrides the
+previous one, so a CLI flag always wins over the same value in the config
+file.
 
 ## Tests
 
@@ -147,7 +194,7 @@ validation is available with `just release-check`.
 ## Known limitations
 
 - No session browser; `/resume` needs a UUID you already know.
-- Tool output is truncated at 2,000 characters with no expansion control yet.
+- Tool output is truncated at 2,000 characters by default (configurable via `-output-limit` or config file).
 - Markdown in assistant messages is wrapped as plain text, not rendered.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).

@@ -232,7 +232,7 @@ func TestRenderItemTool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := RenderItem(th, tt.item, tt.width)
+			got := RenderItem(th, tt.item, tt.width, DefaultOutputLimit)
 			tt.checks(t, got)
 		})
 	}
@@ -260,7 +260,7 @@ func TestRenderItem_NonToolKinds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := RenderItem(th, Item{Kind: tt.kind, Text: tt.text}, 80)
+			got := RenderItem(th, Item{Kind: tt.kind, Text: tt.text}, 80, DefaultOutputLimit)
 			if got == "" {
 				t.Errorf("RenderItem(%v) returned empty", tt.kind)
 			}
@@ -277,7 +277,7 @@ func TestRenderItems_JoinsWithDoubleNewline(t *testing.T) {
 		{Kind: KindInfo, Text: "first"},
 		{Kind: KindInfo, Text: "second"},
 	}
-	got := RenderItems(th, items, 80)
+	got := RenderItems(th, items, 80, DefaultOutputLimit)
 	if !strings.Contains(got, "\n\n") {
 		t.Errorf("expected items joined by double newline, got %q", got)
 	}
@@ -286,7 +286,7 @@ func TestRenderItems_JoinsWithDoubleNewline(t *testing.T) {
 func TestRenderItem_NarrowWidth(t *testing.T) {
 	th := DefaultTheme()
 	item := Item{Kind: KindInfo, Text: "hello"}
-	got := RenderItem(th, item, 3) // width < 8, should clamp to 8
+	got := RenderItem(th, item, 3, DefaultOutputLimit) // width < 8, should clamp to 8
 	want := th.Info.Width(8).Render("hello")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -297,7 +297,7 @@ func TestRenderItem_DefaultBranch(t *testing.T) {
 	th := DefaultTheme()
 	// Use a Kind value outside the known range to hit the default branch,
 	// which renders with the Debug style.
-	got := RenderItem(th, Item{Kind: Kind(99), Text: "fallback"}, 80)
+	got := RenderItem(th, Item{Kind: Kind(99), Text: "fallback"}, 80, DefaultOutputLimit)
 	if got == "" {
 		t.Errorf("default branch returned empty")
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/travisennis/cake-repl/internal/app"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/config"
 	"github.com/travisennis/cake-repl/internal/version"
 )
 
@@ -114,6 +115,10 @@ func run() (err error) {
 	debugLog := flag.String("debug-log", "", "write cake-repl debug output to this file")
 	historyFile := flag.String("history-file", "", "path to persist prompt history across restarts (default: no persistence)")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	configPath := flag.String("config", "", "path to config file (overrides default XDG and project-local config)")
+	noConfig := flag.Bool("no-config", false, "skip loading config file")
+	outputLimit := flag.Int("output-limit", 0, "truncate tool output after this many characters (0 = use internal default 2000)")
+	maxTimelineItems := flag.Int("max-timeline-items", 0, "limit timeline to this many entries (0 = no limit)")
 	flag.Parse()
 
 	if err := validateFlags(*showVersion, *continueFlag, *resume, flag.Args()); err != nil {
@@ -123,6 +128,14 @@ func run() (err error) {
 		fmt.Fprintln(os.Stdout, version.Binary)
 		return nil
 	}
+
+	// Collect explicitly-set flag names so config-file values only apply when
+	// the user did not pass the corresponding flag. This implements the merge
+	// order: hardcoded defaults < config file < CLI flags.
+	explicit := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		explicit[f.Name] = true
+	})
 
 	if *noColor {
 		lipgloss.SetColorProfile(termenv.Ascii)
@@ -134,13 +147,59 @@ func run() (err error) {
 		return err
 	}
 
-	cfg := app.Config{
-		CakeBin:     *cakeBin,
-		Cwd:         dir,
-		Model:       *model,
-		Profile:     *profile,
-		HistoryFile: *historyFile,
+	// Load config file(s).
+	var cfgFile *config.Config
+	switch {
+	case explicit["config"]:
+		cfgFile, err = config.Load(*configPath)
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+	case *noConfig:
+		// Skip config loading entirely.
+	default:
+		xdgPath, localPath := config.DefaultPaths()
+		xdgCfg, xdgErr := config.Load(xdgPath)
+		if xdgErr != nil {
+			return fmt.Errorf("loading XDG config %s: %w", xdgPath, xdgErr)
+		}
+		localCfg, localErr := config.Load(localPath)
+		if localErr != nil {
+			return fmt.Errorf("loading project-local config %s: %w", localPath, localErr)
+		}
+		cfgFile = config.Merge(xdgCfg, localCfg)
 	}
+
+	// Build the final app.Config: hardcoded defaults < config file < CLI flags.
+	cfg := app.Config{
+		CakeBin:          *cakeBin,
+		Cwd:              dir,
+		Model:            *model,
+		Profile:          *profile,
+		HistoryFile:      *historyFile,
+		OutputLimit:      *outputLimit,
+		MaxTimelineItems: *maxTimelineItems,
+	}
+
+	// Apply config file values for fields not explicitly set via CLI.
+	if cfgFile != nil {
+		if !explicit["model"] && cfgFile.Model != "" {
+			cfg.Model = cfgFile.Model
+		}
+		if !explicit["profile"] && cfgFile.Profile != "" {
+			cfg.Profile = cfgFile.Profile
+		}
+		if !explicit["cake-bin"] && cfgFile.CakeBin != "" {
+			cfg.CakeBin = cfgFile.CakeBin
+		}
+		if !explicit["output-limit"] && cfgFile.OutputLimit != 0 {
+			cfg.OutputLimit = cfgFile.OutputLimit
+		}
+		if !explicit["max-timeline-items"] && cfgFile.MaxTimelineItems != 0 {
+			cfg.MaxTimelineItems = cfgFile.MaxTimelineItems
+		}
+	}
+
 	switch {
 	case *resume != "":
 		cfg.InitialMode = cake.RunResume

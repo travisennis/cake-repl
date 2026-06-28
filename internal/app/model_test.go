@@ -21,7 +21,7 @@ func newLaidOutModel() Model {
 // RenderItems, the reference implementation.
 func assertCacheMatchesFullRender(t *testing.T, m *Model, step string) {
 	t.Helper()
-	want := ui.RenderItems(m.theme, m.items, m.renderedWidth)
+	want := ui.RenderItems(m.theme, m.items, m.renderedWidth, m.cfg.OutputLimit)
 	got := strings.Join(m.rendered, "\n\n")
 	if got != want {
 		t.Fatalf("%s: cached render diverged from full render\ngot:\n%s\nwant:\n%s", step, got, want)
@@ -79,7 +79,7 @@ func TestHeightOnlyLayoutDoesNotRerender(t *testing.T) {
 func TestAppendItemExtendsTimelineContentWithoutFullJoin(t *testing.T) {
 	m := newLaidOutModel()
 	before := m.timelineContent
-	rendered := ui.RenderItem(m.theme, ui.Item{Kind: ui.KindAssistant, Text: "hello"}, m.renderedWidth)
+	rendered := ui.RenderItem(m.theme, ui.Item{Kind: ui.KindAssistant, Text: "hello"}, m.renderedWidth, m.cfg.OutputLimit)
 
 	m.rendered[0] = "sentinel"
 	m.appendItem(ui.Item{Kind: ui.KindAssistant, Text: "hello"})

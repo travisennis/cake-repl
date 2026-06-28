@@ -115,9 +115,13 @@ func summarizeWrite(argsJSON string) string {
 }
 
 // TruncateOutput limits s to roughly limit bytes, preferring to cut at a
-// line boundary, and appends a marker with the original size.
+// line boundary, and appends a marker with the original size. A limit of 0
+// or less uses DefaultOutputLimit.
 func TruncateOutput(s string, limit int) string {
 	s = strings.TrimRight(s, "\n")
+	if limit <= 0 {
+		limit = DefaultOutputLimit
+	}
 	if len(s) <= limit {
 		return s
 	}
