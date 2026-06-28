@@ -13,8 +13,10 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   `--continue`/`--resume`/`--model`/`--profile`; never read cake session files,
   parse its human text, or import its internals.
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
-- **CLI flags, config shape, slash commands, key bindings** (mirrored in
-  `README.md`, guardrails, and `HelpText` where applicable).
+- **CLI flags and config shape** (mirrored in `README.md`, guardrails, and
+  ADRs where applicable).
+- **Slash commands and key bindings** (mirrored in `README.md` and
+  `HelpText`).
 - **Session run-mode behavior** pins to `--resume` to prevent hijack.
 - **Secrets**: raw stream content goes only to `-debug-log` (`0o600`).
 - **Go MSRV** `1.26.3`+ and the pinned lint/vuln/release tools.
@@ -28,10 +30,11 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
      release, or repo mechanics, skip `ahm` intake and classify directly.
 2. Classify the request — choose the workflow route below.
 3. Load only the routed docs needed for that request.
-4. State the selected route and loaded docs in handoff.
-5. Preserve compatibility surfaces unless explicitly changed.
-6. Keep edits surgical and verify according to risk (see the testing route).
-7. Hand off with changes, exact checks, and remaining risk.
+4. Apply the Docs And ADR Gate before completion or handoff.
+5. State the selected route and loaded docs in handoff.
+6. Preserve compatibility surfaces unless explicitly changed.
+7. Keep edits surgical and verify according to risk (see the testing route).
+8. Hand off with changes, exact checks, and remaining risk.
 
 When choosing build, test, lint, verification, or commit-prep commands, read
 [`CONTRIBUTING.md`](CONTRIBUTING.md) — it is the canonical command catalog.
@@ -62,6 +65,43 @@ After `ahm` intake, re-classify the discovered work under Workflow Routing.
 For example, a task about CLI flags still uses the CLI routing docs; a task
 about atomic writes still uses the Safety routing docs; a task about templates
 or workflow formats still uses the Workflow State routing docs.
+
+## Docs And ADR Gate
+
+Before completing a task, committing, or handing off, explicitly check whether
+the change affects any durable surface:
+
+- CLI flags or startup behavior.
+- Config file shape, precedence, or paths.
+- Slash commands or key bindings.
+- Persisted state or files on disk.
+- Subprocess/cake contract.
+- Security, logging, secrets, or session behavior.
+- Architecture/module boundaries.
+- User-visible terminal output.
+
+If yes, update the applicable docs in the same change or record why no doc
+change is needed. Use
+[`docs/guardrails/documentation.md`](docs/guardrails/documentation.md) for the
+surface-to-docs matrix.
+
+Feature tasks that introduce or change config shape, persisted state, security
+behavior, session behavior, subprocess behavior, or another durable contract
+must create or update an ADR and reference it from the task before completion.
+
+For task-backed feature work, run the `preflight` skill before completing the
+task, committing, or handoff. For `area:config`, persisted behavior,
+security/session, or CLI changes, preflight Pass 1 must explicitly answer:
+
+- Which user docs changed?
+- Which guardrails changed?
+- Is an ADR required? If not, why not?
+- Is the task record linked to the ADR or updated with the no-ADR rationale?
+
+Do not edit managed skill files under `.agents/skills/` to add repo-specific
+review rules. Put those rules in this file or the relevant guardrail so they
+are in front of the agent after workflow routing, and so `ahm status` stays
+clean.
 
 
 ## Workflow Routing
@@ -114,7 +154,9 @@ consistent across `go.mod`, docs, and CI.
 
 For doc work, consult `docs/guardrails/documentation.md` first. Also use it when behavior, config, architecture, workflow, or compatibility changes require doc updates.
 
-Docs-only changes: keep `README.md`, `HelpText`, and routing in sync, and move detailed rules into the right guardrail rather than growing this file.
+Docs-only changes: keep `README.md`, `HelpText`, guardrails, ADRs, and routing
+in sync where applicable. Move detailed rules into the right guardrail rather
+than growing this file.
 
 ## Repository Rules
 

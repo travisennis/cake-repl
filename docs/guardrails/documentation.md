@@ -7,10 +7,10 @@ configuration, compatibility, or workflow changes require documentation updates.
 ## Compatibility surfaces
 
 - **User reference.** `README.md` is the user-facing source for install, run,
-  flags, keybindings, slash commands, config files, known limitations, and
+  flags, key bindings, slash commands, config files, known limitations, and
   common commands.
 - **Runtime help.** `internal/app/commands.go` `HelpText` mirrors slash
-  commands and keybindings shown in `README.md`.
+  commands and key bindings shown in `README.md`.
 - **Architecture and guardrails.** `ARCHITECTURE.md` documents stable module
   boundaries and invariants. `docs/guardrails/` contains workflow-specific
   agent rules; move detailed rules there instead of growing `AGENTS.md`.
@@ -24,12 +24,56 @@ configuration, compatibility, or workflow changes require documentation updates.
 
 - Docs-only changes: inspect rendered Markdown where practical and verify
   generated indexes are current with `ahm status` or `ahm index` as applicable.
-- Docs that change CLI flags, config shape, commands, keybindings, or output:
+- Docs that change CLI flags, config shape, commands, key bindings, or output:
   cross-check `README.md`, `HelpText`, `AGENTS.md`, and the relevant guardrail.
 - Docs that record a durable decision: create or update an ADR through
   `ahm adr ...`, then make sure `docs/adr/index.md` is regenerated.
 - Code plus docs: use the verification route for the code change; `just ci` is
   the broad gate.
+
+## Documentation impact matrix
+
+Use this matrix when the Docs And ADR Gate in `AGENTS.md` says a change touches
+a durable surface.
+
+| Changed surface | Required docs |
+| --- | --- |
+| CLI flags or startup behavior | `README.md`, `docs/guardrails/cli-and-user-output.md`, `AGENTS.md` compatibility surface when the category changes |
+| Slash commands or key bindings | `README.md`, `internal/app/commands.go` `HelpText`, `docs/guardrails/cli-and-user-output.md` |
+| Config file shape, paths, or precedence | `README.md`, `docs/guardrails/cli-and-user-output.md`, `ARCHITECTURE.md` if architectural, ADR when the contract is introduced or changed |
+| Session behavior | `README.md`, `docs/guardrails/session-and-security.md`, ADR when the durable decision changes |
+| cake invocation contract or stream-json contract | `ARCHITECTURE.md`, `docs/guardrails/cake-integration-and-stream-json.md`, ADR when the contract changes |
+| Security, logging, secrets, or subprocess lifecycle | `docs/guardrails/session-and-security.md`, `README.md` when user-visible, ADR for durable security posture changes |
+| Build, dependency, CI, or release behavior | `CONTRIBUTING.md`, `docs/guardrails/dependencies-build-ci-release.md`, ADR for major runtime dependencies or compatibility changes |
+| Architecture/module boundaries | `ARCHITECTURE.md`, relevant guardrail, ADR for durable boundary changes |
+| User-visible terminal output | `README.md` when behavior changes, `docs/guardrails/cli-and-user-output.md`, screenshots or manual capture when required by that guardrail |
+| Managed-work format or workflow | `AGENTS.md`, relevant `.agents` guidance or templates, `ahm context ...` output source when available |
+
+When a row says "ADR when the contract changes," make the decision before code
+changes when possible. If the need is discovered after implementation, add the
+ADR before completing the task or commit, then reference it from the task.
+
+Managed skill files under `.agents/skills/` are owned by `ahm`; do not edit
+them for repo-specific review rules. Put repo-specific additions in
+`AGENTS.md` or the relevant guardrail instead.
+
+## Task documentation notes
+
+For feature tasks, especially `area:config`, `area:session`, `area:security`,
+or any task that changes persisted behavior, include a short note in the task
+before completion:
+
+```markdown
+## Documentation / ADR Notes
+
+- User docs:
+- Guardrails:
+- ADR: required / not required because ...
+```
+
+If an ADR is required, link it from the task's implementation notes or
+documentation notes. If no ADR is required for a feature task, state the reason
+so the decision is reviewable later.
 
 ## Common failure modes
 
@@ -39,7 +83,9 @@ configuration, compatibility, or workflow changes require documentation updates.
   posture, or compatibility behavior without an ADR.
 - Editing generated indexes directly instead of changing the source record and
   regenerating through `ahm`.
-- Letting runtime `/help` drift from README slash commands and keybindings.
+- Letting runtime `/help` drift from README slash commands and key bindings.
+- Treating `README.md` as enough for a durable behavior change that also needs
+  an ADR or guardrail update.
 
 ## Related docs
 
@@ -47,4 +93,4 @@ configuration, compatibility, or workflow changes require documentation updates.
 - [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) - module map and invariants.
 - [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) - command catalog and checks.
 - [`cli-and-user-output.md`](cli-and-user-output.md) - flags, commands,
-  keybindings, and output.
+  key bindings, and output.
