@@ -68,7 +68,7 @@ func RenderItem(th Theme, it Item, width int, outputLimit int) string {
 	case KindUser:
 		return th.UserLabel.Render("❯ ") + wrap(th.UserText, it.Text)
 	case KindAssistant:
-		return wrap(th.Assistant, it.Text)
+		return RenderMarkdown(it.Text, width)
 	case KindReasoning:
 		return wrap(th.Reasoning, "· "+it.Text)
 	case KindTool:

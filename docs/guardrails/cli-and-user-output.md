@@ -25,10 +25,11 @@ commands or help text (`internal/app/commands.go`), key bindings
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
   (cancel/quit), `Ctrl+U` (clear input), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll).
-- **Output rendering.** Timeline item kinds, status line, and tool-block format.
-  `-no-color` / `DefaultTheme` must keep producing usable ASCII output; tool
-  output truncates at the configured output limit (default 2000 bytes) on rune
-  boundaries.
+- **Output rendering.** Timeline item kinds, status line, tool-block format, and
+  markdown rendering for assistant messages. `-no-color` / `DefaultTheme` must
+  keep producing usable ASCII output; markdown renders via glamour, respecting
+  the terminal color profile. Tool output truncates at the configured output
+  limit (default 2000 bytes) on rune boundaries.
 
 ## Required checks / test focus
 

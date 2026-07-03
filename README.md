@@ -195,7 +195,6 @@ validation is available with `just release-check`.
 
 - No session browser; `/resume` needs a UUID you already know.
 - Tool output is truncated at 2,000 characters by default (configurable via `-output-limit` or config file).
-- Markdown in assistant messages is wrapped as plain text, not rendered.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
