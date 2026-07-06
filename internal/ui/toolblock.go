@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -45,7 +46,10 @@ func summarizeBash(argsJSON string) string {
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Command == "" {
 		return compactJSON(argsJSON)
 	}
-	s := "$ " + firstLineOf(args.Command, 200)
+	// Keep the full first line of the command so the header can wrap it
+	// instead of truncating; width-based clipping happened here previously
+	// and lost the tail of long commands.
+	s := "$ " + firstLineNoLimit(args.Command)
 	if args.Cwd != "" {
 		s += "  (cwd: " + args.Cwd + ")"
 	}
@@ -174,6 +178,112 @@ func firstLineOf(s string, n int) string {
 		s = s[:i] + "…"
 	}
 	return truncateString(s, n)
+}
+
+// firstLineNoLimit returns the first line of s without cell-based trimming.
+// A trailing "…" marks commands that continue on further lines, but no width
+// clipping is applied so callers can wrap the result themselves.
+func firstLineNoLimit(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i] + "…"
+	}
+	return s
+}
+
+// firstLineOnly returns the portion of s before the first newline, with no
+// truncation or marker. Used to split a multi-line summary into the header
+// line (returned here) and the trailing detail lines (handled by the caller).
+func firstLineOnly(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// wrapToolArgs wraps s to fit within contentWidth terminal cells, breaking at
+// whitespace boundaries and only hard-wrapping a single token that is longer
+// than the available width (so long paths or flags are never lost and CLI
+// flags like --no-pager are not split at their hyphens). Wrap is cell-aware so
+// wide runes count correctly. Continuation lines are indented by indent cells
+// so wrapped args align under the argument column of the header.
+func wrapToolArgs(s string, contentWidth, indent int) string {
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	fields := strings.Fields(s)
+	var lines []string
+	var cur string
+	flush := func() {
+		if cur != "" {
+			lines = append(lines, cur)
+			cur = ""
+		}
+	}
+	for _, f := range fields {
+		if lipgloss.Width(f) > contentWidth {
+			// Oversized single token: hard-wrap it, emitting full lines and
+			// carrying the trailing fragment onto the current line.
+			flush()
+			parts := strings.Split(ansi.Hardwrap(f, contentWidth, false), "\n")
+			for i := 0; i+1 < len(parts); i++ {
+				lines = append(lines, parts[i])
+			}
+			cur = parts[len(parts)-1]
+			continue
+		}
+		if cur == "" {
+			cur = f
+			continue
+		}
+		if lipgloss.Width(cur)+1+lipgloss.Width(f) > contentWidth {
+			lines = append(lines, cur)
+			cur = f
+			continue
+		}
+		cur += " " + f
+	}
+	flush()
+	if len(lines) == 0 {
+		return ""
+	}
+	out := lines[0]
+	pad := strings.Repeat(" ", indent)
+	for _, line := range lines[1:] {
+		out += "\n" + pad + line
+	}
+	return out
+}
+
+// renderToolHeader renders the tool-name prefix plus the first line of the
+// argument summary, wrapping the summary to fit width instead of truncating.
+// Continuation lines indent to align under the argument column. Each line is
+// styled independently so lipgloss does not pad the block to its longest line
+// (which would push the prefix past the available width).
+func renderToolHeader(th Theme, name, summary string, width int) string {
+	prefix := th.ToolHeader.Render("⚙ "+strings.ToLower(name)) + " "
+	prefixWidth := lipgloss.Width(prefix)
+	// Continuation indent aligns wrapped args under the argument column; cap
+	// it at narrow widths so there is always room for content.
+	contIndent := prefixWidth
+	if contIndent > width-1 {
+		contIndent = width - 1
+		if contIndent < 0 {
+			contIndent = 0
+		}
+	}
+	avail := width - contIndent
+	if avail < 1 {
+		avail = 1
+	}
+	firstLine := firstLineOnly(summary)
+	wrapped := wrapToolArgs(firstLine, avail, contIndent)
+	lines := strings.Split(wrapped, "\n")
+	for i := range lines {
+		lines[i] = th.ToolArgs.Render(lines[i])
+	}
+	lines[0] = prefix + lines[0]
+	return strings.Join(lines, "\n")
 }
 
 func firstNonEmptyLine(s string) string {

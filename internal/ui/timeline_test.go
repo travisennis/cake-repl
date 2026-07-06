@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestRenderItemTool(t *testing.T) {
@@ -304,4 +305,186 @@ func TestRenderItem_DefaultBranch(t *testing.T) {
 	if !strings.Contains(got, "fallback") {
 		t.Errorf("default branch should contain text, got %q", got)
 	}
+}
+
+// reconstructHeader strips the styled prefix from the first header line and
+// the continuation indent from subsequent wrapped header lines, returning the
+// joined argument content. Reconstruction stops at the first line that does
+// not start with the continuation indent (e.g. the tool output block).
+func reconstructHeader(rendered, prefix string, indent int) string {
+	pad := strings.Repeat(" ", indent)
+	var b strings.Builder
+	for i, line := range strings.Split(rendered, "\n") {
+		switch {
+		case i == 0:
+			b.WriteString(strings.TrimPrefix(line, prefix))
+		case strings.HasPrefix(line, pad):
+			b.WriteString(strings.TrimPrefix(line, pad))
+		default:
+			return b.String()
+		}
+	}
+	return b.String()
+}
+
+// stripWhitespace removes all ASCII whitespace from s. Used by tests to
+// compare wrapped output against the original command: wrapping may replace
+// inter-token spaces with newlines and indent, so we compare only the
+// non-whitespace runes.
+func stripWhitespace(s string) string {
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\t", "")
+	return s
+}
+
+// TestRenderToolHeaderWrapsLongBashCommand ensures long bash commands are
+// wrapped (not truncated with …) and every rendered line fits the width.
+func TestRenderToolHeaderWrapsLongBashCommand(t *testing.T) {
+	th := DefaultTheme()
+	const width = 40
+	// A long single-token command with no spaces exercises the hard-wrap path.
+	cmd := "echo " + strings.Repeat("x", 120)
+	item := Item{
+		Kind: KindTool,
+		Tool: &ToolBlock{
+			Name:      "bash",
+			Arguments: `{"command":"` + cmd + `"}`,
+			Output:    "done\n",
+			Done:      true,
+		},
+	}
+	got := RenderItem(th, item, width, DefaultOutputLimit)
+
+	prefix := th.ToolHeader.Render("⚙ bash") + " "
+	indent := lipgloss.Width(prefix)
+	content := reconstructHeader(got, prefix, indent)
+
+	// The full command tail must appear; nothing width-truncated with ….
+	if strings.Contains(got, "…") {
+		t.Errorf("expected no ellipsis truncation for wrapped command, got:\n%s", got)
+	}
+	if !strings.Contains(got, "⚙ bash") {
+		t.Errorf("missing bash header: %q", got)
+	}
+	if want := "$ echo " + strings.Repeat("x", 120); stripWhitespace(content) != stripWhitespace(want) {
+		t.Errorf("command content not preserved:\nwant %q\ngot  %q", want, content)
+	}
+
+	for i, line := range strings.Split(got, "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line %d has width %d, exceeds %d: %q", i, w, width, line)
+		}
+	}
+
+	// Continuation lines of the header must be indented to align under the
+	// argument column (the width of the "⚙ bash " prefix).
+	headerLines := strings.Split(got, "\n")
+	if len(headerLines) < 2 {
+		t.Fatalf("expected wrapped header to span multiple lines, got:\n%s", got)
+	}
+	cont := headerLines[1]
+	if !strings.HasPrefix(cont, strings.Repeat(" ", indent)) {
+		t.Errorf("continuation line not indented by %d cells: %q", indent, cont)
+	}
+}
+
+// TestRenderToolHeaderWrapsAtWordBoundary ensures a bash command with spaces
+// wraps at word boundaries first.
+func TestRenderToolHeaderWrapsAtWordBoundary(t *testing.T) {
+	th := DefaultTheme()
+	const width = 24
+	cmd := "git --no-pager log --oneline --graph --decorate --all -n 50"
+	item := Item{
+		Kind: KindTool,
+		Tool: &ToolBlock{
+			Name:      "bash",
+			Arguments: `{"command":"` + cmd + `"}`,
+			Output:    "ok\n",
+			Done:      true,
+		},
+	}
+	got := RenderItem(th, item, width, DefaultOutputLimit)
+	for i, line := range strings.Split(got, "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line %d has width %d, exceeds %d: %q", i, w, width, line)
+		}
+	}
+	// CLI flags must not be split at hyphens and the full command is preserved.
+	prefix := th.ToolHeader.Render("⚙ bash") + " "
+	indent := lipgloss.Width(prefix)
+	content := reconstructHeader(got, prefix, indent)
+	if want := "$ " + cmd; stripWhitespace(content) != stripWhitespace(want) {
+		t.Errorf("command content not preserved:\nwant %q\ngot  %q", want, content)
+	}
+}
+
+// TestRenderToolHeaderAsciiNoColor ensures wrapping renders without ANSI
+// escapes in the no-color (Ascii) profile.
+func TestRenderToolHeaderAsciiNoColor(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	th := DefaultTheme()
+	cmd := "echo " + strings.Repeat("y", 80)
+	item := Item{
+		Kind: KindTool,
+		Tool: &ToolBlock{
+			Name:      "bash",
+			Arguments: `{"command":"` + cmd + `"}`,
+			Output:    "done\n",
+			Done:      true,
+		},
+	}
+	got := RenderItem(th, item, 30, DefaultOutputLimit)
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("expected no ANSI escapes in Ascii mode, got:\n%s", got)
+	}
+	prefix := th.ToolHeader.Render("⚙ bash") + " "
+	indent := lipgloss.Width(prefix)
+	if want := "$ " + cmd; stripWhitespace(reconstructHeader(got, prefix, indent)) != stripWhitespace(want) {
+		t.Errorf("command content lost in no-color mode:\nwant %q\ngot  %q", want, reconstructHeader(got, prefix, indent))
+	}
+}
+
+// TestWrapToolArgs covers the wrap helper directly: word-wrap then hard-wrap
+// fallback, and continuation indent.
+func TestWrapToolArgs(t *testing.T) {
+	t.Run("fits on one line", func(t *testing.T) {
+		got := wrapToolArgs("hello world", 80, 4)
+		if got != "hello world" {
+			t.Errorf("got %q", got)
+		}
+	})
+	t.Run("word wrap indents continuation", func(t *testing.T) {
+		got := wrapToolArgs("alpha beta gamma delta epsilon", 12, 3)
+		lines := strings.Split(got, "\n")
+		for i, line := range lines {
+			if i == 0 {
+				continue
+			}
+			if !strings.HasPrefix(line, "   ") {
+				t.Errorf("line %d not indented: %q", i, line)
+			}
+			content := strings.TrimPrefix(line, "   ")
+			if lipgloss.Width(content) > 12 {
+				t.Errorf("line %d content width > 12: %q", i, line)
+			}
+		}
+	})
+	t.Run("long token hard wraps", func(t *testing.T) {
+		got := wrapToolArgs(strings.Repeat("z", 25), 10, 0)
+		for i, line := range strings.Split(got, "\n") {
+			if lipgloss.Width(line) > 10 {
+				t.Errorf("line %d exceeds 10: %q", i, line)
+			}
+		}
+	})
+	t.Run("width clamped to 1", func(t *testing.T) {
+		got := wrapToolArgs("abc", 0, 0)
+		if strings.Count(got, "\n") != 2 {
+			t.Errorf("expected each rune on its own line, got %q", got)
+		}
+	})
 }
