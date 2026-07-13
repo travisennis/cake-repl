@@ -517,3 +517,232 @@ func TestApplyEventMessages(t *testing.T) {
 	}
 	assertCacheMatchesFullRender(t, &m, "after message events")
 }
+
+func TestApplyEventReordersAssistantMessageBeforePendingTool(t *testing.T) {
+	// Simulate the Chat Completions backend bug: function_call events arrive
+	// before the assistant message event. The assistant text should appear
+	// BEFORE the tool call in the timeline.
+	m := newLaidOutModel()
+
+	// Step 1: function_call arrives first (wrong order from Chat Completions backend)
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"ls"}`})
+	if len(m.items) != 2 { // info + tool
+		t.Fatalf("after function_call: got %d items, want 2", len(m.items))
+	}
+	if m.items[1].Kind != ui.KindTool {
+		t.Fatalf("item[1].Kind = %v, want KindTool", m.items[1].Kind)
+	}
+	assertCacheMatchesFullRender(t, &m, "after function_call")
+
+	// Step 2: assistant message arrives after the tool call
+	m.applyEvent(cake.Message{Role: "assistant", Content: "I'll search for the file."})
+	if len(m.items) != 3 { // info + assistant + tool
+		t.Fatalf("after message: got %d items, want 3", len(m.items))
+	}
+	// Message should now be BEFORE the tool call
+	if m.items[1].Kind != ui.KindAssistant {
+		t.Errorf("item[1].Kind = %v, want KindAssistant (should be before tool)", m.items[1].Kind)
+	}
+	if m.items[1].Text != "I'll search for the file." {
+		t.Errorf("item[1].Text = %q, want assistant text", m.items[1].Text)
+	}
+	if m.items[2].Kind != ui.KindTool {
+		t.Errorf("item[2].Kind = %v, want KindTool (should be after message)", m.items[2].Kind)
+	}
+	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 2 {
+		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 2", idx, ok)
+	}
+	assertCacheMatchesFullRender(t, &m, "after message before pending tool")
+
+	// Step 3: tool output still correctly updates the tool at its new position
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "file.txt"})
+	if m.items[2].Kind != ui.KindTool {
+		t.Fatalf("after output: item[2].Kind = %v, want KindTool", m.items[2].Kind)
+	}
+	if !m.items[2].Tool.Done {
+		t.Error("tool should be done after receiving output")
+	}
+	if m.items[2].Tool.Output != "file.txt" {
+		t.Errorf("tool output = %q, want 'file.txt'", m.items[2].Tool.Output)
+	}
+	assertCacheMatchesFullRender(t, &m, "after tool output")
+}
+
+func TestApplyEventAppendsAssistantMessageWhenNoPendingTool(t *testing.T) {
+	// When there are no pending tool calls, the message should append normally.
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: "hello"})
+	if len(m.items) != 2 { // info + assistant
+		t.Fatalf("got %d items, want 2", len(m.items))
+	}
+	if m.items[1].Kind != ui.KindAssistant || m.items[1].Text != "hello" {
+		t.Errorf("item[1] = %+v, want assistant message", m.items[1])
+	}
+	assertCacheMatchesFullRender(t, &m, "after assistant message")
+}
+
+func TestApplyEventReordersAssistantBeforeMultiplePendingTools(t *testing.T) {
+	// Multiple pending tool calls: the assistant message should be inserted
+	// before ALL of them, not just the first one.
+	m := newLaidOutModel()
+
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"ls"}`})
+	m.applyEvent(cake.FunctionCall{ID: "fc-2", CallID: "c-2", Name: "read", Arguments: `{"path":"main.go"}`})
+	// At this point: info, tool(c-1), tool(c-2)
+
+	m.applyEvent(cake.Message{Role: "assistant", Content: "Let me check both files."})
+	if len(m.items) != 4 { // info + assistant + tool + tool
+		t.Fatalf("got %d items, want 4", len(m.items))
+	}
+	// Message should be at index 1, before both tools
+	if m.items[1].Kind != ui.KindAssistant || m.items[1].Text != "Let me check both files." {
+		t.Errorf("item[1] = %+v, want assistant message before tools", m.items[1])
+	}
+	if m.items[2].Kind != ui.KindTool || m.items[3].Kind != ui.KindTool {
+		t.Errorf("items[2,3] should be tools, got kinds %v, %v", m.items[2].Kind, m.items[3].Kind)
+	}
+	// Both pending call indices should be updated
+	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 2 {
+		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 2", idx, ok)
+	}
+	if idx, ok := m.pendingCalls["c-2"]; !ok || idx != 3 {
+		t.Errorf("pendingCalls['c-2'] = %d (ok=%v), want 3", idx, ok)
+	}
+	assertCacheMatchesFullRender(t, &m, "after message before multiple pending tools")
+}
+
+func TestApplyEventPreservesOrderWhenMessageBeforeTool(t *testing.T) {
+	// When cake emits events in the correct order (message before function_call),
+	// the message should still be before the tool call.
+	m := newLaidOutModel()
+
+	m.applyEvent(cake.Message{Role: "assistant", Content: "I'll search for it."})
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"find ."}`})
+
+	if len(m.items) != 3 { // info + assistant + tool
+		t.Fatalf("got %d items, want 3", len(m.items))
+	}
+	if m.items[1].Kind != ui.KindAssistant || m.items[1].Text != "I'll search for it." {
+		t.Errorf("item[1] = %+v, want assistant message", m.items[1])
+	}
+	if m.items[2].Kind != ui.KindTool {
+		t.Errorf("item[2].Kind = %v, want KindTool", m.items[2].Kind)
+	}
+	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 2 {
+		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 2", idx, ok)
+	}
+	assertCacheMatchesFullRender(t, &m, "after correct-order events")
+}
+
+func TestInsertItemAtDoesNotPanicOnEmptyTimeline(t *testing.T) {
+	var m Model
+	m.pendingCalls = map[string]int{}
+	// insertItemAt on an empty model must not panic.
+	m.insertItemAt(0, ui.Item{Kind: ui.KindAssistant, Text: "hello"})
+	if len(m.items) != 1 || m.items[0].Text != "hello" {
+		t.Errorf("insert into empty: got %+v", m.items)
+	}
+}
+
+func TestFirstPendingToolIdx(t *testing.T) {
+	m := newLaidOutModel() // has 1 item (info)
+
+	if idx := m.firstPendingToolIdx(); idx != -1 {
+		t.Errorf("empty timeline: got %d, want -1", idx)
+	}
+
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
+	if idx := m.firstPendingToolIdx(); idx != 1 {
+		t.Errorf("single pending tool: got %d, want 1", idx)
+	}
+
+	// A completed tool should not be detected as pending.
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "done"})
+	if idx := m.firstPendingToolIdx(); idx != -1 {
+		t.Errorf("after tool completed: got %d, want -1", idx)
+	}
+}
+
+func TestInsertItemAtRespectsMaxTimelineItems(t *testing.T) {
+	// When MaxTimelineItems is set and the timeline is at its limit,
+	// inserting an assistant message before pending tools must not grow
+	// beyond the cap, and pendingCalls indices must remain valid.
+	m := newLaidOutModel()
+	m.cfg.MaxTimelineItems = 3
+
+	// Fill the timeline to the cap: info + assistant + tool
+	m.applyEvent(cake.Message{Role: "assistant", Content: "first"})
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"ls"}`})
+	if len(m.items) != 3 {
+		t.Fatalf("before insert: got %d items, want 3", len(m.items))
+	}
+
+	// Now insert a second assistant message before the pending tool.
+	// This would push items to 4, triggering the trim to 3.
+	m.applyEvent(cake.Message{Role: "assistant", Content: "Let me check."})
+	if len(m.items) != m.cfg.MaxTimelineItems {
+		t.Errorf("after insert: got %d items, want %d", len(m.items), m.cfg.MaxTimelineItems)
+	}
+
+	// The initial info message should have been trimmed.
+	// Surviving items: second assistant, first assistant?, or assistant + tool?
+	// After insertion: items were [info, a1, tool], insert at idx=1 → [info, a2, a1, tool],
+	// then trim front by 1 → [a2, a1, tool]. But actually, after first_pending_tool_idx:
+	//   items = [info, a1, tool], pending tool at idx=2
+	//   firstPendingToolIdx() → 2
+	//   insert at 2 → [info, a1, a2, tool]
+	//   then trim front by 1 → [a1, a2, tool]
+	// So surviving: assistant "first", assistant "Let me check.", tool
+	if m.items[0].Kind != ui.KindAssistant || m.items[0].Text != "first" {
+		t.Errorf("item[0] = %+v, want assistant 'first'", m.items[0])
+	}
+	if m.items[1].Kind != ui.KindAssistant || m.items[1].Text != "Let me check." {
+		t.Errorf("item[1] = %+v, want assistant 'Let me check.'", m.items[1])
+	}
+	if m.items[2].Kind != ui.KindTool {
+		t.Errorf("item[2].Kind = %v, want KindTool", m.items[2].Kind)
+	}
+
+	// Pending call index should still point to the tool at its new position.
+	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 2 {
+		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 2", idx, ok)
+	}
+
+	// Tool output should still update correctly.
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "files"})
+	if !m.items[2].Tool.Done || m.items[2].Tool.Output != "files" {
+		t.Errorf("tool after output: done=%v output=%q", m.items[2].Tool.Done, m.items[2].Tool.Output)
+	}
+
+	assertCacheMatchesFullRender(t, &m, "after cap-enforced insert and tool output")
+}
+
+func TestInsertItemAtTrimsPendingCallsInFrontRange(t *testing.T) {
+	// When the front-trim removes a tool that was still pending, its
+	// pendingCalls entry should be removed, not left stale.
+	m := newLaidOutModel()
+	m.cfg.MaxTimelineItems = 2
+
+	// Fill to cap: info + tool(c-1) = 2 items, at cap.
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
+	if len(m.items) != 2 {
+		t.Fatalf("at cap: got %d items, want 2", len(m.items))
+	}
+	if _, ok := m.pendingCalls["c-1"]; !ok {
+		t.Fatal("pendingCalls missing c-1 after append")
+	}
+
+	// Inserting a message before the tool pushes items to 3, triggers trim
+	// of the oldest (info at index 0), then items are [message, tool] at cap.
+	m.applyEvent(cake.Message{Role: "assistant", Content: "checking"})
+	if len(m.items) != m.cfg.MaxTimelineItems {
+		t.Fatalf("after insert+trim: got %d items, want %d", len(m.items), m.cfg.MaxTimelineItems)
+	}
+
+	// c-1 should still be in pendingCalls and point to the tool.
+	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 1 {
+		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 1", idx, ok)
+	}
+
+	assertCacheMatchesFullRender(t, &m, "after cap-enforced insert trims front")
+}

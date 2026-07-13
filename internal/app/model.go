@@ -187,6 +187,64 @@ func (m *Model) appendItem(it ui.Item) int {
 	return len(m.items) - 1
 }
 
+// firstPendingToolIdx returns the index of the first pending (not yet done)
+// KindTool item when all trailing items are pending tools, or -1 otherwise.
+// This is used to insert assistant messages before pending tool calls when
+// cake emits function_call events before message events.
+func (m *Model) firstPendingToolIdx() int {
+	i := len(m.items) - 1
+	for i >= 0 && m.items[i].Kind == ui.KindTool && m.items[i].Tool != nil && !m.items[i].Tool.Done {
+		i--
+	}
+	i++ // first pending tool, or len(items) if none found
+	if i < len(m.items) {
+		return i
+	}
+	return -1
+}
+
+// insertItemAt inserts an item at the given index, shifting subsequent items
+// to the right, and updates the render cache and pending call indices.
+func (m *Model) insertItemAt(idx int, it ui.Item) {
+	m.items = append(m.items, ui.Item{}) // make room
+	copy(m.items[idx+1:], m.items[idx:])
+	m.items[idx] = it
+
+	// Adjust pendingCalls indices for the insertion shift.
+	for callID, callIdx := range m.pendingCalls {
+		if callIdx >= idx {
+			m.pendingCalls[callID] = callIdx + 1
+		}
+	}
+
+	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
+		over := len(m.items) - m.cfg.MaxTimelineItems
+		m.items = m.items[over:]
+		// Adjust pendingCalls for the front-trim shift; entries
+		// in the trimmed range are cancelled (they will never receive output).
+		for callID, callIdx := range m.pendingCalls {
+			if callIdx < over {
+				delete(m.pendingCalls, callID)
+			} else {
+				m.pendingCalls[callID] = callIdx - over
+			}
+		}
+		if m.ready {
+			m.rebuildTimeline()
+		}
+		return
+	}
+
+	if m.ready {
+		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit)
+		m.rendered = append(m.rendered, "") // make room
+		copy(m.rendered[idx+1:], m.rendered[idx:])
+		m.rendered[idx] = rendered
+		m.rebuildTimelineContent()
+		m.syncViewport()
+	}
+}
+
 // rerenderItem refreshes one item's cached rendering after it mutated in
 // place (a tool block receiving its output).
 func (m *Model) rerenderItem(idx int) {

@@ -304,7 +304,16 @@ func (m *Model) applyEvent(ev cake.Event) {
 		switch e.Role {
 		case "assistant":
 			if strings.TrimSpace(e.Content) != "" {
-				m.appendItem(ui.Item{Kind: ui.KindAssistant, Text: e.Content})
+				// When cake emits function_call events before the assistant
+				// message (the Chat Completions backend emits tool calls
+				// before text), insert the assistant message before the
+				// pending tool calls so the text appears before the tool
+				// call in the timeline.
+				if idx := m.firstPendingToolIdx(); idx >= 0 {
+					m.insertItemAt(idx, ui.Item{Kind: ui.KindAssistant, Text: e.Content})
+				} else {
+					m.appendItem(ui.Item{Kind: ui.KindAssistant, Text: e.Content})
+				}
 			}
 		case "user":
 			// The submitted prompt is already on the timeline.
