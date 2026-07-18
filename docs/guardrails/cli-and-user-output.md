@@ -23,7 +23,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   `/resume <uuid>`, `/session`, `/clear`. Keep parsing, behavior, and names
   stable.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
-  (cancel/quit), `Ctrl+U` (clear input), `Up`/`Down` (history), `PgUp`/`PgDn`
+  (cancel/quit), `Ctrl+U` (clear input), `Ctrl+O` (cycle most recent tool
+  output through hidden/truncated/full), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll).
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. `-no-color` / `DefaultTheme` must
@@ -33,7 +34,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   lines indented under the argument column; long single tokens (e.g. paths and
   bash commands) hard-wrap so the full content stays visible. Tool *output*
   truncates at the configured output limit (default 2000 bytes) on rune
-  boundaries.
+  boundaries. `Ctrl+O` cycles the most recent tool block through three output
+  modes: hidden, truncated (default), and full. Full mode ignores the output
+  limit and shows the complete raw output. Only the toggled item is re-rendered;
+  the viewport scroll offset is preserved.
 
 ## Required checks / test focus
 
@@ -59,4 +63,5 @@ commands or help text (`internal/app/commands.go`), key bindings
 - [`cake-integration-and-stream-json.md`](cake-integration-and-stream-json.md) — event source.
 - [`session-and-security.md`](session-and-security.md) — `/new` `/continue` `/resume`, `-debug-log`.
 - [`../adr/002-config-file-for-repl-defaults.md`](../adr/002-config-file-for-repl-defaults.md) — config file decision.
+- [`../adr/003-tool-output-expansion-key-binding.md`](../adr/003-tool-output-expansion-key-binding.md) — tool output expansion key binding.
 - [`../../README.md`](../../README.md) — the user-facing reference these mirror.

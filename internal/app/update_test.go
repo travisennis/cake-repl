@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/ui"
@@ -141,6 +142,109 @@ func TestDescribeHook(t *testing.T) {
 				t.Errorf("line = %q, want %q", line, tt.wantLine)
 			}
 		})
+	}
+}
+
+func TestToggleMostRecentToolOutputCyclesModes(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x", ui.DefaultOutputLimit+100)})
+
+	idx := len(m.items) - 1
+	if m.items[idx].Tool.OutputMode != ui.ToolOutputTruncated {
+		t.Fatalf("default mode = %v, want truncated", m.items[idx].Tool.OutputMode)
+	}
+
+	tm, _ := m.toggleMostRecentToolOutput()
+	m = tm.(Model)
+	if m.items[idx].Tool.OutputMode != ui.ToolOutputFull {
+		t.Errorf("after first toggle: mode = %v, want full", m.items[idx].Tool.OutputMode)
+	}
+
+	tm, _ = m.toggleMostRecentToolOutput()
+	m = tm.(Model)
+	if m.items[idx].Tool.OutputMode != ui.ToolOutputHidden {
+		t.Errorf("after second toggle: mode = %v, want hidden", m.items[idx].Tool.OutputMode)
+	}
+
+	tm, _ = m.toggleMostRecentToolOutput()
+	m = tm.(Model)
+	if m.items[idx].Tool.OutputMode != ui.ToolOutputTruncated {
+		t.Errorf("after third toggle: mode = %v, want truncated", m.items[idx].Tool.OutputMode)
+	}
+	assertCacheMatchesFullRender(t, &m, "after cycling output modes")
+}
+
+func TestToggleMostRecentToolOutputTargetsLastTool(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"ls"}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "first"})
+	m.applyEvent(cake.FunctionCall{ID: "fc-2", CallID: "c-2", Name: "read", Arguments: `{"path":"main.go"}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-2", Output: "second"})
+
+	firstIdx, lastIdx := len(m.items)-2, len(m.items)-1
+
+	tm, _ := m.toggleMostRecentToolOutput()
+	m = tm.(Model)
+	if m.items[firstIdx].Tool.OutputMode != ui.ToolOutputTruncated {
+		t.Errorf("older tool was toggled: mode = %v", m.items[firstIdx].Tool.OutputMode)
+	}
+	if m.items[lastIdx].Tool.OutputMode != ui.ToolOutputFull {
+		t.Errorf("latest tool not toggled: mode = %v", m.items[lastIdx].Tool.OutputMode)
+	}
+}
+
+func TestToggleMostRecentToolOutputNoopWhenNoTools(t *testing.T) {
+	m := newLaidOutModel()
+	before := m.timelineContent
+	tm, cmd := m.toggleMostRecentToolOutput()
+	got := tm.(Model)
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+	if got.timelineContent != before {
+		t.Error("toggle with no tools changed timeline content")
+	}
+}
+
+func TestToggleToolOutputPreservesViewportOffset(t *testing.T) {
+	m := New(Config{})
+	m.width, m.height = 40, 6
+	m.layout()
+
+	// Fill the timeline so it is scrollable.
+	for range 10 {
+		m.applyEvent(cake.Message{Role: "assistant", Content: "line one\nline two\nline three"})
+	}
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x\n", 100)})
+
+	// Scroll up away from the bottom.
+	m.timeline.GotoBottom()
+	m.timeline.SetYOffset(5)
+	wantOffset := m.timeline.YOffset
+
+	tm, _ := m.toggleMostRecentToolOutput()
+	m = tm.(Model)
+	if m.timeline.YOffset != wantOffset {
+		t.Errorf("viewport offset changed: got %d, want %d", m.timeline.YOffset, wantOffset)
+	}
+	assertCacheMatchesFullRender(t, &m, "after toggle with preserved offset")
+}
+
+func TestHandleKeyToggleToolOutput(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "out"})
+
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlO}, m.keys.ToggleToolOutput) {
+		t.Fatal("ctrl+o binding does not match ctrl+o key msg")
+	}
+
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	got := tm.(Model)
+	if got.items[len(got.items)-1].Tool.OutputMode != ui.ToolOutputFull {
+		t.Errorf("handleKey ctrl+o did not toggle to full: mode = %v", got.items[len(got.items)-1].Tool.OutputMode)
 	}
 }
 

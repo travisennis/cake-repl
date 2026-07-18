@@ -187,6 +187,17 @@ func (m *Model) appendItem(it ui.Item) int {
 	return len(m.items) - 1
 }
 
+// lastToolIdx returns the index of the most recent KindTool item, or -1 if
+// there is none.
+func (m *Model) lastToolIdx() int {
+	for i := len(m.items) - 1; i >= 0; i-- {
+		if m.items[i].Kind == ui.KindTool && m.items[i].Tool != nil {
+			return i
+		}
+	}
+	return -1
+}
+
 // firstPendingToolIdx returns the index of the first pending (not yet done)
 // KindTool item when all trailing items are pending tools, or -1 otherwise.
 // This is used to insert assistant messages before pending tool calls when
@@ -284,12 +295,16 @@ func (m *Model) rebuildTimelineContent() {
 }
 
 // syncViewport pushes the cached timeline content into the viewport, keeping
-// the view pinned to the bottom if it was there already.
+// the view pinned to the bottom if it was there already. Otherwise it restores
+// the previous scroll offset so a single item re-render does not move the view.
 func (m *Model) syncViewport() {
 	atBottom := m.timeline.AtBottom()
+	yOffset := m.timeline.YOffset
 	m.timeline.SetContent(m.timelineContent)
 	if atBottom {
 		m.timeline.GotoBottom()
+	} else {
+		m.timeline.SetYOffset(yOffset)
 	}
 }
 

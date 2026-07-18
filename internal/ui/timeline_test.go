@@ -448,6 +448,78 @@ func TestRenderToolHeaderAsciiNoColor(t *testing.T) {
 	}
 }
 
+// TestRenderToolOutputModes covers the three tool output visibility modes.
+func TestRenderToolOutputModes(t *testing.T) {
+	th := DefaultTheme()
+	const width = 80
+	output := strings.Repeat("x", DefaultOutputLimit+500)
+
+	t.Run("truncated shows marker", func(t *testing.T) {
+		item := Item{Kind: KindTool, Tool: &ToolBlock{
+			Name: "bash", Arguments: `{"command":"make"}`,
+			Output: output, Done: true, OutputMode: ToolOutputTruncated,
+		}}
+		got := RenderItem(th, item, width, DefaultOutputLimit)
+		if !strings.Contains(got, "truncated") {
+			t.Errorf("expected truncation marker, got: %q", got)
+		}
+	})
+
+	t.Run("full ignores output limit", func(t *testing.T) {
+		item := Item{Kind: KindTool, Tool: &ToolBlock{
+			Name: "bash", Arguments: `{"command":"make"}`,
+			Output: output, Done: true, OutputMode: ToolOutputFull,
+		}}
+		got := RenderItem(th, item, width, DefaultOutputLimit)
+		if strings.Contains(got, "truncated") {
+			t.Errorf("full output should not contain truncation marker, got: %q", got)
+		}
+		// lipgloss wraps the long line, so count non-newline 'x' runes rather
+		// than looking for one unbroken string.
+		xCount := strings.Count(strings.ReplaceAll(got, "\n", ""), "x")
+		if xCount != DefaultOutputLimit+500 {
+			t.Errorf("full output x count = %d, want %d", xCount, DefaultOutputLimit+500)
+		}
+	})
+
+	t.Run("hidden omits output", func(t *testing.T) {
+		item := Item{Kind: KindTool, Tool: &ToolBlock{
+			Name: "bash", Arguments: `{"command":"make"}`,
+			Output: output, Done: true, OutputMode: ToolOutputHidden,
+		}}
+		got := RenderItem(th, item, width, DefaultOutputLimit)
+		if strings.Contains(got, "truncated") || strings.Contains(got, output) {
+			t.Errorf("hidden mode should not show output, got: %q", got)
+		}
+		if !strings.Contains(got, "⚙ bash") {
+			t.Errorf("hidden mode should still show header, got: %q", got)
+		}
+	})
+
+	t.Run("hidden running tool omits running indicator", func(t *testing.T) {
+		item := Item{Kind: KindTool, Tool: &ToolBlock{
+			Name: "bash", Arguments: `{"command":"sleep 1"}`,
+			Output: "", Done: false, OutputMode: ToolOutputHidden,
+		}}
+		got := RenderItem(th, item, width, DefaultOutputLimit)
+		if strings.Contains(got, "running") {
+			t.Errorf("hidden mode should not show running indicator, got: %q", got)
+		}
+	})
+}
+
+func TestToolOutputModeCycle(t *testing.T) {
+	if got := ToolOutputHidden.Cycle(); got != ToolOutputTruncated {
+		t.Errorf("hidden.Cycle() = %v, want truncated", got)
+	}
+	if got := ToolOutputTruncated.Cycle(); got != ToolOutputFull {
+		t.Errorf("truncated.Cycle() = %v, want full", got)
+	}
+	if got := ToolOutputFull.Cycle(); got != ToolOutputHidden {
+		t.Errorf("full.Cycle() = %v, want hidden", got)
+	}
+}
+
 // TestWrapToolArgs covers the wrap helper directly: word-wrap then hard-wrap
 // fallback, and continuation indent.
 func TestWrapToolArgs(t *testing.T) {

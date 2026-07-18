@@ -96,7 +96,8 @@ keybindings
   ctrl+s           submit prompt
   ctrl+c           cancel running task; quit when idle
   ctrl+u           clear input
+  ctrl+o           cycle most recent tool output: hidden / truncated / full
   tab              complete slash commands
   up/down          recall prompt history (at the input's first/last line)
   pgup/pgdn        scroll timeline
-  mouse wheel       scroll timeline`
+  mouse wheel      scroll timeline`

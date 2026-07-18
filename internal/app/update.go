@@ -97,6 +97,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.TabComplete):
 		return m.handleTabComplete()
 
+	case key.Matches(msg, m.keys.ToggleToolOutput):
+		return m.toggleMostRecentToolOutput()
+
 	// Up/down recall prompt history only at the input's edge; inside a
 	// multi-line input they keep moving the cursor.
 	case key.Matches(msg, m.keys.HistoryPrev):
@@ -127,6 +130,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	m.layout() // input height tracks line count
 	return m, cmd
+}
+
+// toggleMostRecentToolOutput cycles the most recent tool block's output mode
+// through hidden → truncated → full and re-renders only that item.
+func (m Model) toggleMostRecentToolOutput() (tea.Model, tea.Cmd) {
+	idx := m.lastToolIdx()
+	if idx < 0 {
+		return m, nil
+	}
+	m.items[idx].Tool.OutputMode = m.items[idx].Tool.OutputMode.Cycle()
+	m.rerenderItem(idx)
+	return m, nil
 }
 
 // handleTabComplete implements Tab key completion with cycling.
@@ -329,8 +344,9 @@ func (m *Model) applyEvent(ev cake.Event) {
 
 	case cake.FunctionCall:
 		idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
-			Name:      e.Name,
-			Arguments: e.Arguments,
+			Name:       e.Name,
+			Arguments:  e.Arguments,
+			OutputMode: ui.ToolOutputTruncated,
 		}})
 		m.pendingCalls[e.CallID] = idx
 
@@ -342,10 +358,11 @@ func (m *Model) applyEvent(ev cake.Event) {
 			m.rerenderItem(idx)
 		} else {
 			m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
-				Name:      "(tool output)",
-				Arguments: "{}",
-				Output:    e.Output,
-				Done:      true,
+				Name:       "(tool output)",
+				Arguments:  "{}",
+				Output:     e.Output,
+				Done:       true,
+				OutputMode: ui.ToolOutputTruncated,
 			}})
 		}
 

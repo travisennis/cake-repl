@@ -30,12 +30,40 @@ type Item struct {
 	Tool *ToolBlock
 }
 
+// ToolOutputMode controls how much of a tool's output is rendered.
+type ToolOutputMode int
+
+const (
+	// ToolOutputTruncated caps output at the configured output limit. It is the
+	// zero value so tool blocks that do not set a mode render the legacy view.
+	ToolOutputTruncated ToolOutputMode = iota
+	// ToolOutputFull shows the complete raw output regardless of the limit.
+	ToolOutputFull
+	// ToolOutputHidden shows the tool header but no output/status lines.
+	ToolOutputHidden
+)
+
+// Cycle returns the next mode in the order hidden → truncated → full → hidden.
+func (m ToolOutputMode) Cycle() ToolOutputMode {
+	switch m {
+	case ToolOutputTruncated:
+		return ToolOutputFull
+	case ToolOutputFull:
+		return ToolOutputHidden
+	case ToolOutputHidden:
+		return ToolOutputTruncated
+	default:
+		return ToolOutputFull
+	}
+}
+
 // ToolBlock pairs a tool call with its (eventual) output.
 type ToolBlock struct {
-	Name      string // original name as sent by cake
-	Arguments string // raw JSON arguments
-	Output    string
-	Done      bool
+	Name       string // original name as sent by cake
+	Arguments  string // raw JSON arguments
+	Output     string
+	Done       bool
+	OutputMode ToolOutputMode
 }
 
 // RenderItems renders the whole timeline to a single string at the given
@@ -104,14 +132,21 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int) string {
 	if rest := strings.SplitN(summary, "\n", 2); len(rest) == 2 {
 		lines = append(lines, th.ToolArgs.Width(width).Render(rest[1]))
 	}
-	switch {
-	case !tool.Done:
-		lines = append(lines, th.ToolOutput.Render("  … running"))
-	case strings.TrimSpace(tool.Output) == "":
-		lines = append(lines, th.ToolOutput.Render("  (no output)"))
-	default:
-		out := TruncateOutput(tool.Output, outputLimit)
-		lines = append(lines, indent(th.ToolOutput.Width(width-2).Render(out), "  "))
+	if tool.OutputMode != ToolOutputHidden {
+		switch {
+		case !tool.Done:
+			lines = append(lines, th.ToolOutput.Render("  … running"))
+		case strings.TrimSpace(tool.Output) == "":
+			lines = append(lines, th.ToolOutput.Render("  (no output)"))
+		default:
+			var out string
+			if tool.OutputMode == ToolOutputFull {
+				out = strings.TrimRight(tool.Output, "\n")
+			} else {
+				out = TruncateOutput(tool.Output, outputLimit)
+			}
+			lines = append(lines, indent(th.ToolOutput.Width(width-2).Render(out), "  "))
+		}
 	}
 	return strings.Join(lines, "\n")
 }
