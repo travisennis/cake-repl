@@ -21,7 +21,7 @@ func newLaidOutModel() Model {
 // RenderItems, the reference implementation.
 func assertCacheMatchesFullRender(t *testing.T, m *Model, step string) {
 	t.Helper()
-	want := ui.RenderItems(m.theme, m.items, m.renderedWidth, m.cfg.OutputLimit)
+	want := ui.RenderItems(m.theme, m.items, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
 	got := strings.Join(m.rendered, "\n\n")
 	if got != want {
 		t.Fatalf("%s: cached render diverged from full render\ngot:\n%s\nwant:\n%s", step, got, want)
@@ -79,7 +79,7 @@ func TestHeightOnlyLayoutDoesNotRerender(t *testing.T) {
 func TestAppendItemExtendsTimelineContentWithoutFullJoin(t *testing.T) {
 	m := newLaidOutModel()
 	before := m.timelineContent
-	rendered := ui.RenderItem(m.theme, ui.Item{Kind: ui.KindAssistant, Text: "hello"}, m.renderedWidth, m.cfg.OutputLimit)
+	rendered := ui.RenderItem(m.theme, ui.Item{Kind: ui.KindAssistant, Text: "hello"}, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
 
 	m.rendered[0] = "sentinel"
 	m.appendItem(ui.Item{Kind: ui.KindAssistant, Text: "hello"})
@@ -166,6 +166,7 @@ exit 0
 func TestClearResetsRenderCache(t *testing.T) {
 	m := newLaidOutModel()
 	m.applyEvent(cake.Message{Role: "assistant", Content: "hello"})
+	m.toolOutputMode = ui.ToolOutputHidden
 
 	tm, _ := m.execCommand(Command{Kind: CmdClear})
 	got := tm.(Model)
@@ -175,6 +176,9 @@ func TestClearResetsRenderCache(t *testing.T) {
 	}
 	if got.timelineContent != "" {
 		t.Errorf("clear left timelineContent=%q", got.timelineContent)
+	}
+	if got.toolOutputMode != ui.ToolOutputHidden {
+		t.Errorf("clear reset tool output mode: got %v, want hidden", got.toolOutputMode)
 	}
 	assertCacheMatchesFullRender(t, &got, "after /clear")
 }

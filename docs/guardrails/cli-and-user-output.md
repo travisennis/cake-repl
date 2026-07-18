@@ -23,8 +23,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   `/resume <uuid>`, `/session`, `/clear`. Keep parsing, behavior, and names
   stable.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
-  (cancel/quit), `Ctrl+U` (clear input), `Ctrl+O` (cycle most recent tool
-  output through hidden/truncated/full), `Up`/`Down` (history), `PgUp`/`PgDn`
+  (cancel/quit), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
+  through truncated/full/hidden), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll).
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. `-no-color` / `DefaultTheme` must
@@ -34,10 +34,12 @@ commands or help text (`internal/app/commands.go`), key bindings
   lines indented under the argument column; long single tokens (e.g. paths and
   bash commands) hard-wrap so the full content stays visible. Tool *output*
   truncates at the configured output limit (default 2000 bytes) on rune
-  boundaries. `Ctrl+O` cycles the most recent tool block through three output
-  modes: hidden, truncated (default), and full. Full mode ignores the output
-  limit and shows the complete raw output. Only the toggled item is re-rendered;
-  the viewport scroll offset is preserved.
+  boundaries. `Ctrl+O` cycles every tool block through three session-wide
+  output modes: truncated (default), full, and hidden. Full mode ignores the
+  output limit and shows the complete raw output. The current mode also applies
+  to tool blocks added later and survives `/clear`. Only tool items are
+  re-rendered on toggle; cached non-tool renders and the viewport scroll offset
+  are preserved.
 
 ## Required checks / test focus
 
@@ -54,8 +56,9 @@ commands or help text (`internal/app/commands.go`), key bindings
   `AGENTS.md`/routing. Update the applicable surfaces together.
 - **Color assumptions.** Don't hardcode escape codes; go through `internal/ui`
   theme/lipgloss so `-no-color` (termenv `Ascii`) still works.
-- **Width/layout regressions.** The timeline caches per-item renders; only width
-  changes and `/clear` force a full rebuild. Don't bypass the cache.
+- **Width/layout regressions.** The timeline caches per-item renders; width
+  changes and `/clear` force a full rebuild, while `Ctrl+O` re-renders only tool
+  items. Don't bypass the cache.
 - **Truncation surprises.** Respect rune-safe truncation; never cut mid-rune.
 
 ## Related docs

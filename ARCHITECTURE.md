@@ -59,8 +59,9 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   unknown fields are ignored, so a newer cake never breaks the stream. Malformed
   lines surface as synthetic `ParseError` events; the stream keeps flowing.
 - **Pure rendering.** `internal/ui` is side-effect-free and takes data in,
-  strings out. The timeline is rendered through a per-item cache; only width
-  changes and `/clear` trigger a full re-render.
+  strings out. The timeline is rendered through a per-item cache; width changes
+  and `/clear` trigger a full re-render, while global tool-output mode changes
+  re-render only tool items.
 - **Session state is a pure state machine.** `sessionState` (in `session.go`)
   decides the next run mode with no I/O, which is what makes the
   hijack-prevention behavior testable. After a successful task it pins future

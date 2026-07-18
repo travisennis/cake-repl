@@ -145,65 +145,77 @@ func TestDescribeHook(t *testing.T) {
 	}
 }
 
-func TestToggleMostRecentToolOutputCyclesModes(t *testing.T) {
+func TestToggleToolOutputCyclesGlobalMode(t *testing.T) {
 	m := newLaidOutModel()
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x", ui.DefaultOutputLimit+100)})
 
-	idx := len(m.items) - 1
-	if m.items[idx].Tool.OutputMode != ui.ToolOutputTruncated {
-		t.Fatalf("default mode = %v, want truncated", m.items[idx].Tool.OutputMode)
+	if m.toolOutputMode != ui.ToolOutputTruncated {
+		t.Fatalf("default mode = %v, want truncated", m.toolOutputMode)
 	}
 
-	tm, _ := m.toggleMostRecentToolOutput()
+	tm, _ := m.toggleToolOutput()
 	m = tm.(Model)
-	if m.items[idx].Tool.OutputMode != ui.ToolOutputFull {
-		t.Errorf("after first toggle: mode = %v, want full", m.items[idx].Tool.OutputMode)
+	if m.toolOutputMode != ui.ToolOutputFull {
+		t.Errorf("after first toggle: mode = %v, want full", m.toolOutputMode)
 	}
 
-	tm, _ = m.toggleMostRecentToolOutput()
+	tm, _ = m.toggleToolOutput()
 	m = tm.(Model)
-	if m.items[idx].Tool.OutputMode != ui.ToolOutputHidden {
-		t.Errorf("after second toggle: mode = %v, want hidden", m.items[idx].Tool.OutputMode)
+	if m.toolOutputMode != ui.ToolOutputHidden {
+		t.Errorf("after second toggle: mode = %v, want hidden", m.toolOutputMode)
 	}
 
-	tm, _ = m.toggleMostRecentToolOutput()
+	tm, _ = m.toggleToolOutput()
 	m = tm.(Model)
-	if m.items[idx].Tool.OutputMode != ui.ToolOutputTruncated {
-		t.Errorf("after third toggle: mode = %v, want truncated", m.items[idx].Tool.OutputMode)
+	if m.toolOutputMode != ui.ToolOutputTruncated {
+		t.Errorf("after third toggle: mode = %v, want truncated", m.toolOutputMode)
 	}
 	assertCacheMatchesFullRender(t, &m, "after cycling output modes")
 }
 
-func TestToggleMostRecentToolOutputTargetsLastTool(t *testing.T) {
+func TestToggleToolOutputRerendersEveryToolAndReusesNonToolCache(t *testing.T) {
 	m := newLaidOutModel()
+	firstOutput := strings.Repeat("x", ui.DefaultOutputLimit+1)
+	secondOutput := strings.Repeat("z", ui.DefaultOutputLimit+1)
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"ls"}`})
-	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "first"})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: firstOutput})
 	m.applyEvent(cake.FunctionCall{ID: "fc-2", CallID: "c-2", Name: "read", Arguments: `{"path":"main.go"}`})
-	m.applyEvent(cake.FunctionCallOutput{CallID: "c-2", Output: "second"})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-2", Output: secondOutput})
 
-	firstIdx, lastIdx := len(m.items)-2, len(m.items)-1
+	// A sentinel proves the cached non-tool rendering is reused rather than
+	// regenerated during the global tool-only pass.
+	m.rendered[0] = "cached non-tool sentinel"
 
-	tm, _ := m.toggleMostRecentToolOutput()
+	tm, _ := m.toggleToolOutput()
 	m = tm.(Model)
-	if m.items[firstIdx].Tool.OutputMode != ui.ToolOutputTruncated {
-		t.Errorf("older tool was toggled: mode = %v", m.items[firstIdx].Tool.OutputMode)
+	if m.rendered[0] != "cached non-tool sentinel" {
+		t.Error("non-tool cached render was replaced")
 	}
-	if m.items[lastIdx].Tool.OutputMode != ui.ToolOutputFull {
-		t.Errorf("latest tool not toggled: mode = %v", m.items[lastIdx].Tool.OutputMode)
+	firstRendered := m.rendered[len(m.rendered)-2]
+	secondRendered := m.rendered[len(m.rendered)-1]
+	if strings.Count(firstRendered, "x") != len(firstOutput) {
+		t.Error("older tool did not render its full output after global toggle")
+	}
+	if strings.Count(secondRendered, "z") != len(secondOutput) {
+		t.Error("newer tool did not render its full output after global toggle")
 	}
 }
 
-func TestToggleMostRecentToolOutputNoopWhenNoTools(t *testing.T) {
+func TestToggleToolOutputBeforeToolAppliesToFutureOutput(t *testing.T) {
 	m := newLaidOutModel()
-	before := m.timelineContent
-	tm, cmd := m.toggleMostRecentToolOutput()
-	got := tm.(Model)
+	tm, cmd := m.toggleToolOutput()
+	m = tm.(Model)
 	if cmd != nil {
 		t.Errorf("cmd = %v, want nil", cmd)
 	}
-	if got.timelineContent != before {
-		t.Error("toggle with no tools changed timeline content")
+	if m.toolOutputMode != ui.ToolOutputFull {
+		t.Fatalf("mode = %v, want full", m.toolOutputMode)
+	}
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x", ui.DefaultOutputLimit+100)})
+	if strings.Contains(m.rendered[len(m.rendered)-1], "truncated") {
+		t.Error("tool output added after toggle did not use full mode")
 	}
 }
 
@@ -224,12 +236,32 @@ func TestToggleToolOutputPreservesViewportOffset(t *testing.T) {
 	m.timeline.SetYOffset(5)
 	wantOffset := m.timeline.YOffset
 
-	tm, _ := m.toggleMostRecentToolOutput()
+	tm, _ := m.toggleToolOutput()
 	m = tm.(Model)
 	if m.timeline.YOffset != wantOffset {
 		t.Errorf("viewport offset changed: got %d, want %d", m.timeline.YOffset, wantOffset)
 	}
 	assertCacheMatchesFullRender(t, &m, "after toggle with preserved offset")
+}
+
+func TestToggleToolOutputPreservesBottomPinning(t *testing.T) {
+	m := New(Config{})
+	m.width, m.height = 40, 6
+	m.layout()
+
+	for range 10 {
+		m.applyEvent(cake.Message{Role: "assistant", Content: "line one\nline two\nline three"})
+	}
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x\n", 100)})
+	m.timeline.GotoBottom()
+
+	tm, _ := m.toggleToolOutput()
+	m = tm.(Model)
+	if !m.timeline.AtBottom() {
+		t.Fatal("global tool output toggle did not preserve bottom pinning")
+	}
+	assertCacheMatchesFullRender(t, &m, "after pinned global toggle")
 }
 
 func TestHandleKeyToggleToolOutput(t *testing.T) {
@@ -243,8 +275,8 @@ func TestHandleKeyToggleToolOutput(t *testing.T) {
 
 	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
 	got := tm.(Model)
-	if got.items[len(got.items)-1].Tool.OutputMode != ui.ToolOutputFull {
-		t.Errorf("handleKey ctrl+o did not toggle to full: mode = %v", got.items[len(got.items)-1].Tool.OutputMode)
+	if got.toolOutputMode != ui.ToolOutputFull {
+		t.Errorf("handleKey ctrl+o did not toggle to full: mode = %v", got.toolOutputMode)
 	}
 }
 

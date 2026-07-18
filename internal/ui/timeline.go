@@ -43,7 +43,7 @@ const (
 	ToolOutputHidden
 )
 
-// Cycle returns the next mode in the order hidden → truncated → full → hidden.
+// Cycle returns the next mode in the order truncated → full → hidden → truncated.
 func (m ToolOutputMode) Cycle() ToolOutputMode {
 	switch m {
 	case ToolOutputTruncated:
@@ -59,22 +59,21 @@ func (m ToolOutputMode) Cycle() ToolOutputMode {
 
 // ToolBlock pairs a tool call with its (eventual) output.
 type ToolBlock struct {
-	Name       string // original name as sent by cake
-	Arguments  string // raw JSON arguments
-	Output     string
-	Done       bool
-	OutputMode ToolOutputMode
+	Name      string // original name as sent by cake
+	Arguments string // raw JSON arguments
+	Output    string
+	Done      bool
 }
 
 // RenderItems renders the whole timeline to a single string at the given
 // width and output limit.
-func RenderItems(th Theme, items []Item, width int, outputLimit int) string {
+func RenderItems(th Theme, items []Item, width int, outputLimit int, toolOutputMode ToolOutputMode) string {
 	if outputLimit <= 0 {
 		outputLimit = DefaultOutputLimit
 	}
 	parts := make([]string, 0, len(items))
 	for _, it := range items {
-		parts = append(parts, RenderItem(th, it, width, outputLimit))
+		parts = append(parts, RenderItem(th, it, width, outputLimit, toolOutputMode))
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -82,7 +81,7 @@ func RenderItems(th Theme, items []Item, width int, outputLimit int) string {
 // RenderItem renders one timeline item at the given width and output limit.
 // Items render independently of each other, so callers can cache results per
 // item.
-func RenderItem(th Theme, it Item, width int, outputLimit int) string {
+func RenderItem(th Theme, it Item, width int, outputLimit int, toolOutputMode ToolOutputMode) string {
 	if width < 8 {
 		width = 8
 	}
@@ -100,7 +99,7 @@ func RenderItem(th Theme, it Item, width int, outputLimit int) string {
 	case KindReasoning:
 		return wrap(th.Reasoning, "· "+it.Text)
 	case KindTool:
-		return renderTool(th, it.Tool, width, outputLimit)
+		return renderTool(th, it.Tool, width, outputLimit, toolOutputMode)
 	case KindHook:
 		return wrap(th.Hook, "⚑ "+it.Text)
 	case KindTaskStart:
@@ -118,7 +117,7 @@ func RenderItem(th Theme, it Item, width int, outputLimit int) string {
 	}
 }
 
-func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int) string {
+func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMode ToolOutputMode) string {
 	if tool == nil {
 		return ""
 	}
@@ -132,7 +131,7 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int) string {
 	if rest := strings.SplitN(summary, "\n", 2); len(rest) == 2 {
 		lines = append(lines, th.ToolArgs.Width(width).Render(rest[1]))
 	}
-	if tool.OutputMode != ToolOutputHidden {
+	if outputMode != ToolOutputHidden {
 		switch {
 		case !tool.Done:
 			lines = append(lines, th.ToolOutput.Render("  … running"))
@@ -140,7 +139,7 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int) string {
 			lines = append(lines, th.ToolOutput.Render("  (no output)"))
 		default:
 			var out string
-			if tool.OutputMode == ToolOutputFull {
+			if outputMode == ToolOutputFull {
 				out = strings.TrimRight(tool.Output, "\n")
 			} else {
 				out = TruncateOutput(tool.Output, outputLimit)

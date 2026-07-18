@@ -98,7 +98,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleTabComplete()
 
 	case key.Matches(msg, m.keys.ToggleToolOutput):
-		return m.toggleMostRecentToolOutput()
+		return m.toggleToolOutput()
 
 	// Up/down recall prompt history only at the input's edge; inside a
 	// multi-line input they keep moving the cursor.
@@ -132,15 +132,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// toggleMostRecentToolOutput cycles the most recent tool block's output mode
-// through hidden → truncated → full and re-renders only that item.
-func (m Model) toggleMostRecentToolOutput() (tea.Model, tea.Cmd) {
-	idx := m.lastToolIdx()
-	if idx < 0 {
-		return m, nil
-	}
-	m.items[idx].Tool.OutputMode = m.items[idx].Tool.OutputMode.Cycle()
-	m.rerenderItem(idx)
+// toggleToolOutput cycles the session-wide tool output mode and re-renders
+// only tool items, reusing cached renders for every other item kind.
+func (m Model) toggleToolOutput() (tea.Model, tea.Cmd) {
+	m.toolOutputMode = m.toolOutputMode.Cycle()
+	m.rerenderToolItems()
 	return m, nil
 }
 
@@ -344,9 +340,8 @@ func (m *Model) applyEvent(ev cake.Event) {
 
 	case cake.FunctionCall:
 		idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
-			Name:       e.Name,
-			Arguments:  e.Arguments,
-			OutputMode: ui.ToolOutputTruncated,
+			Name:      e.Name,
+			Arguments: e.Arguments,
 		}})
 		m.pendingCalls[e.CallID] = idx
 
@@ -358,11 +353,10 @@ func (m *Model) applyEvent(ev cake.Event) {
 			m.rerenderItem(idx)
 		} else {
 			m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
-				Name:       "(tool output)",
-				Arguments:  "{}",
-				Output:     e.Output,
-				Done:       true,
-				OutputMode: ui.ToolOutputTruncated,
+				Name:      "(tool output)",
+				Arguments: "{}",
+				Output:    e.Output,
+				Done:      true,
 			}})
 		}
 

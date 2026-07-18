@@ -62,6 +62,9 @@ type Model struct {
 	history      promptHistory
 	pendingCalls map[string]int // call_id -> index into items
 	items        []ui.Item
+	// toolOutputMode applies to every tool block in the timeline and to tool
+	// blocks appended later in this REPL session.
+	toolOutputMode ui.ToolOutputMode
 
 	// rendered caches one rendered string per item at renderedWidth.
 	// timelineContent caches the viewport payload so appends do not join the
@@ -183,23 +186,12 @@ func (m *Model) appendItem(it ui.Item) int {
 		m.rebuildTimelineContent()
 	}
 	if m.ready {
-		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit)
+		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
 		m.rendered = append(m.rendered, rendered)
 		m.appendTimelineContent(rendered)
 		m.syncViewport()
 	}
 	return len(m.items) - 1
-}
-
-// lastToolIdx returns the index of the most recent KindTool item, or -1 if
-// there is none.
-func (m *Model) lastToolIdx() int {
-	for i := len(m.items) - 1; i >= 0; i-- {
-		if m.items[i].Kind == ui.KindTool && m.items[i].Tool != nil {
-			return i
-		}
-	}
-	return -1
 }
 
 // firstPendingToolIdx returns the index of the first pending (not yet done)
@@ -251,7 +243,7 @@ func (m *Model) insertItemAt(idx int, it ui.Item) {
 	}
 
 	if m.ready {
-		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit)
+		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
 		m.rendered = append(m.rendered, "") // make room
 		copy(m.rendered[idx+1:], m.rendered[idx:])
 		m.rendered[idx] = rendered
@@ -266,14 +258,28 @@ func (m *Model) rerenderItem(idx int) {
 	if !m.ready || idx < 0 || idx >= len(m.rendered) {
 		return
 	}
-	m.rendered[idx] = ui.RenderItem(m.theme, m.items[idx], m.renderedWidth, m.cfg.OutputLimit)
+	m.rendered[idx] = ui.RenderItem(m.theme, m.items[idx], m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
 	m.rebuildTimelineContent()
 	m.syncViewport()
 }
 
-// rebuildTimeline re-renders every item at the current viewport width. Only
-// width changes (and /clear) need this; everything else updates the cache
-// incrementally.
+// rerenderToolItems refreshes every tool item's cached rendering while
+// reusing the cached strings for all other timeline item kinds.
+func (m *Model) rerenderToolItems() {
+	if !m.ready {
+		return
+	}
+	for i, it := range m.items {
+		if it.Kind == ui.KindTool {
+			m.rendered[i] = ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
+		}
+	}
+	m.rebuildTimelineContent()
+	m.syncViewport()
+}
+
+// rebuildTimeline re-renders every item at the current viewport width. Width
+// changes and /clear use this; other changes update the cache incrementally.
 func (m *Model) rebuildTimeline() {
 	if !m.ready {
 		return
@@ -281,7 +287,7 @@ func (m *Model) rebuildTimeline() {
 	m.renderedWidth = m.timeline.Width
 	m.rendered = m.rendered[:0]
 	for _, it := range m.items {
-		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit))
+		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode))
 	}
 	m.rebuildTimelineContent()
 	m.syncViewport()

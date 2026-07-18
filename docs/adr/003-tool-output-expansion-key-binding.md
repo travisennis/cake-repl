@@ -59,3 +59,16 @@ output. The key binding is added to the REPL key map and mirrored in the
 - Task: [010](../../.agents/.tasks/completed/010.md)
 - Guardrail: [`docs/guardrails/cli-and-user-output.md`](../guardrails/cli-and-user-output.md)
 
+## Superseding Decision (2026-07-18)
+
+Task [048](../../.agents/.tasks/completed/048.md) supersedes the per-item portion
+of this decision. `Ctrl+O` now cycles one session-wide mode in the order
+**truncated → full → hidden → truncated**. The mode applies to every existing
+tool block and to tool blocks added later, remains in memory across `/clear`,
+and has no persisted or configurable startup default.
+
+The global behavior replaces the `ToolBlock` per-item mode because changing
+only the most recent block could appear to do nothing when that block was off
+screen or its output fit below the truncation limit. A toggle re-renders every
+tool item while retaining cached renders for non-tool items. Viewport behavior
+is unchanged: it stays pinned at the bottom or restores the previous offset.

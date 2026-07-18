@@ -75,7 +75,7 @@ Flags:
 | `Ctrl+S` | submit prompt |
 | `Ctrl+C` | cancel running cake task; quit when idle |
 | `Ctrl+U` | clear input |
-| `Ctrl+O` | cycle most recent tool output: hidden / truncated / full |
+| `Ctrl+O` | cycle all tool output: truncated / full / hidden |
 | `Up` / `Down` | recall prompt history (at the input's first/last line) |
 | `PgUp` / `PgDn` | scroll timeline |
 | `Mouse wheel` | scroll timeline |
