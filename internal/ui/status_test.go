@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestStatusLine_EmptySegments(t *testing.T) {
@@ -68,5 +71,17 @@ func TestShortID(t *testing.T) {
 	}
 	if got := ShortID("ééééééééé"); got != "éééééééé" || !utf8.ValidString(got) {
 		t.Errorf("multibyte id mangled: %q", got)
+	}
+}
+
+func TestStatusLine_AsciiNoANSI(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	th := DefaultTheme()
+	got := StatusLine(th, 40, "session abc", "idle", "next: ask")
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("status line contains ANSI escapes in Ascii mode: %q", got)
 	}
 }

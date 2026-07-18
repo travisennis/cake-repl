@@ -78,8 +78,12 @@ type Model struct {
 
 // New builds the initial model.
 func New(cfg Config) Model {
+	th := ui.DefaultTheme()
+
 	input := textarea.New()
 	input.Placeholder = "Type a prompt. Enter = newline, Ctrl+S = submit, /help for commands."
+	input.FocusedStyle.Placeholder = th.Placeholder
+	input.BlurredStyle.Placeholder = th.Placeholder
 	input.ShowLineNumbers = false
 	input.CharLimit = 0
 	input.SetHeight(minInputHeight)
@@ -90,7 +94,7 @@ func New(cfg Config) Model {
 
 	m := Model{
 		cfg:          cfg,
-		theme:        ui.DefaultTheme(),
+		theme:        th,
 		keys:         defaultKeyMap(),
 		input:        input,
 		spin:         spin,

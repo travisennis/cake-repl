@@ -16,7 +16,7 @@ func StatusLine(th Theme, width int, segments ...string) string {
 			nonEmpty = append(nonEmpty, s)
 		}
 	}
-	line := " " + strings.Join(nonEmpty, " │ ") + " "
+	line := " " + strings.Join(nonEmpty, th.StatusSeparator.Render(" │ ")) + " "
 	if w := lipgloss.Width(line); w < width {
 		line += strings.Repeat(" ", width-w)
 	}
