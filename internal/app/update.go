@@ -418,6 +418,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 
 	switch {
 	case res.Canceled:
+		m.session.OnCancel()
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceled"})
 	case res.Err != nil:
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: "cake failed: " + res.Err.Error()})

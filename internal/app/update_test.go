@@ -485,6 +485,39 @@ func TestExecCommandExitWhileRunningCancelsFirst(t *testing.T) {
 	}
 }
 
+func TestFinishRunCanceledPinsToStartedSession(t *testing.T) {
+	m := newLaidOutModel()
+	m.running = true
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
+	tm, cmd := m.finishRun(cake.Result{Canceled: true})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+	mode, resumeID := m.session.RunOptions()
+	if mode != cake.RunResume || resumeID != "d8fceb36" {
+		t.Errorf("after cancel mode=%v id=%q, want resume pinned to d8fceb36", mode, resumeID)
+	}
+	it := lastItem(t, m)
+	if it.Kind != ui.KindWarning || it.Text != "canceled" {
+		t.Errorf("last item kind=%v text=%q, want canceled warning", it.Kind, it.Text)
+	}
+}
+
+func TestFinishRunCanceledBeforeTaskStartDoesNotInventSession(t *testing.T) {
+	m := newLaidOutModel()
+	m.running = true
+	tm, cmd := m.finishRun(cake.Result{Canceled: true})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+	mode, resumeID := m.session.RunOptions()
+	if mode != cake.RunFresh || resumeID != "" {
+		t.Errorf("after cancel mode=%v id=%q, want fresh with no id", mode, resumeID)
+	}
+}
+
 func TestFinishRunQuitsAfterExitCommand(t *testing.T) {
 	m := newLaidOutModel()
 	m.running = true

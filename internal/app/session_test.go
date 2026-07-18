@@ -99,3 +99,36 @@ func TestUseContinueClearsResumeID(t *testing.T) {
 		t.Errorf("mode=%v id=%q", mode, id)
 	}
 }
+
+func TestCancelAfterTaskStartPinsToSession(t *testing.T) {
+	var s sessionState
+	s.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
+	s.OnCancel()
+
+	mode, id := s.RunOptions()
+	if mode != cake.RunResume || id != "d8fceb36" {
+		t.Errorf("after cancel mode=%v id=%q, want resume pinned to d8fceb36", mode, id)
+	}
+}
+
+func TestCancelBeforeTaskStartDoesNotInventSession(t *testing.T) {
+	var s sessionState
+	s.OnCancel()
+
+	mode, id := s.RunOptions()
+	if mode != cake.RunFresh || id != "" {
+		t.Errorf("fresh + cancel before TaskStart mode=%v id=%q, want fresh with empty id", mode, id)
+	}
+}
+
+func TestCancelDuringExplicitResumePreservesResumeID(t *testing.T) {
+	var s sessionState
+	s.UseResume("11111111-2222-3333-4444-555555555555")
+	s.OnTaskStart(cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"})
+	s.OnCancel()
+
+	mode, id := s.RunOptions()
+	if mode != cake.RunResume || id != "11111111-2222-3333-4444-555555555555" {
+		t.Errorf("after cancel mode=%v id=%q, want resume pinned to explicit session", mode, id)
+	}
+}

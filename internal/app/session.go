@@ -47,6 +47,17 @@ func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 	}
 }
 
+// OnCancel records that the current run was interrupted by the user. If a
+// session id has already been announced, future prompts are pinned to that
+// session so the next submission does not accidentally create a new one. This
+// preserves the hijack-prevention boundary even when a task is cut short.
+func (s *sessionState) OnCancel() {
+	if s.SessionID != "" {
+		s.NextMode = cake.RunResume
+		s.ResumeID = s.SessionID
+	}
+}
+
 // Reset clears all session state; the next prompt starts a fresh session.
 func (s *sessionState) Reset() {
 	*s = sessionState{NextMode: cake.RunFresh}

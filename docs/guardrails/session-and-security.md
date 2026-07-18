@@ -10,7 +10,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `sessionState` pins future prompts to `--resume <session-id>`. This prevents
   another cake process that creates a newer session in the same cwd from
   **hijacking** the conversation. Fallback is `--continue` only when no session
-  id was ever reported. A failed/canceled task must not advance the run mode.
+  id was ever reported. A failed task must not advance the run mode. A canceled
+  task preserves the pin to a session id that was already announced, so the
+  next submission does not accidentally start a fresh session.
 - **Run-mode transitions.** `RunFresh` → (success) → `RunResume`; `/new` resets
   to fresh; `/continue` and `/resume` set the next mode explicitly. Keep these a
   pure, I/O-free state machine so they stay testable.

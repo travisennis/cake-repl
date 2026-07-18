@@ -60,6 +60,11 @@ prompt reuses whatever mode was active before the failure. This prevents a
 failed run from accidentally causing a mode switch into a state the user didn't
 request.
 
+A canceled task (the user interrupts with Ctrl-C) preserves the session pin if a
+session id was already announced by `TaskStart`. This prevents a canceled run
+from silently starting a new session on the next prompt, which would split the
+conversation and reintroduce the hijack risk.
+
 User-visible slash commands that override the state machine:
 
 - `/new` resets to `RunFresh`.
@@ -72,10 +77,10 @@ User-visible slash commands that override the state machine:
   external cake process can redirect the conversation.
 - Good, because **the behavior is testable**: `sessionState` is a pure struct
   with zero I/O. The full transition table is covered in `session_test.go`
-  (seven test cases covering success-pin, failure-no-advance, fallback to
-  continue, reset, and manual overrides).
-- Good, because **it's simple**: the state machine is ~70 lines with four
-  methods (`RunOptions`, `OnTaskStart`, `OnTaskComplete`, `Reset`,
+  (ten test cases covering success-pin, failure-no-advance, cancel-pin,
+  fallback to continue, reset, and manual overrides).
+- Good, because **it's simple**: the state machine is ~80 lines with seven
+  methods (`RunOptions`, `OnTaskStart`, `OnTaskComplete`, `OnCancel`, `Reset`,
   `UseContinue`, `UseResume`). No goroutines, no file I/O, no locking.
 - Neutral, because **the REPL can't recover if the pinned session file is
   deleted**. The next prompt will fail with a cake error, and the user must
@@ -89,8 +94,9 @@ User-visible slash commands that override the state machine:
 ## More Information
 
 - Implementation: `internal/app/session.go` (the `sessionState` struct and its
-  methods).
-- Tests: `internal/app/session_test.go` (seven cases covering all transitions).
+  methods, including `OnCancel` for the cancellation pin).
+- Tests: `internal/app/session_test.go` (ten cases covering all transitions
+  including cancellation).
 - Guardrail: [`docs/guardrails/session-and-security.md`](../guardrails/session-and-security.md)
   defines the compatibility surface and common failure modes.
 - Architectural invariant documented in
