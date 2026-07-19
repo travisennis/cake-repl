@@ -31,7 +31,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   labeled conversation sections with a slim gutter at normal widths; narrow
   widths omit the gutter and abbreviate the assistant label. Reasoning and tool
   output remain secondary, while task starts, info, completions, warnings, and
-  errors use distinct compact markers. The prompt textarea is framed as
+  errors use distinct compact markers. The one-line status display leads with a
+  bracketed idle/running state, followed by labeled session, next-run, optional
+  model, and cwd context; it pads or truncates to the terminal width. The prompt
+  textarea is framed as
   a focused composer with ready/running state and concise submit, newline, and
   help hints; its borders remain visible without color. `-no-color` /
   `DefaultTheme` must keep producing usable ASCII output; markdown renders via

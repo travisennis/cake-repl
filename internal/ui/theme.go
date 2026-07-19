@@ -32,6 +32,7 @@ type Theme struct {
 
 	// Status bar.
 	StatusBar       lipgloss.Style
+	StatusState     lipgloss.Style
 	StatusKey       lipgloss.Style
 	StatusValue     lipgloss.Style
 	StatusSeparator lipgloss.Style
@@ -65,10 +66,11 @@ func DefaultTheme() Theme {
 		PromptBorder:      lipgloss.NewStyle().Faint(true),
 		PromptHint:        lipgloss.NewStyle().Faint(true),
 		Placeholder:       lipgloss.NewStyle().Faint(true),
-		StatusBar:         lipgloss.NewStyle().Reverse(true),
-		StatusKey:         lipgloss.NewStyle().Reverse(true).Bold(true),
-		StatusValue:       lipgloss.NewStyle().Reverse(true),
-		StatusSeparator:   lipgloss.NewStyle().Reverse(true),
+		StatusBar:         lipgloss.NewStyle(),
+		StatusState:       lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true),
+		StatusKey:         lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true),
+		StatusValue:       lipgloss.NewStyle(),
+		StatusSeparator:   lipgloss.NewStyle().Faint(true),
 		Muted:             lipgloss.NewStyle().Faint(true),
 		TimelineSeparator: lipgloss.NewStyle().Faint(true),
 		TimelineAccent:    lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Faint(true),

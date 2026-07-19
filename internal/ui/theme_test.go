@@ -16,7 +16,15 @@ func TestDefaultThemeNotEmpty(t *testing.T) {
 
 	th := DefaultTheme()
 
-	// Every semantic role should have at least one attribute, producing styled output.
+	// StatusBar and StatusValue intentionally use the terminal's native
+	// foreground so context stays readable on both light and dark backgrounds.
+	for name, s := range map[string]lipgloss.Style{"StatusBar": th.StatusBar, "StatusValue": th.StatusValue} {
+		if rendered := s.Render("x"); rendered != "x" {
+			t.Errorf("%s should use the terminal default, got %q", name, rendered)
+		}
+	}
+
+	// Every other semantic role should produce styled output.
 	styles := map[string]lipgloss.Style{
 		"UserLabel":         th.UserLabel,
 		"UserText":          th.UserText,
@@ -37,9 +45,8 @@ func TestDefaultThemeNotEmpty(t *testing.T) {
 		"PromptBorder":      th.PromptBorder,
 		"PromptHint":        th.PromptHint,
 		"Placeholder":       th.Placeholder,
-		"StatusBar":         th.StatusBar,
+		"StatusState":       th.StatusState,
 		"StatusKey":         th.StatusKey,
-		"StatusValue":       th.StatusValue,
 		"StatusSeparator":   th.StatusSeparator,
 		"Muted":             th.Muted,
 		"TimelineSeparator": th.TimelineSeparator,
@@ -81,6 +88,7 @@ func TestDefaultThemeAsciiDegradation(t *testing.T) {
 		th.PromptHint,
 		th.Placeholder,
 		th.StatusBar,
+		th.StatusState,
 		th.StatusKey,
 		th.StatusValue,
 		th.StatusSeparator,

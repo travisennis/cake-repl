@@ -29,9 +29,9 @@ func (m Model) View() string {
 }
 
 func (m Model) statusLine() string {
-	session := "session –"
+	session := "–"
 	if m.session.SessionID != "" {
-		session = "session " + ui.ShortID(m.session.SessionID)
+		session = ui.ShortID(m.session.SessionID)
 	}
 
 	state := "idle"
@@ -40,15 +40,16 @@ func (m Model) statusLine() string {
 	}
 
 	mode, resumeID := m.session.RunOptions()
-	next := "next: " + mode.String()
+	next := mode.String()
 	if mode == cake.RunResume {
 		next += " " + ui.ShortID(resumeID)
 	}
 
-	model := ""
-	if m.cfg.Model != "" {
-		model = "model " + m.cfg.Model
-	}
-
-	return ui.StatusLine(m.theme, m.width, session, state, next, model, filepath.Base(m.cfg.Cwd))
+	return ui.StatusLine(m.theme, m.width, ui.Status{
+		State:   state,
+		Session: session,
+		Next:    next,
+		Model:   m.cfg.Model,
+		Cwd:     filepath.Base(m.cfg.Cwd),
+	})
 }
