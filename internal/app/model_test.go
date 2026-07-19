@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/ui"
 )
@@ -73,6 +74,28 @@ func TestHeightOnlyLayoutDoesNotRerender(t *testing.T) {
 	m.layout()
 	if m.rendered[0] == "sentinel" {
 		t.Error("width change should re-render items")
+	}
+}
+
+func TestLayoutAccountsForPromptComposerChrome(t *testing.T) {
+	m := newLaidOutModel()
+	wantMinHeight := 24 - minInputHeight - composerVerticalChrome - statusHeight
+	if m.timeline.Height != wantMinHeight {
+		t.Fatalf("minimum-input timeline height = %d, want %d", m.timeline.Height, wantMinHeight)
+	}
+	inputLine := strings.Split(m.input.View(), "\n")[0]
+	if got := lipgloss.Width(inputLine); got != 80-composerHorizontalChrome {
+		t.Fatalf("rendered input width = %d, want %d", got, 80-composerHorizontalChrome)
+	}
+
+	m.input.SetValue(strings.Repeat("line\n", maxInputHeight+2))
+	m.layout()
+	wantMaxHeight := 24 - maxInputHeight - composerVerticalChrome - statusHeight
+	if m.timeline.Height != wantMaxHeight {
+		t.Fatalf("maximum-input timeline height = %d, want %d", m.timeline.Height, wantMaxHeight)
+	}
+	if got := len(strings.Split(m.View(), "\n")); got != m.height {
+		t.Errorf("view height = %d lines, want terminal height %d", got, m.height)
 	}
 }
 

@@ -13,11 +13,17 @@ func (m Model) View() string {
 	if !m.ready {
 		return "starting cake-repl…"
 	}
-	rule := m.theme.Rule.Render(strings.Repeat("─", m.width))
+	composer := ui.PromptComposer(
+		m.theme,
+		m.input.View(),
+		m.width,
+		m.running,
+		m.input.LineCount(),
+		"Ctrl+S submit · Enter newline · /help",
+	)
 	return strings.Join([]string{
 		m.timeline.View(),
-		rule,
-		m.input.View(),
+		composer,
 		m.statusLine(),
 	}, "\n")
 }

@@ -32,11 +32,12 @@ type Config struct {
 }
 
 const (
-	minInputHeight    = 3
-	maxInputHeight    = 8
-	statusHeight      = 1
-	ruleHeight        = 1
-	maxHistoryEntries = 1000
+	minInputHeight           = 3
+	maxInputHeight           = 8
+	composerVerticalChrome   = 2
+	composerHorizontalChrome = 2
+	statusHeight             = 1
+	maxHistoryEntries        = 1000
 )
 
 // Model is the Bubble Tea model for the whole REPL.
@@ -84,7 +85,7 @@ func New(cfg Config) Model {
 	th := ui.DefaultTheme()
 
 	input := textarea.New()
-	input.Placeholder = "Type a prompt. Enter = newline, Ctrl+S = submit, /help for commands."
+	input.Placeholder = "Type a prompt…"
 	input.FocusedStyle.Placeholder = th.Placeholder
 	input.BlurredStyle.Placeholder = th.Placeholder
 	input.ShowLineNumbers = false
@@ -326,10 +327,14 @@ func (m *Model) layout() {
 		return
 	}
 	inputHeight := clamp(m.input.LineCount(), minInputHeight, maxInputHeight)
-	m.input.SetWidth(m.width)
+	inputWidth := m.width - composerHorizontalChrome
+	if inputWidth < 1 {
+		inputWidth = 1
+	}
+	m.input.SetWidth(inputWidth)
 	m.input.SetHeight(inputHeight)
 
-	vpHeight := m.height - inputHeight - statusHeight - ruleHeight
+	vpHeight := m.height - inputHeight - composerVerticalChrome - statusHeight
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
