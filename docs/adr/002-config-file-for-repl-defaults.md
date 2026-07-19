@@ -87,7 +87,7 @@ The config file contract is:
 
 ## More Information
 
-- Task: `.agents/.tasks/completed/008.md`.
+- Task: `.ahm/tasks/completed/008.md`.
 - Implementation: `internal/config/config.go`.
 - Startup merge: `cmd/cake-repl/main.go`.
 - User docs: `README.md#config-file`.

@@ -47,7 +47,7 @@ a durable surface.
 | Build, dependency, CI, or release behavior | `CONTRIBUTING.md`, `docs/guardrails/dependencies-build-ci-release.md`, ADR for major runtime dependencies or compatibility changes |
 | Architecture/module boundaries | `ARCHITECTURE.md`, relevant guardrail, ADR for durable boundary changes |
 | User-visible terminal output | `README.md` when behavior changes, `docs/guardrails/cli-and-user-output.md`, screenshots or manual capture when required by that guardrail |
-| Managed-work format or workflow | `AGENTS.md`, relevant `.agents` guidance or templates, `ahm context ...` output source when available |
+| Managed-work format or workflow | `AGENTS.md`, relevant `.ahm` records or templates, `ahm context ...` output source when available |
 
 When a row says "ADR when the contract changes," make the decision before code
 changes when possible. If the need is discovered after implementation, add the
