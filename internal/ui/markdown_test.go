@@ -114,10 +114,8 @@ func TestRenderMarkdown_AsciiProfile(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected non-empty output")
 	}
-	// In Ascii mode, glamour may still emit bold/italic escapes (\x1b[;1m,
-	// \x1b[;3m) but should not emit color codes (38;5;NNN or 48;5;NNN).
-	if strings.Contains(got, "\x1b[38;5;") || strings.Contains(got, "\x1b[48;5;") {
-		t.Errorf("output should not contain color ANSI escapes in Ascii mode, got %q", got)
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("output should not contain ANSI escapes in Ascii mode, got %q", got)
 	}
 	// Content should still be present.
 	plain := stripANSI(got)
@@ -126,6 +124,49 @@ func TestRenderMarkdown_AsciiProfile(t *testing.T) {
 	}
 	if !strings.Contains(plain, "list item") {
 		t.Errorf("output should contain 'list item', plain=%q", plain)
+	}
+}
+
+func TestRenderMarkdown_ThemedRepresentativeElements(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	input := "# Heading\n\n> quoted context\n\n- item with **strong** and *emphasis*\n\n`inline code` and [a link](https://example.com)\n\n```go\nfmt.Println(\"hello\")\n```"
+	got := RenderMarkdown(input, 60)
+	plain := stripANSI(got)
+	for _, want := range []string{"# Heading", "quoted context", "item with", "strong", "emphasis", "inline code", "a link", "fmt.Println"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("render missing %q:\n%s", want, plain)
+		}
+	}
+	if !strings.Contains(got, "\x1b[") {
+		t.Error("themed markdown did not emit styling in TrueColor mode")
+	}
+	if strings.Contains(got, "\x1b[48;") {
+		t.Errorf("compact theme should not add block backgrounds: %q", got)
+	}
+}
+
+func TestRenderMarkdown_AsciiRepresentativeElements(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	input := "# Heading\n\n> quote\n\n- **bold** and *italic*\n\n`code` and [link](https://example.com)"
+	got := RenderMarkdown(input, 32)
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("Ascii representative render contains ANSI: %q", got)
+	}
+	for _, want := range []string{"# Heading", "| quote", "bold", "italic", "`code`", "link"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Ascii render missing %q:\n%s", want, got)
+		}
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if width := lipgloss.Width(line); width > 32 {
+			t.Errorf("line %q width = %d, exceeds 32", line, width)
+		}
 	}
 }
 

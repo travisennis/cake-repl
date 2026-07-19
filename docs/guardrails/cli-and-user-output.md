@@ -37,11 +37,13 @@ commands or help text (`internal/app/commands.go`), key bindings
   textarea is framed as
   a focused composer with ready/running state and concise submit, newline, and
   help hints; its borders remain visible without color. `-no-color` /
-  `DefaultTheme` must keep producing usable ASCII output; markdown renders via
-  glamour, respecting the terminal color profile. Tool-block headers (tool name
-  plus argument summary) wrap to the terminal width instead of truncating, with
-  continuation lines indented under the argument column; long single tokens
-  (e.g. paths and bash commands) hard-wrap so the full content stays visible.
+  `DefaultTheme` must keep producing usable ASCII output. Markdown renders via
+  glamour with compact REPL-themed headings, quotes, links, code, and emphasis;
+  the ASCII profile uses text markers and strips all ANSI. Tool-block headers
+  (tool name plus argument summary) wrap to the terminal width instead of
+  truncating, with continuation lines indented under the argument column; long
+  single tokens (e.g. paths and bash commands) hard-wrap so the full content
+  stays visible.
   Tool *output* truncates at the configured output limit (default 2000 bytes) on
   rune boundaries. `Ctrl+O` cycles every tool block through three session-wide
   output modes: truncated (default), full, and hidden. Full mode ignores the
