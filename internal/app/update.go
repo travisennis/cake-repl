@@ -47,7 +47,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case eventMsg:
-		m.applyEvent(msg.ev)
+		if !m.newSessionPending {
+			m.applyEvent(msg.ev)
+		}
 		return m, waitForRun(m.run)
 
 	case runDoneMsg:
@@ -83,6 +85,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Submit):
 		return m.submit()
+
+	case key.Matches(msg, m.keys.NewSession):
+		return m.startNewSession()
 
 	case key.Matches(msg, m.keys.ClearInput):
 		m.input.Reset()
@@ -130,6 +135,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	m.layout() // input height tracks line count
 	return m, cmd
+}
+
+// startNewSession creates an immediate visual and session-state boundary.
+// When a run is active, its process is canceled and drained normally, but its
+// remaining events are suppressed so they cannot enter or re-pin the new
+// session.
+func (m Model) startNewSession() (tea.Model, tea.Cmd) {
+	if m.running {
+		m.newSessionPending = true
+		m.run.Cancel()
+	}
+	m.session.Reset()
+	m.sawComplete = false
+	m.items = nil
+	m.pendingCalls = map[string]int{}
+	m.rebuildTimeline()
+	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "New session"})
+	return m, nil
 }
 
 // toggleToolOutput cycles the session-wide tool output mode and re-renders
@@ -399,6 +422,13 @@ func (m *Model) logDebug(text string) {
 func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	m.running = false
 	m.run = nil
+	if m.newSessionPending {
+		m.newSessionPending = false
+		if m.exitAfter {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
 
 	// Any tool call still waiting for output will never get one.
 	for callID, idx := range m.pendingCalls {

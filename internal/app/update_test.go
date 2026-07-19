@@ -280,6 +280,88 @@ func TestHandleKeyToggleToolOutput(t *testing.T) {
 	}
 }
 
+func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.T) {
+	m := newLaidOutModel()
+	m.cfg.Model = "gpt-x"
+	m.cfg.Profile = "work"
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "s-1", TaskID: "t-1"})
+	m.session.OnTaskComplete(success("s-1"))
+	m.history.Add("earlier prompt")
+	m.input.SetValue("draft prompt")
+	m.applyEvent(cake.FunctionCall{CallID: "call-1", Name: "bash", Arguments: `{}`})
+
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlN}, m.keys.NewSession) {
+		t.Fatal("ctrl+n binding does not match ctrl+n key msg")
+	}
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
+	got := tm.(Model)
+
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+	if mode, id := got.session.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Errorf("new session mode=%v id=%q, want fresh with no id", mode, id)
+	}
+	if got.session.SessionID != "" || got.session.TaskID != "" || got.session.LastComplete != nil {
+		t.Errorf("old session state survived: %+v", got.session)
+	}
+	if len(got.items) != 1 || got.items[0].Kind != ui.KindInfo || got.items[0].Text != "New session" {
+		t.Fatalf("timeline = %#v, want one New session info item", got.items)
+	}
+	if len(got.pendingCalls) != 0 {
+		t.Errorf("pending calls survived: %#v", got.pendingCalls)
+	}
+	if len(got.history.entries) != 1 || got.history.entries[0] != "earlier prompt" {
+		t.Errorf("history = %#v, want earlier prompt preserved", got.history.entries)
+	}
+	if got.input.Value() != "draft prompt" {
+		t.Errorf("input = %q, want draft preserved", got.input.Value())
+	}
+	if got.cfg.Model != "gpt-x" || got.cfg.Profile != "work" {
+		t.Errorf("settings changed: model=%q profile=%q", got.cfg.Model, got.cfg.Profile)
+	}
+	assertCacheMatchesFullRender(t, &got, "after new session")
+}
+
+func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
+	m := newLaidOutModel()
+	m.running = true
+	m.run = &cake.Run{} // Cancel on a zero Run is a safe no-op.
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "old-session", TaskID: "old-task"})
+
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+	if !m.newSessionPending {
+		t.Fatal("old run was not marked for draining")
+	}
+
+	// A final old-run event can race with cancellation. Update must drain it
+	// without adding it to the fresh timeline.
+	tm, _ = m.Update(eventMsg{ev: cake.Message{Role: "assistant", Content: "late old output"}})
+	m = tm.(Model)
+	if len(m.items) != 1 || m.items[0].Text != "New session" {
+		t.Fatalf("late event crossed boundary: %#v", m.items)
+	}
+
+	tm, cmd = m.finishRun(cake.Result{Canceled: true})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+	if m.running || m.newSessionPending {
+		t.Errorf("run state not settled: running=%v pending=%v", m.running, m.newSessionPending)
+	}
+	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Errorf("old cancellation re-pinned session: mode=%v id=%q", mode, id)
+	}
+	if len(m.items) != 1 || m.items[0].Text != "New session" {
+		t.Errorf("cancel result crossed boundary: %#v", m.items)
+	}
+}
+
 func TestSubmitEmptyInputIsNoop(t *testing.T) {
 	m := newLaidOutModel()
 	before := len(m.items)

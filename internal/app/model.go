@@ -58,6 +58,10 @@ type Model struct {
 	run         *cake.Run
 	sawComplete bool
 	exitAfter   bool
+	// newSessionPending is true while an old run canceled by Ctrl+N is being
+	// drained. Its remaining events and cancellation result belong before the
+	// new-session boundary and must not affect the fresh state.
+	newSessionPending bool
 
 	session      sessionState
 	history      promptHistory

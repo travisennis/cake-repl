@@ -23,7 +23,7 @@ commands or help text (`internal/app/commands.go`), key bindings
   `/resume <uuid>`, `/session`, `/clear`. Keep parsing, behavior, and names
   stable.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
-  (cancel/quit), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
+  (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll).
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and

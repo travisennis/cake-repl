@@ -74,6 +74,7 @@ Flags:
 | `Tab` | complete slash commands |
 | `Ctrl+S` | submit prompt |
 | `Ctrl+C` | cancel running cake task; quit when idle |
+| `Ctrl+N` | start a new session (cancels a running task) |
 | `Ctrl+U` | clear input |
 | `Ctrl+O` | cycle all tool output: truncated / full / hidden |
 | `Up` / `Down` | recall prompt history (at the input's first/last line) |
@@ -101,6 +102,9 @@ Flags:
   session id, the fallback is `--continue`.
 - A failed or canceled task does not advance the run mode.
 - `/new` clears local session state; the next prompt starts fresh.
+- `Ctrl+N` clears the timeline and local session state immediately. If a task
+  is running, it is canceled and its remaining events are discarded. Prompt
+  history, the current input draft, and model/profile settings are preserved.
 - `/continue` explicitly targets cake's latest session for the directory on
   the next prompt; once it succeeds, later prompts pin to that session.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts

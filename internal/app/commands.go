@@ -95,6 +95,7 @@ keybindings
   enter            insert newline
   ctrl+s           submit prompt
   ctrl+c           cancel running task; quit when idle
+  ctrl+n           start a new session (cancels a running task)
   ctrl+u           clear input
   ctrl+o           cycle all tool output: truncated / full / hidden
   tab              complete slash commands

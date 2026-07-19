@@ -14,8 +14,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   task preserves the pin to a session id that was already announced, so the
   next submission does not accidentally start a fresh session.
 - **Run-mode transitions.** `RunFresh` → (success) → `RunResume`; `/new` resets
-  to fresh; `/continue` and `/resume` set the next mode explicitly. Keep these a
-  pure, I/O-free state machine so they stay testable.
+  to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
+  drains an active run without letting its late events or cancellation restore
+  the old session pin; `/continue` and `/resume` set the next mode explicitly.
+  Keep session transitions pure and I/O-free so they stay testable.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
   secrets. They go **only** to `-debug-log` (opened `0o600`), never to the
   timeline or stdout. Do not add logging that leaks raw stream content elsewhere.
