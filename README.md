@@ -5,8 +5,10 @@ A standalone terminal REPL for the [`cake`](https://github.com/travisennis/cake)
 `cake-repl` treats cake as the engine: each submitted prompt spawns one
 `cake --output-format stream-json` process and renders its event stream live —
 assistant messages, reasoning summaries, tool calls grouped with their outputs,
-hook denials, and completion stats. After a successful turn, the next prompt
-automatically continues the same cake session.
+hook denials, and completion stats. Labeled user and assistant sections anchor
+the conversation while operational events remain compact and visually distinct.
+After a successful turn, the next prompt automatically continues the same cake
+session.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output and its

@@ -16,15 +16,11 @@ func TestDefaultThemeNotEmpty(t *testing.T) {
 
 	th := DefaultTheme()
 
-	// Assistant is intentionally a plain (empty) style.
-	if g := th.Assistant.Render("x"); g != "x" {
-		t.Errorf("Assistant should be plain, got %q", g)
-	}
-
-	// All other styles should have at least one attribute, producing styled output.
+	// Every semantic role should have at least one attribute, producing styled output.
 	styles := map[string]lipgloss.Style{
 		"UserLabel":         th.UserLabel,
 		"UserText":          th.UserText,
+		"Assistant":         th.Assistant,
 		"Reasoning":         th.Reasoning,
 		"ToolHeader":        th.ToolHeader,
 		"ToolArgs":          th.ToolArgs,

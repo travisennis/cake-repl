@@ -47,8 +47,8 @@ type Theme struct {
 func DefaultTheme() Theme {
 	return Theme{
 		UserLabel:         lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true),
-		UserText:          lipgloss.NewStyle().Faint(true),
-		Assistant:         lipgloss.NewStyle(),
+		UserText:          lipgloss.NewStyle().Bold(true),
+		Assistant:         lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true),
 		Reasoning:         lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Faint(true).Italic(true),
 		ToolHeader:        lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true),
 		ToolArgs:          lipgloss.NewStyle().Foreground(lipgloss.Color("6")),

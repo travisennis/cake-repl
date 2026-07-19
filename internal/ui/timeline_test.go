@@ -248,15 +248,15 @@ func TestRenderItem_NonToolKinds(t *testing.T) {
 		text    string
 		wantSub string
 	}{
-		{"user", KindUser, "hello", "❯"},
-		{"assistant", KindAssistant, "world", "world"},
+		{"user", KindUser, "hello", "YOU"},
+		{"assistant", KindAssistant, "world", "ASSISTANT"},
 		{"reasoning", KindReasoning, "thinking", "·"},
 		{"hook", KindHook, "hook msg", "⚑"},
-		{"task_start", KindTaskStart, "task info", "—"},
+		{"task_start", KindTaskStart, "task info", "→"},
 		{"complete", KindComplete, "done", "✓"},
 		{"error", KindError, "boom", "✗"},
 		{"warning", KindWarning, "caution", "!"},
-		{"info", KindInfo, "info text", "info text"},
+		{"info", KindInfo, "info text", "i info text"},
 	}
 
 	for _, tt := range tests {
@@ -267,6 +267,44 @@ func TestRenderItem_NonToolKinds(t *testing.T) {
 			}
 			if !strings.Contains(got, tt.wantSub) {
 				t.Errorf("RenderItem(%v) = %q, want it to contain %q", tt.kind, got, tt.wantSub)
+			}
+		})
+	}
+}
+
+func TestRenderItem_ConversationHierarchyAndWidth(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	th := DefaultTheme()
+	for _, tt := range []struct {
+		name       string
+		item       Item
+		width      int
+		wantLabel  string
+		wantBody   string
+		wantGutter bool
+	}{
+		{name: "user anchor", item: Item{Kind: KindUser, Text: "a long user prompt that wraps"}, width: 18, wantLabel: "── YOU", wantBody: "prompt", wantGutter: true},
+		{name: "assistant section", item: Item{Kind: KindAssistant, Text: "An assistant reply that wraps cleanly."}, width: 18, wantLabel: "── ASSISTANT", wantBody: "reply", wantGutter: true},
+		{name: "narrow assistant", item: Item{Kind: KindAssistant, Text: "reply"}, width: 8, wantLabel: "── AI", wantBody: "reply", wantGutter: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderItem(th, tt.item, tt.width, DefaultOutputLimit, ToolOutputTruncated)
+			if !strings.Contains(got, tt.wantLabel) || !strings.Contains(got, tt.wantBody) {
+				t.Errorf("render missing hierarchy markers:\n%s", got)
+			}
+			if strings.Contains(got, "│ ") != tt.wantGutter {
+				t.Errorf("gutter presence = %v, want %v:\n%s", strings.Contains(got, "│ "), tt.wantGutter, got)
+			}
+			if strings.Contains(got, "\x1b[") {
+				t.Errorf("Ascii render contains ANSI escapes: %q", got)
+			}
+			for _, line := range strings.Split(got, "\n") {
+				if gotWidth := lipgloss.Width(line); gotWidth > tt.width {
+					t.Errorf("line %q width = %d, exceeds %d", line, gotWidth, tt.width)
+				}
 			}
 		})
 	}
@@ -288,7 +326,7 @@ func TestRenderItem_NarrowWidth(t *testing.T) {
 	th := DefaultTheme()
 	item := Item{Kind: KindInfo, Text: "hello"}
 	got := RenderItem(th, item, 3, DefaultOutputLimit, ToolOutputTruncated) // width < 8, should clamp to 8
-	want := th.Info.Width(8).Render("hello")
+	want := th.Info.Width(8).Render("i hello")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

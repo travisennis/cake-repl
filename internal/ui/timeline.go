@@ -93,17 +93,19 @@ func RenderItem(th Theme, it Item, width int, outputLimit int, toolOutputMode To
 	}
 	switch it.Kind {
 	case KindUser:
-		return th.UserLabel.Render("❯ ") + wrap(th.UserText, it.Text)
+		header, gutter, bodyWidth := conversationFrame(th, th.UserLabel, "YOU", "YOU", width)
+		return header + "\n" + indent(th.UserText.Width(bodyWidth).Render(it.Text), gutter)
 	case KindAssistant:
-		return RenderMarkdown(it.Text, width)
+		header, gutter, bodyWidth := conversationFrame(th, th.Assistant, "ASSISTANT", "AI", width)
+		return header + "\n" + indent(RenderMarkdown(it.Text, bodyWidth), gutter)
 	case KindReasoning:
-		return wrap(th.Reasoning, "· "+it.Text)
+		return wrap(th.Reasoning, "  · "+it.Text)
 	case KindTool:
 		return renderTool(th, it.Tool, width, outputLimit, toolOutputMode)
 	case KindHook:
 		return wrap(th.Hook, "⚑ "+it.Text)
 	case KindTaskStart:
-		return wrap(th.Debug, "— "+it.Text)
+		return wrap(th.Debug, "→ "+it.Text)
 	case KindComplete:
 		return wrap(th.Complete, "✓ "+it.Text)
 	case KindError:
@@ -111,10 +113,26 @@ func RenderItem(th Theme, it Item, width int, outputLimit int, toolOutputMode To
 	case KindWarning:
 		return wrap(th.Warning, "! "+it.Text)
 	case KindInfo:
-		return wrap(th.Info, it.Text)
+		return wrap(th.Info, "i "+it.Text)
 	default:
 		return wrap(th.Debug, it.Text)
 	}
+}
+
+// conversationFrame returns a section label, optional body gutter, and the
+// width available to the body. Very narrow terminals omit the gutter and use
+// a short label so every rendered line stays within the supplied width.
+func conversationFrame(th Theme, labelStyle lipgloss.Style, label, narrowLabel string, width int) (header, gutter string, bodyWidth int) {
+	if width < 12 {
+		label = narrowLabel
+	}
+	header = th.TimelineSeparator.Render("── ") + labelStyle.Render(label)
+	bodyWidth = width
+	if width >= 10 {
+		gutter = th.TimelineAccent.Render("│ ")
+		bodyWidth -= 2
+	}
+	return header, gutter, bodyWidth
 }
 
 func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMode ToolOutputMode) string {
