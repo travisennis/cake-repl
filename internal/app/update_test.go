@@ -997,3 +997,88 @@ func TestInsertItemAtTrimsPendingCallsInFrontRange(t *testing.T) {
 
 	assertCacheMatchesFullRender(t, &m, "after cap-enforced insert trims front")
 }
+
+func TestAppendItemUpdatesPendingCallsOnTrim(t *testing.T) {
+	// appendItem must adjust pendingCalls indices when MaxTimelineItems
+	// trimming shifts items left; otherwise a FunctionCallOutput resolves
+	// to the wrong index, writing output into a different pending tool's
+	// block.
+	m := newLaidOutModel()
+	m.cfg.MaxTimelineItems = 3
+
+	// info item fills slot 0; add two tools to reach the cap.
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "A", Name: "bash", Arguments: `{"command":"echo a"}`})
+	m.applyEvent(cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{"command":"echo b"}`})
+	// items: [info, tool-A, tool-B] ← at cap (3)
+
+	// A reasoning item pushes to 4, triggers trim of the front.
+	// After trim: [tool-A, tool-B, reasoning]
+	m.applyEvent(cake.Reasoning{Summary: []string{"thinking"}})
+
+	// pendingCalls must reflect the left shift: A→0, B→1
+	if idx, ok := m.pendingCalls["A"]; !ok || idx != 0 {
+		t.Errorf("pendingCalls['A'] = %d (ok=%v), want 0", idx, ok)
+	}
+	if idx, ok := m.pendingCalls["B"]; !ok || idx != 1 {
+		t.Errorf("pendingCalls['B'] = %d (ok=%v), want 1", idx, ok)
+	}
+
+	// Output for A must go to tool A's block, not B's.
+	m.applyEvent(cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"})
+	if !m.items[0].Tool.Done || m.items[0].Tool.Output != "OUTPUT-A" {
+		t.Errorf("tool A after output: done=%v output=%q", m.items[0].Tool.Done, m.items[0].Tool.Output)
+	}
+	// B must still be pending.
+	if m.items[1].Tool.Done {
+		t.Error("tool B should still be pending")
+	}
+
+	// A's pending entry must be gone (consumed by output).
+	if _, ok := m.pendingCalls["A"]; ok {
+		t.Error("pendingCalls should not contain A after its output arrived")
+	}
+
+	assertCacheMatchesFullRender(t, &m, "after trim and tool A output")
+}
+
+func TestAppendItemRemovesPendingCallWhenToolTrimmedAway(t *testing.T) {
+	// When a pending tool call's item is itself trimmed out of the
+	// timeline window, its pendingCalls entry must be deleted so that
+	// late output falls back to a standalone block instead of writing
+	// into a different tool's block.
+	m := newLaidOutModel()
+	m.cfg.MaxTimelineItems = 2
+
+	// items: [info, tool-A]
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "A", Name: "bash", Arguments: `{"command":"echo a"}`})
+
+	// items: [tool-A, tool-B] (info trimmed away)
+	m.applyEvent(cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{"command":"echo b"}`})
+
+	// items: [tool-B, reasoning] (tool-A trimmed away)
+	m.applyEvent(cake.Reasoning{Summary: []string{"thinking"}})
+
+	// A must be gone from pendingCalls since its item was trimmed.
+	if _, ok := m.pendingCalls["A"]; ok {
+		t.Error("pendingCalls should not contain trimmed-away call A")
+	}
+	// B must be at the new correct index.
+	if idx, ok := m.pendingCalls["B"]; !ok || idx != 0 {
+		t.Errorf("pendingCalls['B'] = %d (ok=%v), want 0", idx, ok)
+	}
+
+	// Late output for A must append a standalone block. The append may
+	// trigger another front-trim that removes B's item, which is expected.
+	m.applyEvent(cake.FunctionCallOutput{CallID: "A", Output: "LATE-A"})
+	if len(m.items) != m.cfg.MaxTimelineItems {
+		t.Errorf("items len = %d, want %d (after trim to cap)", len(m.items), m.cfg.MaxTimelineItems)
+	}
+	// The last item is the newest (standalone tool output survived the
+	// front-trim).
+	last := m.items[len(m.items)-1]
+	if last.Kind != ui.KindTool || last.Tool.Name != "(tool output)" || last.Tool.Output != "LATE-A" {
+		t.Errorf("last item: got %+v, want standalone '(tool output)' block", last)
+	}
+
+	assertCacheMatchesFullRender(t, &m, "after trimmed tool's late output")
+}

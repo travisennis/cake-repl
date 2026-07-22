@@ -180,13 +180,26 @@ func (m Model) Init() tea.Cmd {
 	return textarea.Blink
 }
 
+// trimFront removes the first `over` items from the timeline, adjusts
+// pendingCalls indices, and drops entries for trimmed-away pending calls.
+func (m *Model) trimFront(over int) {
+	m.items = m.items[over:]
+	for callID, callIdx := range m.pendingCalls {
+		if callIdx < over {
+			delete(m.pendingCalls, callID)
+		} else {
+			m.pendingCalls[callID] = callIdx - over
+		}
+	}
+}
+
 // appendItem adds a timeline item, renders it into the cache, and returns
 // its index.
 func (m *Model) appendItem(it ui.Item) int {
 	m.items = append(m.items, it)
 	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
 		over := len(m.items) - m.cfg.MaxTimelineItems
-		m.items = m.items[over:]
+		m.trimFront(over)
 		m.rendered = m.rendered[over:]
 		m.rebuildTimelineContent()
 	}
@@ -231,16 +244,7 @@ func (m *Model) insertItemAt(idx int, it ui.Item) {
 
 	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
 		over := len(m.items) - m.cfg.MaxTimelineItems
-		m.items = m.items[over:]
-		// Adjust pendingCalls for the front-trim shift; entries
-		// in the trimmed range are cancelled (they will never receive output).
-		for callID, callIdx := range m.pendingCalls {
-			if callIdx < over {
-				delete(m.pendingCalls, callID)
-			} else {
-				m.pendingCalls[callID] = callIdx - over
-			}
-		}
+		m.trimFront(over)
 		if m.ready {
 			m.rebuildTimeline()
 		}
