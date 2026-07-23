@@ -1,0 +1,27 @@
+# Dependabot configuration for automated dependency updates.
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    labels:
+      - "area:deps"
+    groups:
+      # Group indirect charmbracelet ecosystem bumps (less risky, high churn).
+      charmbracelet:
+        patterns:
+          - "github.com/charmbracelet/*"
+        update-types:
+          - "patch"
+      # Group all other indirect dependencies into one PR each week.
+      indirect:
+        dependency-type: "indirect"
+        update-types:
+          - "patch"
