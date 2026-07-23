@@ -21,7 +21,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/continue`,
   `/resume <uuid>`, `/session`, `/clear`. Keep parsing, behavior, and names
-  stable.
+  stable. `/new`, `/continue`, and `/resume` require an idle REPL; `Ctrl+N`
+  remains the cancel-and-reset operation during an active run.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden), `Up`/`Down` (history), `PgUp`/`PgDn`

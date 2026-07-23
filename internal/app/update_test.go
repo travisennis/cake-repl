@@ -645,6 +645,51 @@ func TestFinishRunQuitsAfterExitCommand(t *testing.T) {
 	}
 }
 
+func TestExecSessionCommandsRejectedWhenRunning(t *testing.T) {
+	const activeID = "11111111-2222-3333-4444-555555555555"
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"new", "/new"},
+		{"continue", "/continue"},
+		{"resume", "/resume aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newLaidOutModel()
+			m.running = true
+			m.session.OnTaskStart(cake.TaskStart{SessionID: activeID, TaskID: "t-1"})
+			modeBefore, resumeBefore := m.session.RunOptions()
+
+			m.input.SetValue(tt.input)
+			tm, cmd := m.submit()
+			m = tm.(Model)
+			if cmd != nil {
+				t.Errorf("cmd = %v, want nil", cmd)
+			}
+			it := lastItem(t, m)
+			if it.Kind != ui.KindWarning || !strings.Contains(it.Text, "finish or cancel the running task first") {
+				t.Errorf("got kind=%v text=%q, want rejection warning", it.Kind, it.Text)
+			}
+			if mode, resumeID := m.session.RunOptions(); mode != modeBefore || resumeID != resumeBefore {
+				t.Errorf("session mode changed from (%v,%q) to (%v,%q)", modeBefore, resumeBefore, mode, resumeID)
+			}
+
+			m.applyEvent(success(activeID))
+			tm, cmd = m.finishRun(cake.Result{ExitCode: 0})
+			m = tm.(Model)
+			if cmd != nil {
+				t.Errorf("finish cmd = %v, want nil", cmd)
+			}
+			if mode, resumeID := m.session.RunOptions(); mode != cake.RunResume || resumeID != activeID {
+				t.Errorf("after success mode=%v id=%q, want resume pinned to %q", mode, resumeID, activeID)
+			}
+		})
+	}
+}
+
 func TestExecCommandSessionModes(t *testing.T) {
 	const id = "11111111-2222-3333-4444-555555555555"
 	m := newLaidOutModel()

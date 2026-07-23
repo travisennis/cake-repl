@@ -91,6 +91,8 @@ const HelpText = `commands
   /session         show session id, task id, cwd, run mode, last result
   /clear           clear the timeline (session state is kept)
 
+  /new, /continue, and /resume require an idle REPL
+
 keybindings
   enter            insert newline
   ctrl+s           submit prompt

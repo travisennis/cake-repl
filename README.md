@@ -113,6 +113,9 @@ Flags:
   the next prompt; once it succeeds, later prompts pin to that session.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts
   stay pinned to the same session.
+- `/new`, `/continue`, and `/resume` are rejected while a task is running.
+  Finish or cancel the task first (Ctrl+C), or use `Ctrl+N` to cancel and start
+  a new session in one action.
 
 ## Config file
 

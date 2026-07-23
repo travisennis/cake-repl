@@ -249,6 +249,11 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
+	if m.running && (cmd.Kind == CmdNew || cmd.Kind == CmdContinue || cmd.Kind == CmdResume) {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "finish or cancel the running task first"})
+		return m, nil
+	}
+
 	switch cmd.Kind {
 	case CmdHelp:
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: HelpText})
