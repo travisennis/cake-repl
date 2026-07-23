@@ -287,6 +287,11 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 
 // persistHistory appends one entry to the history file when configured.
 // Write errors are silently ignored so a bad path never breaks the REPL.
+//
+// Each entry is stored as "\x02" + JSON-encoded prompt + "\n". The \x02
+// prefix unambiguously marks JSONL records so loadHistory can distinguish
+// them from legacy plain-text lines. Appending via O_APPEND is safe for
+// concurrent writers.
 func (m Model) persistHistory(text string) {
 	if m.cfg.HistoryFile == "" {
 		return
@@ -296,7 +301,7 @@ func (m Model) persistHistory(text string) {
 		return
 	}
 	defer f.Close() //nolint:errcheck // best-effort on close
-	_, _ = f.WriteString(text + "\n")
+	_, _ = f.WriteString(encodeHistoryEntry(text))
 }
 
 func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {

@@ -5,6 +5,7 @@ package app
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -38,6 +39,7 @@ const (
 	composerHorizontalChrome = 2
 	statusHeight             = 1
 	maxHistoryEntries        = 1000
+	jsonlPrefix              = "\x02" // per-record marker for JSONL entries
 )
 
 // Model is the Bubble Tea model for the whole REPL.
@@ -121,8 +123,14 @@ func New(cfg Config) Model {
 	return m
 }
 
-// loadHistory reads a newline-terminated history file into the prompt history
-// state machine. Entries beyond maxHistoryEntries are trimmed on load.
+// loadHistory reads a history file into the prompt history state machine.
+//
+// Each line starting with jsonlPrefix ("\x02") is decoded as a JSON-encoded
+// string; all other lines are treated as plain-text legacy entries. Blank
+// lines are skipped.
+//
+// Entries beyond maxHistoryEntries are trimmed on load and the surviving
+// entries are rewritten with the JSONL prefix, migrating legacy files forward.
 func (m *Model) loadHistory(path string) {
 	f, err := os.Open(path) //nolint:gosec // user-provided path from -history-file
 	if err != nil {
@@ -135,9 +143,19 @@ func (m *Model) loadHistory(path string) {
 	buf := make([]byte, 64*1024)
 	sc.Buffer(buf, 1024*1024)
 	for sc.Scan() {
-		if line := sc.Text(); line != "" {
-			entries = append(entries, line)
+		line := sc.Text()
+		if line == "" {
+			continue
 		}
+		if strings.HasPrefix(line, jsonlPrefix) {
+			var s string
+			if err := json.Unmarshal([]byte(line[len(jsonlPrefix):]), &s); err == nil {
+				entries = append(entries, s)
+				continue
+			}
+		}
+		// Plain text (legacy entry or unparseable JSONL) — keep verbatim.
+		entries = append(entries, line)
 	}
 	if err := sc.Err(); err != nil {
 		return // best-effort
@@ -146,12 +164,22 @@ func (m *Model) loadHistory(path string) {
 	if len(entries) > maxHistoryEntries {
 		entries = entries[len(entries)-maxHistoryEntries:]
 		// Rewrite the file to stay under the cap. Errors are best-effort.
-		data := strings.Join(entries, "\n") + "\n"
-		_ = os.WriteFile(path, []byte(data), 0o600)
+		// Write every retained entry with the JSONL prefix, migrating any
+		// plain-text legacy entries forward.
+		var b strings.Builder
+		for _, e := range entries {
+			b.WriteString(encodeHistoryEntry(e))
+		}
+		_ = os.WriteFile(path, []byte(b.String()), 0o600)
 	}
 
 	m.history.entries = entries
 	m.history.idx = len(entries)
+}
+
+func encodeHistoryEntry(text string) string {
+	j, _ := json.Marshal(text)
+	return jsonlPrefix + string(j) + "\n"
 }
 
 // CancelRunning cancels any active cake subprocess. Safe to call when
