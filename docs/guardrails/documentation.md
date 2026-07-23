@@ -33,29 +33,58 @@ configuration, compatibility, or workflow changes require documentation updates.
 
 ## Documentation impact matrix
 
-Use this matrix when the Docs And ADR Gate in `AGENTS.md` says a change touches
-a durable surface.
+Use this matrix when a change touches a durable surface.
 
 | Changed surface | Required docs |
 | --- | --- |
 | CLI flags or startup behavior | `README.md`, `docs/guardrails/cli-and-user-output.md`, `AGENTS.md` compatibility surface when the category changes |
 | Slash commands or key bindings | `README.md`, `internal/app/commands.go` `HelpText`, `docs/guardrails/cli-and-user-output.md` |
 | Config file shape, paths, or precedence | `README.md`, `docs/guardrails/cli-and-user-output.md`, `ARCHITECTURE.md` if architectural, ADR when the contract is introduced or changed |
+| Persisted state or files on disk | ADR when the contract is introduced or changed, `README.md` when user-visible, relevant guardrail, `ARCHITECTURE.md` when it introduces a new storage boundary |
 | Session behavior | `README.md`, `docs/guardrails/session-and-security.md`, ADR when the durable decision changes |
 | cake invocation contract or stream-json contract | `ARCHITECTURE.md`, `docs/guardrails/cake-integration-and-stream-json.md`, ADR when the contract changes |
-| Security, logging, secrets, or subprocess lifecycle | `docs/guardrails/session-and-security.md`, `README.md` when user-visible, ADR for durable security posture changes |
+| Security, logging, secrets, or subprocess lifecycle | `docs/guardrails/session-and-security.md`, `README.md` when user-visible, ADR for durable security or subprocess behavior changes |
 | Build, dependency, CI, or release behavior | `CONTRIBUTING.md`, `docs/guardrails/dependencies-build-ci-release.md`, ADR for major runtime dependencies or compatibility changes |
 | Architecture/module boundaries | `ARCHITECTURE.md`, relevant guardrail, ADR for durable boundary changes |
 | User-visible terminal output | `README.md` when behavior changes, `docs/guardrails/cli-and-user-output.md`, screenshots or manual capture when required by that guardrail |
 | Managed-work format or workflow | `AGENTS.md`, relevant `.ahm` records or templates, `ahm context ...` output source when available |
+| Any other durable contract not listed above | ADR when the contract is introduced or changed, plus the most relevant existing row's doc requirements |
 
 When a row says "ADR when the contract changes," make the decision before code
 changes when possible. If the need is discovered after implementation, add the
 ADR before completing the task or commit, then reference it from the task.
 
+Any feature that introduces or changes a durable contract not covered by an
+existing row in this table must create or update an ADR.
+
 Managed skill files under `.agents/skills/` are owned by `ahm`; do not edit
 them for repo-specific review rules. Put repo-specific additions in
 `AGENTS.md` or the relevant guardrail instead.
+
+## Durable-surface checklist
+
+Before completing a task, committing, or handing off, explicitly check whether
+the change affects any durable surface:
+
+- CLI flags or startup behavior.
+- Config file shape, precedence, or paths.
+- Slash commands or key bindings.
+- Persisted state or files on disk.
+- Subprocess/cake contract.
+- Security, logging, secrets, or session behavior.
+- Architecture/module boundaries.
+- User-visible terminal output.
+
+## Preflight requirements for high-impact areas
+
+For task-backed feature work, run the `preflight` skill before completing the
+task, committing, or handoff. For `area:config`, persisted behavior,
+security/session, or CLI changes, preflight Pass 1 must explicitly answer:
+
+- Which user docs changed?
+- Which guardrails changed?
+- Is an ADR required? If not, why not?
+- Is the task record linked to the ADR or updated with the no-ADR rationale?
 
 ## Task documentation notes
 
