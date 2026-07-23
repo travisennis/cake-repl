@@ -42,7 +42,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Cancellation races.** Treating a finished run as canceled because Ctrl+C
-  arrived late — classify from `Wait`'s error, not the context.
+  arrived late — classify from the `cmd.Cancel` flag plus signal-terminated
+  process status on POSIX, not the context. See `runner.go` for how the atomic
+  flag preserves ordering.
 - **Zombie / runaway processes.** Removing the SIGKILL fallback or `WaitDelay`,
   or allowing more than one concurrent run.
 

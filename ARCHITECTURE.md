@@ -74,9 +74,10 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
 - **One cake process at a time.** Submitting while a task runs is rejected; the
   model tracks a single live `*cake.Run`.
 - **Graceful cancellation.** Cancel sends SIGTERM then SIGKILL after a grace
-  period (kill outright on Windows). Cancellation is classified from `Wait`'s
-  error, not from the context directly, so a late Ctrl+C cannot relabel a
-  finished run.
+  period (kill outright on Windows). Cancellation is classified from whether
+  `cmd.Cancel` successfully signaled the process and, on POSIX, whether the
+  process was signal-terminated—not from `ctx.Err()`—so a late Ctrl+C cannot
+  relabel a finished run.
 
 ## Related docs
 

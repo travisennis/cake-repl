@@ -1,8 +1,11 @@
 package cake
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -223,6 +226,65 @@ exit 1
 	}
 	if res.ExitCode != 1 {
 		t.Errorf("exit code = %d, want 1", res.ExitCode)
+	}
+}
+
+func TestRunnerLateCancelAfterNonZeroExit(t *testing.T) {
+	waited := make(chan struct{})
+	classify := make(chan struct{})
+	bin := writeFakeCake(t, `
+echo "something broke" >&2
+exit 2
+`)
+	run, err := Start(Options{
+		Bin:    bin,
+		Prompt: "hi",
+		afterWait: func() {
+			close(waited)
+			<-classify
+		},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	select {
+	case <-waited:
+		// Wait has confirmed the non-zero exit, but the result has not yet
+		// been classified. A late cancel must not change it into a cancel.
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for process exit")
+	}
+	run.Cancel()
+	close(classify)
+
+	events, res := collect(t, run)
+	if len(events) != 0 {
+		t.Errorf("expected no events, got %#v", events)
+	}
+	if res.ExitCode != 2 {
+		t.Errorf("exit code = %d, want 2", res.ExitCode)
+	}
+	if !strings.Contains(res.Stderr, "something broke") {
+		t.Errorf("stderr not captured: %q", res.Stderr)
+	}
+	if res.Canceled {
+		t.Error("late cancel relabeled non-zero exit as canceled")
+	}
+}
+
+func TestCanceledExitRequiresSignalTermination(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cancellation uses the cmd.Cancel flag")
+	}
+	bin := writeFakeCake(t, "exit 2\n")
+	err := exec.Command(bin).Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("Run error = %v, want *exec.ExitError", err)
+	}
+	if canceledExit(exitErr, true) {
+		t.Error("natural non-zero exit classified as canceled")
 	}
 }
 

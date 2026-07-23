@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -47,6 +48,8 @@ type Options struct {
 	Model    string
 	Profile  string
 	DebugLog io.Writer
+
+	afterWait func()
 }
 
 // Args returns the cake CLI arguments for these options.
@@ -163,11 +166,27 @@ func Start(opts Options) (*Run, error) {
 	// fall back to SIGKILL if it does not exit promptly. Windows cannot
 	// deliver SIGTERM (Process.Signal returns an error, which would stall
 	// cancellation for the full WaitDelay), so kill outright there.
+
+	// cancelRequested records whether the exec context watcher successfully
+	// signaled the process. Unlike ctx.Err() it stays false for a cancel after
+	// Wait, and canceledExit checks the final POSIX status to disambiguate an
+	// exited-but-unreaped process.
+	var cancelRequested atomic.Bool
+
 	cmd.Cancel = func() error {
+		// Only record a successful signal. If the process has already
+		// exited, os/exec treats os.ErrProcessDone as a natural completion
+		// and Wait synchronizes with this callback before returning.
+		var err error
 		if runtime.GOOS == "windows" {
-			return cmd.Process.Kill()
+			err = cmd.Process.Kill()
+		} else {
+			err = cmd.Process.Signal(syscall.SIGTERM)
 		}
-		return cmd.Process.Signal(syscall.SIGTERM)
+		if err == nil {
+			cancelRequested.Store(true)
+		}
+		return err
 	}
 	cmd.WaitDelay = 3 * time.Second
 
@@ -217,10 +236,12 @@ func Start(opts Options) (*Run, error) {
 		}
 
 		waitErr := cmd.Wait()
-		// Classify cancellation from Wait's error, not from ctx directly: a
-		// Ctrl+C landing between the process exiting and this point must not
-		// relabel a finished run as canceled. exec resolves that ordering —
-		// a cancel that arrives after exit leaves Wait's error untouched.
+		if opts.afterWait != nil {
+			opts.afterWait()
+		}
+		// Classify cancellation from whether cmd.Cancel was invoked while
+		// Wait was active, not from ctx directly: a Ctrl+C landing after
+		// Wait has returned must not relabel a finished run as canceled.
 		res := Result{Stderr: stderr.String()}
 		var exitErr *exec.ExitError
 		switch {
@@ -233,7 +254,7 @@ func Start(opts Options) (*Run, error) {
 			res.ExitCode = cmd.ProcessState.ExitCode()
 		case errors.As(waitErr, &exitErr):
 			res.ExitCode = exitErr.ExitCode()
-			res.Canceled = ctx.Err() != nil
+			res.Canceled = canceledExit(exitErr, cancelRequested.Load())
 		default:
 			res.ExitCode = -1
 			res.Err = waitErr
@@ -245,6 +266,16 @@ func Start(opts Options) (*Run, error) {
 	}()
 
 	return &Run{Events: events, Result: result, cancel: cancel}, nil
+}
+
+func canceledExit(exitErr *exec.ExitError, cancelRequested bool) bool {
+	if !cancelRequested {
+		return false
+	}
+	// On POSIX, signaling an exited-but-unreaped process can succeed. Require
+	// signal termination as well as the cmd.Cancel flag so that natural
+	// non-zero exits stay failures. Windows Kill does not expose that state.
+	return runtime.GOOS == "windows" || !exitErr.Exited()
 }
 
 // snippet returns at most n bytes of s with newlines flattened, never

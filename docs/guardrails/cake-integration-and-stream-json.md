@@ -35,9 +35,9 @@ consumes cake events. This is the project's core external contract.
 - **Dropping malformed lines silently.** Invalid JSON lines become synthetic
   `ParseError` events; the reader keeps going. Don't abort the stream on one bad
   line, and don't use `bufio.Scanner` (long tool-output lines overflow it).
-- **Mislabeling cancellation.** Cancellation is derived from `cmd.Wait`'s error,
-  not from the context, so a late Ctrl+C cannot relabel a finished run. Preserve
-  that ordering.
+- **Mislabeling cancellation.** Cancellation is derived from the `cmd.Cancel`
+  flag plus signal-terminated process status on POSIX, not from `ctx.Err()`, so
+  a late Ctrl+C cannot relabel a finished run. Preserve that ordering.
 - **Unbounded memory.** stderr is kept as a bounded tail (`tailBuffer`); tool
   output is truncated for display. Don't accumulate full streams in memory.
 
