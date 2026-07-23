@@ -6,15 +6,7 @@ import (
 
 // TestHandleTabComplete exercises the completion cycling state machine.
 //
-// NOTE: the production code has a bug in the "input changed" check at
-// update.go:127.  After a cycle starts (e.g., "/q" → "/quit"),
-// completionPrefix is "/q" but the input is "/quit".  On the next Tab,
-// input != completionPrefix resets the cycle instead of advancing it.
-// Scenarios 3 and 4 from the task (cycle advance, cycle wrap) therefore
-// fail with the current code.  The tests here document the actual behavior;
-// when that bug is fixed, add tests for advance and wrap.
-//
-// Scenarios that DO work:
+// Scenarios:
 //  1. Non-slash input is a no-op
 //  2. Unknown slash prefix is a no-op
 //  3. Single match completes directly, no cycle state
@@ -156,36 +148,131 @@ func TestHandleTabComplete(t *testing.T) {
 	})
 }
 
-// TestHandleTabCompleteSecondTabReset documents the current behavior when Tab
-// is pressed a second time during a multi-match cycle: the input-change check
-// at update.go:127 resets the cycle instead of advancing it.
-//
-// This is a known limitation — see the comment in TestHandleTabComplete.
-// When the cycling bug is fixed, these tests should be updated to verify
-// advance and wrap-around instead.
-func TestHandleTabCompleteSecondTabReset(t *testing.T) {
+// TestHandleTabCompleteAdvance verifies that pressing Tab a second time advances
+// the cycle to the next match.
+func TestHandleTabCompleteAdvance(t *testing.T) {
 	// Start a cycle with /q → /quit
 	m := newLaidOutModel()
 	m.input.SetValue("/q")
 
 	m1, _ := m.handleTabComplete() // cycle starts: input=/quit, prefix=/q, matches=[/quit,/q], idx=0
 
-	// Second Tab: the bug — input (/quit) != prefix (/q), so cycle resets.
-	// Then since prefix is "", it computes matches from "/quit" which is a
-	// single match, so input stays "/quit" and no new cycle starts.
+	// Second Tab: advance to /q (idx 1)
 	m2, _ := m1.(Model).handleTabComplete()
 	got := m2.(Model)
 
-	if got.input.Value() != "/quit" {
-		t.Errorf("input = %q after second Tab, want %q (cycle was reset)", got.input.Value(), "/quit")
+	if got.input.Value() != "/q" {
+		t.Errorf("input = %q after second Tab, want %q", got.input.Value(), "/q")
+	}
+	if got.completionPrefix != "/q" {
+		t.Errorf("completionPrefix = %q after second Tab, want %q", got.completionPrefix, "/q")
+	}
+	if len(got.completionMatches) != 2 {
+		t.Fatalf("completionMatches = %v, want 2 entries", got.completionMatches)
+	}
+	if got.completionIdx != 1 {
+		t.Errorf("completionIdx = %d after second Tab, want 1", got.completionIdx)
+	}
+}
+
+// TestHandleTabCompleteWrap verifies that pressing Tab beyond the end of the
+// match list wraps around, restoring the original prefix and ending the cycle.
+func TestHandleTabCompleteWrap(t *testing.T) {
+	// Start a cycle with /q → /quit
+	m := newLaidOutModel()
+	m.input.SetValue("/q")
+
+	m1, _ := m.handleTabComplete() // cycle starts: input=/quit, idx=0
+
+	// Second Tab: advance to /q (idx 1)
+	m2, _ := m1.(Model).handleTabComplete()
+
+	// Third Tab: wrap — restore prefix /q, clear cycle state
+	m3, _ := m2.(Model).handleTabComplete()
+	got := m3.(Model)
+
+	if got.input.Value() != "/q" {
+		t.Errorf("input = %q after wrap, want %q", got.input.Value(), "/q")
 	}
 	if got.completionPrefix != "" {
-		t.Errorf("completionPrefix = %q after second Tab, want empty (cycle was reset)", got.completionPrefix)
+		t.Errorf("completionPrefix = %q after wrap, want empty", got.completionPrefix)
 	}
 	if got.completionMatches != nil {
-		t.Errorf("completionMatches = %v after second Tab, want nil (cycle was reset)", got.completionMatches)
+		t.Errorf("completionMatches = %v after wrap, want nil", got.completionMatches)
 	}
 	if got.completionIdx != 0 {
-		t.Errorf("completionIdx = %d after second Tab, want 0 (cycle was reset)", got.completionIdx)
+		t.Errorf("completionIdx = %d after wrap, want 0", got.completionIdx)
+	}
+}
+
+// TestHandleTabCompleteBareSlashCycle verifies cycling through all commands
+// starting from bare "/".
+func TestHandleTabCompleteBareSlashCycle(t *testing.T) {
+	m := newLaidOutModel()
+	m.input.SetValue("/")
+
+	// First Tab: start cycle, first match is /help
+	m1, _ := m.handleTabComplete()
+	got1 := m1.(Model)
+	if got1.input.Value() != "/help" {
+		t.Errorf("input after first Tab = %q, want %q", got1.input.Value(), "/help")
+	}
+
+	// Advance through remaining 8 matches (indices 1..8) then wrap back to "/".
+	cur := got1
+	for i := 0; i < 9; i++ {
+		next, _ := cur.handleTabComplete()
+		cur = next.(Model)
+	}
+
+	// After 9 more Tabs (8 advances + 1 wrap), we should be back at "/" with
+	// no active cycle.
+	if cur.input.Value() != "/" {
+		t.Errorf("input after full cycle + wrap = %q, want %q", cur.input.Value(), "/")
+	}
+	if cur.completionPrefix != "" {
+		t.Errorf("completionPrefix after full cycle + wrap = %q, want empty", cur.completionPrefix)
+	}
+	if cur.completionMatches != nil {
+		t.Errorf("completionMatches after full cycle + wrap = %v, want nil", cur.completionMatches)
+	}
+}
+
+// TestHandleTabCompleteResumeCycle verifies cycling through matching known
+// session IDs and restoring the original partial UUID on wrap.
+func TestHandleTabCompleteResumeCycle(t *testing.T) {
+	const (
+		first  = "11111111-2222-3333-4444-555555555555"
+		second = "11111111-aaaa-bbbb-cccc-dddddddddddd"
+		prefix = "/resume 1111"
+	)
+
+	m := newLaidOutModel()
+	m.session.SessionID = first
+	m.session.ResumeID = second
+	m.input.SetValue(prefix)
+
+	m1, _ := m.handleTabComplete()
+	got := m1.(Model)
+	if got.input.Value() != first {
+		t.Errorf("input after first Tab = %q, want %q", got.input.Value(), first)
+	}
+
+	m2, _ := got.handleTabComplete()
+	got = m2.(Model)
+	if got.input.Value() != second {
+		t.Errorf("input after second Tab = %q, want %q", got.input.Value(), second)
+	}
+
+	m3, _ := got.handleTabComplete()
+	got = m3.(Model)
+	if got.input.Value() != prefix {
+		t.Errorf("input after wrap = %q, want %q", got.input.Value(), prefix)
+	}
+	if got.completionPrefix != "" {
+		t.Errorf("completionPrefix after wrap = %q, want empty", got.completionPrefix)
+	}
+	if got.completionMatches != nil {
+		t.Errorf("completionMatches after wrap = %v, want nil", got.completionMatches)
 	}
 }

@@ -168,7 +168,9 @@ func (m Model) handleTabComplete() (tea.Model, tea.Cmd) {
 	input := m.input.Value()
 
 	// If the input changed since the last Tab press, start a fresh cycle.
-	if m.completionPrefix != "" && input != m.completionPrefix {
+	// Compare against what the completer last set (completionMatches[completionIdx])
+	// rather than the original prefix, so that pressing Tab again advances the cycle.
+	if m.completionPrefix != "" && input != m.completionMatches[m.completionIdx] {
 		m.completionPrefix = ""
 		m.completionMatches = nil
 		m.completionIdx = 0
