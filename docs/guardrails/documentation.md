@@ -7,8 +7,9 @@ configuration, compatibility, or workflow changes require documentation updates.
 ## Compatibility surfaces
 
 - **User reference.** `README.md` is the user-facing source for install, run,
-  flags, key bindings, slash commands, config files, known limitations, and
-  common commands.
+  flags, key bindings, slash commands, config files, and known limitations.
+  The canonical development-command catalog is owned by `CONTRIBUTING.md`;
+  `README.md` retains basic build, install, and test examples.
 - **Runtime help.** `internal/app/commands.go` `HelpText` mirrors slash
   commands and key bindings shown in `README.md`.
 - **Architecture and guardrails.** `ARCHITECTURE.md` documents stable module
@@ -44,7 +45,7 @@ Use this matrix when a change touches a durable surface.
 | Session behavior | `README.md`, `docs/guardrails/session-and-security.md`, ADR when the durable decision changes |
 | cake invocation contract or stream-json contract | `ARCHITECTURE.md`, `docs/guardrails/cake-integration-and-stream-json.md`, ADR when the contract changes |
 | Security, logging, secrets, or subprocess lifecycle | `docs/guardrails/session-and-security.md`, `README.md` when user-visible, ADR for durable security or subprocess behavior changes |
-| Build, dependency, CI, or release behavior | `CONTRIBUTING.md`, `docs/guardrails/dependencies-build-ci-release.md`, ADR for major runtime dependencies or compatibility changes |
+| Build, dependency, CI, or release behavior | `CONTRIBUTING.md` (canonical command catalog), `docs/guardrails/dependencies-build-ci-release.md`, ADR for major runtime dependencies or compatibility changes |
 | Architecture/module boundaries | `ARCHITECTURE.md`, relevant guardrail, ADR for durable boundary changes |
 | User-visible terminal output | `README.md` when behavior changes, `docs/guardrails/cli-and-user-output.md`, screenshots or manual capture when required by that guardrail |
 | Managed-work format or workflow | `AGENTS.md`, relevant `.ahm` records or templates, `ahm context ...` output source when available |

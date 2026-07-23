@@ -169,27 +169,8 @@ Integration tests drive the subprocess runner with fake cake shell scripts
 (successful streams, malformed lines, non-zero exits, cancellation), so they
 run without a real cake binary.
 
-## Common commands
-
-This repo includes a `justfile` for common development commands:
-
-```bash
-just build          # go build -trimpath -o bin/cake-repl ./cmd/cake-repl
-just install        # go install -trimpath ./cmd/cake-repl
-just test           # go test ./...
-just test-race      # go test -race -cover ./...
-just fmt            # go fmt ./...
-just fmt-check      # fail if gofmt would change files
-just tidy-check     # fail if go mod tidy would change files
-just vet            # go vet ./...
-just lint           # golangci-lint run
-just vuln           # govulncheck ./...
-just release-check  # GoReleaser config check and snapshot build
-just ci             # full local/CI gate
-just install-tools  # install pinned lint, vuln, and release tools
-just release        # optimized local release binary at ./cake-repl
-just run            # go run ./cmd/cake-repl
-```
+For all common development commands (build, test, lint, verify, release), see
+[`CONTRIBUTING.md`](CONTRIBUTING.md#command-catalog).
 
 ## Release build
 
