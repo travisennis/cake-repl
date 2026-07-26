@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
@@ -11,10 +12,20 @@ import (
 	"github.com/muesli/termenv"
 )
 
+var (
+	mdMu       sync.Mutex
+	mdRenderer *glamour.TermRenderer
+	mdWidth    int
+	mdProfile  termenv.Profile
+)
+
 // RenderMarkdown renders markdown text to ANSI-formatted output at the given
 // width, respecting the current terminal color profile (so --no-color produces
 // readable plain text). Its compact style mirrors the REPL's cyan accent,
 // blue links, yellow code, and muted structural elements.
+//
+// A private memoization cache avoids constructing a new glamour renderer on
+// every call: the renderer is rebuilt only when width or color profile change.
 func RenderMarkdown(text string, width int) string {
 	if strings.TrimSpace(text) == "" {
 		return text
@@ -24,12 +35,8 @@ func RenderMarkdown(text string, width int) string {
 	}
 
 	profile := lipgloss.ColorProfile()
-	r, err := glamour.NewTermRenderer(
-		glamour.WithWordWrap(width),
-		glamour.WithColorProfile(profile),
-		glamour.WithStyles(markdownStyle(profile)),
-	)
-	if err != nil {
+	r := getRenderer(width, profile)
+	if r == nil {
 		// Fallback: plain text wrapped at width.
 		return lipgloss.NewStyle().Width(width).Render(text)
 	}
@@ -54,6 +61,31 @@ func RenderMarkdown(text string, width int) string {
 	}
 
 	return out
+}
+
+// getRenderer returns a cached or newly built glamour renderer for the given
+// width and profile. It returns nil when renderer construction fails.
+func getRenderer(width int, profile termenv.Profile) *glamour.TermRenderer {
+	mdMu.Lock()
+	defer mdMu.Unlock()
+
+	if mdRenderer != nil && mdWidth == width && mdProfile == profile {
+		return mdRenderer
+	}
+
+	r, err := glamour.NewTermRenderer(
+		glamour.WithWordWrap(width),
+		glamour.WithColorProfile(profile),
+		glamour.WithStyles(markdownStyle(profile)),
+	)
+	if err != nil {
+		return nil
+	}
+
+	mdRenderer = r
+	mdWidth = width
+	mdProfile = profile
+	return r
 }
 
 // markdownStyle keeps Glamour's mature syntax-highlighting defaults while

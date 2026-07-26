@@ -188,6 +188,33 @@ func TestRenderMarkdown_WidthWrapping(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdown_CacheKeyedOnWidth(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	input := "# A heading that should wrap differently at different widths"
+
+	// First render at a wide width.
+	wide := RenderMarkdown(input, 120)
+	if wide == "" {
+		t.Fatal("expected non-empty output for wide render")
+	}
+
+	// Second render at a narrow width — must produce correctly wrapped output.
+	narrow := RenderMarkdown(input, 40)
+	if narrow == "" {
+		t.Fatal("expected non-empty output for narrow render")
+	}
+
+	// The narrow output should have more lines (or different wrapping) than wide.
+	wideLines := strings.Count(stripANSI(wide), "\n")
+	narrowLines := strings.Count(stripANSI(narrow), "\n")
+	if narrowLines <= wideLines || narrowLines < 1 {
+		t.Errorf("narrow render should have more line breaks than wide (wide=%d, narrow=%d):\nwide: %q\nnarrow: %q", wideLines, narrowLines, wide, narrow)
+	}
+}
+
 func TestRenderMarkdown_FallbackOnError(t *testing.T) {
 	orig := lipgloss.ColorProfile()
 	defer lipgloss.SetColorProfile(orig)
