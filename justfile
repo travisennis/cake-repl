@@ -25,6 +25,12 @@ test:
 test-race:
     go test -race -cover ./...
 
+# Opt-in only, never part of `ci`: runs the real-cake smoke test, which spawns
+# the actual cake binary and makes a model-backed request that can cost money.
+# Set CAKE_BIN to use a cake other than the one on PATH.
+test-real-cake:
+    CAKE_REAL_SMOKE=1 go test -tags=integration -count=1 -run TestSmokeRealCake ./internal/cake/
+
 fmt:
     go fmt ./...
 

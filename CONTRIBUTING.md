@@ -11,7 +11,8 @@ see [`AGENTS.md`](AGENTS.md).
 - [`just`](https://github.com/casey/just) for the task runner (optional; the
   underlying `go` commands work too).
 - A `cake` binary on `PATH` only to use the app — the test suite does **not**
-  need one (runner tests use fake shell scripts).
+  need one (runner tests use fake shell scripts). The single real-cake smoke
+  test is opt-in and skips when cake is absent; see `just test-real-cake`.
 
 Install the pinned lint/vuln/release tools once:
 
@@ -30,6 +31,7 @@ just run *args      # go run ./cmd/cake-repl
 just install        # go install -trimpath ./cmd/cake-repl
 just test           # go test ./...
 just test-race      # go test -race -cover ./...
+just test-real-cake # opt-in real-cake smoke test (spawns cake; can cost money)
 just quick          # go test ./... && go vet ./...
 just fmt            # go fmt ./...
 just fmt-check      # fail if gofmt would change files
@@ -93,7 +95,10 @@ Details on the test layout and the fake-cake harness live in
 
 - **Runner tests must not require a real `cake` binary.** The test harness uses
   fake shell scripts so the suite stays hermetic. If you add a runner test,
-  keep it that way unless the task explicitly says otherwise.
+  keep it that way unless the task explicitly says otherwise. The one exception
+  is `TestSmokeRealCake`, which is gated behind the `integration` build tag
+  *and* `CAKE_REAL_SMOKE=1` so it never runs from `just test`, `just test-race`,
+  or `just ci`.
 - **Preserve the cake engine contract.** Only run cake as
   `--output-format stream-json` with `--continue`/`--resume`/`--model`/
   `--profile`. Never read cake session files, parse its human text, or import

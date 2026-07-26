@@ -170,8 +170,16 @@ just test
 ```
 
 Integration tests drive the subprocess runner with fake cake shell scripts
-(successful streams, malformed lines, non-zero exits, cancellation), so they
-run without a real cake binary.
+replaying NDJSON fixtures (successful streams, malformed lines, non-zero exits,
+cancellation), so they run without a real cake binary.
+
+One opt-in smoke test does use a real cake. It needs the `integration` build
+tag and `CAKE_REAL_SMOKE=1`, and it makes a model-backed cake request that can
+cost money, so it never runs from `just test` or `just ci`:
+
+```bash
+just test-real-cake
+```
 
 For all common development commands (build, test, lint, verify, release), see
 [`CONTRIBUTING.md`](CONTRIBUTING.md#command-catalog).

@@ -25,8 +25,15 @@ func writeFakeCake(t *testing.T, script string) string {
 // collect drains a run's events and final result with a timeout.
 func collect(t *testing.T, run *Run) ([]Event, Result) {
 	t.Helper()
+	return collectWithin(t, run, 10*time.Second)
+}
+
+// collectWithin is collect with an explicit deadline, for runs that are slower
+// than a fake-cake script.
+func collectWithin(t *testing.T, run *Run, d time.Duration) ([]Event, Result) {
+	t.Helper()
 	var events []Event
-	timeout := time.After(10 * time.Second)
+	timeout := time.After(d)
 	for {
 		select {
 		case ev, ok := <-run.Events:
