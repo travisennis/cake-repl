@@ -31,7 +31,7 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 3. Select the route below, load only its docs, and state both before editing.
 4. Preserve compatibility unless explicitly changed; edit surgically and
    verify according to risk.
-5. After implementation edits, run codex review, fix all findings, and rerun
+5. After implementation edits, run a review in a subagent, fix all findings, and rerun
    until clean; reconsider approaches that do not converge.
 6. Consult a deeper reasoning model via a subagent for unclear design, debugging, or path
    choices when stuck.
