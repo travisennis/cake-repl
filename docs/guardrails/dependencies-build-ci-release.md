@@ -6,7 +6,7 @@ workflows (`.github/workflows/`), `.goreleaser.yaml`, `.golangci.yml`, or
 
 ## Compatibility surfaces
 
-- **Go version (MSRV).** Module targets `go 1.26`; docs state Go `1.26.3`+.
+- **Go version (MSRV).** Module targets `go 1.26.3`; docs state Go `1.26.3`+.
   Keep `go.mod`, `README.md`, and CI (`go-version-file: go.mod`) consistent if
   you change it. Raising it is a user-visible decision.
 - **Pinned tool versions.** `golangci-lint`, `govulncheck`, and `goreleaser`

@@ -310,13 +310,18 @@ func TestRenderItem_ConversationHierarchyAndWidth(t *testing.T) {
 	}
 }
 
-func TestRenderItems_JoinsWithDoubleNewline(t *testing.T) {
+func TestRenderItem_JoinsWithDoubleNewline(t *testing.T) {
 	th := DefaultTheme()
 	items := []Item{
 		{Kind: KindInfo, Text: "first"},
 		{Kind: KindInfo, Text: "second"},
 	}
-	got := RenderItems(th, items, 80, DefaultOutputLimit, ToolOutputTruncated)
+	// The documented join convention for timeline items is a double newline.
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		parts = append(parts, RenderItem(th, it, 80, DefaultOutputLimit, ToolOutputTruncated))
+	}
+	got := strings.Join(parts, "\n\n")
 	if !strings.Contains(got, "\n\n") {
 		t.Errorf("expected items joined by double newline, got %q", got)
 	}

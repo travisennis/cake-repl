@@ -11,7 +11,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   `-profile`, `-cwd`, `-no-color`, `-debug-log`, `-history-file`,
   `-config <path>`, `-no-config`, `-output-limit <n>`,
   `-max-timeline-items <n>`, `-version`. Names, defaults, and validation
-  (mutually exclusive `-continue`/`-resume`, uuid shape, positional args
+  (mutually exclusive `-continue`/`-resume`, mutually exclusive
+  `-config`/`-no-config`, uuid shape, positional args
   rejected) are user-facing. `-continue`, `-resume`, `-model`, and `-profile`
   pass-through must stay aligned with the cake contract.
 - **Config file shape.** TOML config supports only stable REPL defaults:

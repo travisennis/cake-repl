@@ -65,19 +65,6 @@ type ToolBlock struct {
 	Done      bool
 }
 
-// RenderItems renders the whole timeline to a single string at the given
-// width and output limit.
-func RenderItems(th Theme, items []Item, width int, outputLimit int, toolOutputMode ToolOutputMode) string {
-	if outputLimit <= 0 {
-		outputLimit = DefaultOutputLimit
-	}
-	parts := make([]string, 0, len(items))
-	for _, it := range items {
-		parts = append(parts, RenderItem(th, it, width, outputLimit, toolOutputMode))
-	}
-	return strings.Join(parts, "\n\n")
-}
-
 // RenderItem renders one timeline item at the given width and output limit.
 // Items render independently of each other, so callers can cache results per
 // item.

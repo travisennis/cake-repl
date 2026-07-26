@@ -31,8 +31,6 @@ func TestDefaultThemeNotEmpty(t *testing.T) {
 		"Warning":           th.Warning,
 		"Info":              th.Info,
 		"Debug":             th.Debug,
-		"Rule":              th.Rule,
-		"Chrome":            th.Chrome,
 		"PromptTitle":       th.PromptTitle,
 		"PromptBorder":      th.PromptBorder,
 		"PromptHint":        th.PromptHint,
@@ -42,7 +40,6 @@ func TestDefaultThemeNotEmpty(t *testing.T) {
 		"StatusKey":         th.StatusKey,
 		"StatusValue":       th.StatusValue,
 		"StatusSeparator":   th.StatusSeparator,
-		"Muted":             th.Muted,
 		"TimelineSeparator": th.TimelineSeparator,
 		"TimelineAccent":    th.TimelineAccent,
 	}
@@ -75,8 +72,6 @@ func TestDefaultThemeAsciiDegradation(t *testing.T) {
 		th.Warning,
 		th.Info,
 		th.Debug,
-		th.Rule,
-		th.Chrome,
 		th.PromptTitle,
 		th.PromptBorder,
 		th.PromptHint,
@@ -86,7 +81,6 @@ func TestDefaultThemeAsciiDegradation(t *testing.T) {
 		th.StatusKey,
 		th.StatusValue,
 		th.StatusSeparator,
-		th.Muted,
 		th.TimelineSeparator,
 		th.TimelineAccent,
 	}

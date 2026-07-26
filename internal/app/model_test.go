@@ -18,11 +18,24 @@ func newLaidOutModel() Model {
 	return m
 }
 
+// renderItemsFull is the reference implementation for timeline join: each item
+// is rendered independently via RenderItem and joined with a double newline.
+func renderItemsFull(th ui.Theme, items []ui.Item, width int, outputLimit int, toolOutputMode ui.ToolOutputMode) string {
+	if outputLimit <= 0 {
+		outputLimit = ui.DefaultOutputLimit
+	}
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		parts = append(parts, ui.RenderItem(th, it, width, outputLimit, toolOutputMode))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 // assertCacheMatchesFullRender checks the incremental render cache against
-// RenderItems, the reference implementation.
+// the documented RenderItem + double-newline join.
 func assertCacheMatchesFullRender(t *testing.T, m *Model, step string) {
 	t.Helper()
-	want := ui.RenderItems(m.theme, m.items, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
+	want := renderItemsFull(m.theme, m.items, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
 	got := strings.Join(m.rendered, "\n\n")
 	if got != want {
 		t.Fatalf("%s: cached render diverged from full render\ngot:\n%s\nwant:\n%s", step, got, want)

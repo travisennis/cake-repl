@@ -20,10 +20,6 @@ type Theme struct {
 	Info       lipgloss.Style
 	Debug      lipgloss.Style
 
-	// App chrome.
-	Rule   lipgloss.Style
-	Chrome lipgloss.Style
-
 	// Prompt composer.
 	PromptTitle  lipgloss.Style
 	PromptBorder lipgloss.Style
@@ -38,7 +34,6 @@ type Theme struct {
 	StatusSeparator lipgloss.Style
 
 	// Shared metadata and timeline structure.
-	Muted             lipgloss.Style
 	TimelineSeparator lipgloss.Style
 	TimelineAccent    lipgloss.Style
 }
@@ -60,8 +55,6 @@ func DefaultTheme() Theme {
 		Warning:           lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 		Info:              lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
 		Debug:             lipgloss.NewStyle().Faint(true),
-		Rule:              lipgloss.NewStyle().Faint(true),
-		Chrome:            lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Faint(true),
 		PromptTitle:       lipgloss.NewStyle().Bold(true),
 		PromptBorder:      lipgloss.NewStyle().Faint(true),
 		PromptHint:        lipgloss.NewStyle().Faint(true),
@@ -71,7 +64,6 @@ func DefaultTheme() Theme {
 		StatusKey:         lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true),
 		StatusValue:       lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
 		StatusSeparator:   lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
-		Muted:             lipgloss.NewStyle().Faint(true),
 		TimelineSeparator: lipgloss.NewStyle().Faint(true),
 		TimelineAccent:    lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Faint(true),
 	}

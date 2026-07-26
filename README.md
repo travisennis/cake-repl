@@ -134,6 +134,7 @@ precedence over XDG-level values:
 
 Pass `--config <path>` to use a single custom config file instead of the
 default paths. Pass `--no-config` to skip config file loading entirely.
+`--config` and `--no-config` are mutually exclusive.
 
 ### Format
 

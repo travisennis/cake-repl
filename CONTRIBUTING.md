@@ -7,7 +7,7 @@ see [`AGENTS.md`](AGENTS.md).
 
 ## Requirements
 
-- Go `1.26.3` or newer (the module targets `go 1.26`).
+- Go `1.26.3` or newer (the module targets `go 1.26.3`).
 - [`just`](https://github.com/casey/just) for the task runner (optional; the
   underlying `go` commands work too).
 - A `cake` binary on `PATH` only to use the app — the test suite does **not**

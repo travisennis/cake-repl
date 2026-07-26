@@ -241,6 +241,11 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m.execCommand(cmd)
 	}
 
+	if m.newSessionPending {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "waiting for the canceled task to exit…"})
+		return m, nil
+	}
+
 	if m.running {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "a task is already running — Ctrl+C cancels it"})
 		return m, nil

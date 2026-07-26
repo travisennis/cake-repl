@@ -10,7 +10,7 @@ import (
 
 func TestValidateFlagsVersionShortCircuits(t *testing.T) {
 	// --version should return nil even when other flags are invalid.
-	if err := validateFlags(true, true, "not-a-uuid", []string{"surprise!"}); err != nil {
+	if err := validateFlags(true, true, "not-a-uuid", []string{"surprise!"}, "/path", true); err != nil {
 		t.Errorf("validateFlags(true, …) = %v, want nil", err)
 	}
 }
@@ -22,6 +22,8 @@ func TestValidateFlags(t *testing.T) {
 		continueFlag bool
 		resume       string
 		args         []string
+		configPath   string
+		noConfig     bool
 		wantErr      bool
 	}{
 		{
@@ -59,13 +61,19 @@ func TestValidateFlags(t *testing.T) {
 			resume:  "11111111-2222-3333-4444-55555555555Z", // bad char at end
 			wantErr: true,
 		},
+		{
+			name:       "--config and --no-config both set",
+			configPath: "/some/path",
+			noConfig:   true,
+			wantErr:    true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateFlags(tt.showVersion, tt.continueFlag, tt.resume, tt.args)
+			err := validateFlags(tt.showVersion, tt.continueFlag, tt.resume, tt.args, tt.configPath, tt.noConfig)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateFlags(%v, %v, %q, %v) = %v, wantErr=%v",
-					tt.showVersion, tt.continueFlag, tt.resume, tt.args, err, tt.wantErr)
+				t.Errorf("validateFlags(%v, %v, %q, %v, %q, %v) = %v, wantErr=%v",
+					tt.showVersion, tt.continueFlag, tt.resume, tt.args, tt.configPath, tt.noConfig, err, tt.wantErr)
 			}
 		})
 	}
@@ -73,7 +81,7 @@ func TestValidateFlags(t *testing.T) {
 
 func TestValidateFlagsVersionShortCircuitSkipsArgCheck(t *testing.T) {
 	// showVersion=true must not fail even with positional arguments.
-	if err := validateFlags(true, false, "", []string{"oops"}); err != nil {
+	if err := validateFlags(true, false, "", []string{"oops"}, "", false); err != nil {
 		t.Errorf("validateFlags(true, …) with args = %v, want nil", err)
 	}
 }

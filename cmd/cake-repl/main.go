@@ -59,7 +59,7 @@ func displayPath(home, path string) string {
 // validateFlags checks the mutually exclusive / incompatible flag combinations
 // and returns an error when validation fails. When showVersion is true it
 // short-circuits and returns nil so the caller handles --version separately.
-func validateFlags(showVersion bool, continueFlag bool, resume string, args []string) error {
+func validateFlags(showVersion bool, continueFlag bool, resume string, args []string, configPath string, noConfig bool) error {
 	if showVersion {
 		return nil
 	}
@@ -71,6 +71,9 @@ func validateFlags(showVersion bool, continueFlag bool, resume string, args []st
 	}
 	if resume != "" && !app.IsSessionID(resume) {
 		return fmt.Errorf("invalid -resume uuid: %s", resume)
+	}
+	if configPath != "" && noConfig {
+		return fmt.Errorf("-config and -no-config are mutually exclusive")
 	}
 	return nil
 }
@@ -121,7 +124,7 @@ func run() (err error) {
 	maxTimelineItems := flag.Int("max-timeline-items", 0, "limit timeline to this many entries (0 = no limit)")
 	flag.Parse()
 
-	if err := validateFlags(*showVersion, *continueFlag, *resume, flag.Args()); err != nil {
+	if err := validateFlags(*showVersion, *continueFlag, *resume, flag.Args(), *configPath, *noConfig); err != nil {
 		return err
 	}
 	if *showVersion {

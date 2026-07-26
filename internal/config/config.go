@@ -39,9 +39,10 @@ func DefaultPaths() (xdgPath, localPath string) {
 	return
 }
 
-// Load reads and decodes a TOML config file. A missing or unreadable file
-// returns an empty Config without error, so callers can always merge the
-// result unconditionally.
+// Load reads and decodes a TOML config file. A missing file returns an empty
+// Config without error, so callers can always merge the result
+// unconditionally. A file that exists but cannot be read or decoded (e.g.
+// permission errors, invalid TOML) aborts with an error.
 func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	_, err := toml.DecodeFile(path, cfg)
