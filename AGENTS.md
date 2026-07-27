@@ -33,8 +33,10 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
    verify according to risk.
 5. Before handoff or commit after code changes, run the
    [`preflight`](.agents/skills/preflight/SKILL.md) skill in a subagent. It owns
-   the review scale, the fix-and-rerun loop, and the convergence rule. Consult
-   the [documentation impact matrix](docs/guardrails/documentation.md) for
+   the review scale and the fix-and-rerun loop. If a third round reports
+   findings of the same class, stop patching: report the finding class and the
+   suspected design flaw, and escalate to a design decision. Consult the
+   [documentation impact matrix](docs/guardrails/documentation.md) for
    durable-surface changes.
 6. For task-backed work, run `ahm task complete <id>` to close the task
    lifecycle.
