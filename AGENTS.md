@@ -9,17 +9,17 @@ NDJSON event stream live.
 
 Compatibility surfaces — preserve unless the task explicitly changes them:
 
-- **cake contract**: run cake only as `--output-format stream-json` with
-  `--continue`/`--resume`/`--model`/`--profile`; never read cake session files,
+- **cake contract**: run cake only in stream-json output mode with the
+  documented session, model, and profile flags; never read cake session files,
   parse its human text, or import its internals.
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
-- **CLI flags and config shape** (mirrored in `README.md`, guardrails, and
-  ADRs where applicable).
-- **Slash commands and key bindings** (mirrored in `README.md` and
-  `HelpText`).
-- **Session run-mode behavior** pins to `--resume` to prevent hijack.
-- **Secrets**: raw stream content goes only to `-debug-log` (`0o600`).
-- **Go MSRV** `1.26.3`+ and the pinned lint/vuln/release tools.
+- **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
+- **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.
+- **Session run-mode behavior**, which prevents session hijack.
+- **Secrets**: raw stream content goes only to the debug log, written
+  owner-only.
+- **The Go MSRV and the pinned lint, vulnerability, and release tools**;
+  `go.mod` and the `justfile` are the authority for the versions.
 
 ## Operating Loop
 
@@ -31,15 +31,13 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 3. Select the route below, load only its docs, and state both before editing.
 4. Preserve compatibility unless explicitly changed; edit surgically and
    verify according to risk.
-5. After implementation edits, run a review in a subagent, fix all findings, and rerun
-   until clean; reconsider approaches that do not converge.
-6. Consult a deeper reasoning model via a subagent for unclear design, debugging, or path
-   choices when stuck.
-7. Before handoff or commit after code changes, run the
-   [`preflight`](.agents/skills/preflight/SKILL.md) skill in a subagent and consult the
-   [documentation impact matrix](docs/guardrails/documentation.md) for
+5. Before handoff or commit after code changes, run the
+   [`preflight`](.agents/skills/preflight/SKILL.md) skill in a subagent. It owns
+   the review scale, the fix-and-rerun loop, and the convergence rule. Consult
+   the [documentation impact matrix](docs/guardrails/documentation.md) for
    durable-surface changes.
-8. For task-backed work, run `ahm task complete <id>` to close the task lifecycle.
+6. For task-backed work, run `ahm task complete <id>` to close the task
+   lifecycle.
 
 Specialized workflow docs override this file when they conflict.
 
@@ -50,48 +48,107 @@ When choosing build, test, lint, verification, or commit-prep commands, read
 
 ### cake Integration And Stream-JSON
 
-Use for `internal/cake/`, cake CLI args, or event consumption. Consult
-[`docs/guardrails/cake-integration-and-stream-json.md`](docs/guardrails/cake-integration-and-stream-json.md)
-and [`ARCHITECTURE.md`](ARCHITECTURE.md). Decode forward-compatibly; never cross the engine boundary.
+Use for `internal/cake/`, cake CLI arguments, or event consumption.
+
+Consult:
+
+- [cake integration and stream-json](docs/guardrails/cake-integration-and-stream-json.md),
+  for the engine contract and the decoding rules — this is the core external
+  contract.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md), for engine isolation and the module map.
+
+Decode forward-compatibly; never cross the engine boundary.
 
 ### CLI, Slash Commands, And Output
 
 Use for flags, slash commands, key bindings, or `internal/ui/` rendering.
-Consult [`docs/guardrails/cli-and-user-output.md`](docs/guardrails/cli-and-user-output.md)
-and [`CONTRIBUTING.md`](CONTRIBUTING.md). Keep `-no-color` usable.
+
+Consult:
+
+- [CLI, commands, and user output](docs/guardrails/cli-and-user-output.md), for
+  flag, slash-command, key-binding, and rendering expectations.
+- [ADR 003](docs/adr/003-tool-output-expansion-key-binding.md), for the
+  tool-output expansion binding.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md), for the commands that verify the change.
+
+Keep `-no-color` usable.
 
 ### Sessions, Security, And Subprocess Lifecycle
 
-Use for run-mode state machine, subprocess lifecycle, or `-debug-log`.
-Consult [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
+Use for the run-mode state machine, subprocess lifecycle, or the debug log.
+
+Consult:
+
+- [Sessions, security, and subprocess lifecycle](docs/guardrails/session-and-security.md),
+  for the state machine, cancellation, and what may be written to disk.
+- [ADR 001](docs/adr/001-session-run-mode-pinned-to-resume-to-prevent-hijack.md),
+  for why run mode pins to resume.
+- [ADR 004](docs/adr/004-ctrl-n-creates-an-isolated-new-session-boundary.md), for
+  the new-session boundary.
+
 Preserve session-hijack prevention and never leak raw stream content.
 
 ### Core Runtime, UI, And Implementation Quality
 
 Use for `internal/app` logic, `internal/ui` rendering, and code style.
-Consult [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Consult:
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md), for the module map, the one-way
+  dependency direction, and the architectural invariants.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md), for code style and verification
+  expectations.
+
 Keep `internal/ui` side-effect-free and the one-way dependency direction intact.
 
 ### Tests And Verification
 
-Use for adding tests or deciding what to run. Consult
-[`docs/guardrails/testing-and-verification.md`](docs/guardrails/testing-and-verification.md)
-and [`CONTRIBUTING.md`](CONTRIBUTING.md). Runner tests must not require a real `cake`;
-run `just test-race` for the runner, `just ci` before handoff.
+Use for adding tests or deciding what to run.
+
+Consult:
+
+- [Testing and verification](docs/guardrails/testing-and-verification.md), for
+  test conventions and the verification ladder.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md), for the command definitions themselves.
+
+Runner tests must not require a real `cake`; run `just test-race` for the
+runner, `just ci` before handoff.
 
 ### Dependencies, Build, CI, And Release
 
-Use for `go.mod`, `justfile`, workflows, `.goreleaser.yaml`, or linters.
-Consult [`docs/guardrails/dependencies-build-ci-release.md`](docs/guardrails/dependencies-build-ci-release.md)
-and [`CONTRIBUTING.md`](CONTRIBUTING.md). Keep pinned tool versions and the Go MSRV
-consistent across `go.mod`, docs, and CI.
+Use for `go.mod`, the `justfile`, workflows, `.goreleaser.yaml`, or linters.
+
+Consult:
+
+- [Dependencies, build, CI, and release](docs/guardrails/dependencies-build-ci-release.md),
+  for dependency, tool-pinning, and release policy.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md), for the build and release commands.
+
+Keep pinned tool versions and the Go MSRV consistent across `go.mod`, docs, and
+CI.
 
 ### Documentation
 
-Use for doc work or when behavior, config, architecture, or compatibility changes
-require doc updates. Consult `docs/guardrails/documentation.md` first. Keep
-`README.md`, `HelpText`, guardrails, ADRs, and routing in sync; move detailed
-rules into the right guardrail rather than growing this file.
+Use for doc work, or when behavior, config, architecture, or compatibility
+changes require doc updates.
+
+Consult:
+
+- [Documentation](docs/guardrails/documentation.md), for the impact matrix that
+  says which surfaces require which doc updates.
+
+Keep `README.md`, `HelpText`, guardrails, ADRs, and routing in sync; move
+detailed rules into the right guardrail rather than growing this file.
+
+### Agent Instructions And Skills
+
+Use for changes to this file, `.agents/skills/`, or any other prose whose
+purpose is to change how an agent behaves.
+
+Consult:
+
+- [Agent-facing instructions](docs/guardrails/agent-instructions.md), for the
+  evidence a behavior-shaping edit requires.
 
 ## Repository Rules
 
