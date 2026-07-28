@@ -12,6 +12,9 @@ workflows (`.github/workflows/`), `.goreleaser.yaml`, `.golangci.yml`, or
 - **Pinned tool versions.** `golangci-lint`, `govulncheck`, and `goreleaser`
   versions are pinned in the `justfile` and referenced by the workflows. Bump
   them together with the workflow `version:` fields, never one side only.
+  `benchstat` is deliberately outside this set: it is an optional developer
+  tool for reading `just bench` output, no CI job uses it, and `install-tools`
+  does not install it.
 - **Dependency surface.** The runtime stack is the charmbracelet ecosystem
   (bubbletea, bubbles, lipgloss) plus termenv. Prefer the standard library; add
   dependencies deliberately and keep `go mod tidy` clean.

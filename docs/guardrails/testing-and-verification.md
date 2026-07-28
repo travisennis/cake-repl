@@ -30,6 +30,19 @@ this guardrail covers the project's test conventions and the verification ladder
   `runner_pipeline_test.go` replays the same fixtures through a fake cake and
   asserts `Start()` delivers the same events — it is hermetic and part of the
   normal suite.
+- **Benchmarks live beside the code they measure** (`*_bench_test.go`) and are
+  as hermetic as the rest of the suite: no real `cake`, fixed terminal
+  dimensions, deterministic payloads, and an explicitly set color profile so a
+  missing TTY does not silently change what is measured. They never run from
+  `just test`, `just test-race`, or `just ci` — only under `-bench`, via
+  `just bench`.
+- **Do not turn a single benchmark run into a design decision.** Measure each
+  layer separately so a result is attributable, cover more than one input size,
+  and repeat the run (`just bench -count=6`), summarizing with `benchstat`
+  (optional developer tool: `go install golang.org/x/perf/cmd/benchstat@latest`;
+  deliberately not pinned in `install-tools`, since CI does not use it). Record
+  the numbers, the environment, and the exact commands in the task record —
+  `internal/app/model_bench_test.go` and task 059 are the worked example.
 - **The real-cake smoke test is opt-in twice over.** `TestSmokeRealCake` needs
   both the `integration` build tag and `CAKE_REAL_SMOKE=1` (`just
   test-real-cake`; `CAKE_BIN` overrides the binary). It must skip — never fail —
@@ -41,6 +54,8 @@ this guardrail covers the project's test conventions and the verification ladder
 
 - Focused change → `just test` (+ `just vet`/`just lint` if relevant).
 - Concurrency / `internal/cake/runner.go` → `just test-race`.
+- Performance change → `just bench` before and after, plus the normal ladder
+  for the code itself.
 - Broad change before handoff → `just ci`.
 - Dependency or release-config change → also `just vuln` / `just release-check`.
 

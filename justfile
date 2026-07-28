@@ -31,6 +31,10 @@ test-race:
 test-real-cake:
     CAKE_REAL_SMOKE=1 go test -tags=integration -count=1 -run TestSmokeRealCake ./internal/cake/
 
+# Benchmarks only, with allocations; extra flags pass through. Never in `ci`.
+bench *args:
+    go test -run '^$' -bench . -benchmem -timeout=30m {{ args }} ./...
+
 fmt:
     go fmt ./...
 

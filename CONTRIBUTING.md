@@ -32,6 +32,7 @@ just install        # go install -trimpath ./cmd/cake-repl
 just test           # go test ./...
 just test-race      # go test -race -cover ./...
 just test-real-cake # opt-in real-cake smoke test (spawns cake; can cost money)
+just bench *args    # benchmarks only, with allocations (e.g. just bench -count=6)
 just quick          # go test ./... && go vet ./...
 just fmt            # go fmt ./...
 just fmt-check      # fail if gofmt would change files
@@ -47,6 +48,13 @@ just ci             # full gate: fmt-check tidy-check vet test-race lint vuln bu
 just verify         # alias for ci
 ```
 
+`just bench` passes extra flags through before the package list, and a later
+flag wins over the recipe's own default, so `just bench -count=6` produces a
+`benchstat`-ready run, `just bench -benchtime=10x` is a quick check, and
+`just bench -bench Timeline` narrows to one family. It runs with a 30-minute
+timeout because repeated runs of the timeline benchmarks exceed Go's
+10-minute default.
+
 Without `just`, run the underlying `go` commands:
 
 ```bash
@@ -60,6 +68,8 @@ go test ./...
 go test ./internal/app/...
 # Run race-detector tests with coverage
 go test -race -cover ./...
+# Run benchmarks only, with allocation counts
+go test -run '^$' -bench . -benchmem -timeout=30m ./...
 # Format
 go fmt ./...
 # Tidy
@@ -85,6 +95,10 @@ go vet ./...
 - Focused change: run `just test` (and `just vet`/`just lint` if relevant).
 - Touching the subprocess runner or anything concurrent: run `just test-race`.
 - Broader change before handoff: run `just ci`.
+- Performance work: run `just bench` before and after the change — with
+  `-count=6` and `benchstat` when the numbers drive a decision. Benchmarks
+  never run from `just test` or `just ci`, so they cost nothing until asked
+  for.
 - Add focused tests next to changed code, especially for stream-json parsing,
   session transitions, command parsing, and UI formatting.
 
