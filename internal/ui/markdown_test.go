@@ -3,6 +3,7 @@ package ui
 import (
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -213,6 +214,33 @@ func TestRenderMarkdown_CacheKeyedOnWidth(t *testing.T) {
 	if narrowLines <= wideLines || narrowLines < 1 {
 		t.Errorf("narrow render should have more line breaks than wide (wide=%d, narrow=%d):\nwide: %q\nnarrow: %q", wideLines, narrowLines, wide, narrow)
 	}
+}
+
+// TestRenderMarkdown_ConcurrentSafety calls RenderMarkdown from multiple
+// goroutines to prove the mutex-protected renderer is safe for concurrent use.
+func TestRenderMarkdown_ConcurrentSafety(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	input := "# Concurrent Rendering\n\nThis **test** verifies that `RenderMarkdown` is safe to call from multiple goroutines."
+
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got := RenderMarkdown(input, 80)
+			if got == "" {
+				t.Error("concurrent render returned empty output")
+			}
+			plain := stripANSI(got)
+			if !strings.Contains(plain, "Concurrent Rendering") {
+				t.Errorf("concurrent render missing content, plain=%q", plain)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestRenderMarkdown_FallbackOnError(t *testing.T) {

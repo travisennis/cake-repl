@@ -26,6 +26,9 @@ var (
 //
 // A private memoization cache avoids constructing a new glamour renderer on
 // every call: the renderer is rebuilt only when width or color profile change.
+//
+// RenderMarkdown is safe for concurrent use: the cached renderer is serialized
+// through a package-level mutex from cache lookup through render completion.
 func RenderMarkdown(text string, width int) string {
 	if strings.TrimSpace(text) == "" {
 		return text
@@ -35,13 +38,18 @@ func RenderMarkdown(text string, width int) string {
 	}
 
 	profile := lipgloss.ColorProfile()
-	r := getRenderer(width, profile)
+
+	mdMu.Lock()
+	r := getRendererLocked(width, profile)
 	if r == nil {
+		mdMu.Unlock()
 		// Fallback: plain text wrapped at width.
 		return lipgloss.NewStyle().Width(width).Render(text)
 	}
 
 	out, err := r.Render(text)
+	mdMu.Unlock()
+
 	if err != nil {
 		return lipgloss.NewStyle().Width(width).Render(text)
 	}
@@ -63,12 +71,11 @@ func RenderMarkdown(text string, width int) string {
 	return out
 }
 
-// getRenderer returns a cached or newly built glamour renderer for the given
+// getRendererLocked returns a cached or newly built glamour renderer for the given
 // width and profile. It returns nil when renderer construction fails.
-func getRenderer(width int, profile termenv.Profile) *glamour.TermRenderer {
-	mdMu.Lock()
-	defer mdMu.Unlock()
-
+//
+// The caller must hold mdMu.
+func getRendererLocked(width int, profile termenv.Profile) *glamour.TermRenderer {
 	if mdRenderer != nil && mdWidth == width && mdProfile == profile {
 		return mdRenderer
 	}
