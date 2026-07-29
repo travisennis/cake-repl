@@ -1127,3 +1127,74 @@ func TestAppendItemRemovesPendingCallWhenToolTrimmedAway(t *testing.T) {
 
 	assertCacheMatchesFullRender(t, &m, "after trimmed tool's late output")
 }
+
+func TestPreReadyTrimDoesNotPanic(t *testing.T) {
+	// Regression: appending past MaxTimelineItems before the first
+	// WindowSizeMsg (when !m.ready) must not panic on the empty render
+	// cache. Drive through Update, not by calling appendItem directly.
+	m := New(Config{MaxTimelineItems: 3})
+	// m.items starts with the welcome message (1 item at index 0).
+	// Sending events through Update before any layout exercises the
+	// pre-ready path.
+	for _, msg := range []tea.Msg{
+		eventMsg{cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"}},
+		eventMsg{cake.Message{Role: "assistant", Content: "hello"}},
+		eventMsg{cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`}},
+		eventMsg{cake.FunctionCallOutput{CallID: "c-1", Output: "output"}},
+	} {
+		tm, _ := m.Update(msg)
+		m = tm.(Model)
+	}
+
+	// Render cache must be empty before first layout.
+	if len(m.rendered) != 0 {
+		t.Errorf("before layout: rendered = %d, want 0", len(m.rendered))
+	}
+
+	// After layout the cache must reflect the trimmed items.
+	m.width, m.height = 80, 24
+	m.layout()
+	if len(m.rendered) != len(m.items) {
+		t.Errorf("after layout: rendered=%d items=%d, want equal", len(m.rendered), len(m.items))
+	}
+	if len(m.items) > 3 {
+		t.Errorf("after layout with max=3: items=%d, want ≤3", len(m.items))
+	}
+	assertCacheMatchesFullRender(t, &m, "after pre-ready trim then layout")
+}
+
+func TestPreReadyTrimWithPendingCalls(t *testing.T) {
+	// Same scenario as above but with a mix of tool items whose call_ids
+	// must survive the trim.
+	m := New(Config{MaxTimelineItems: 3})
+	// items: [welcome] → send events before layout
+	for _, msg := range []tea.Msg{
+		eventMsg{cake.FunctionCall{ID: "fc-1", CallID: "A", Name: "bash", Arguments: `{}`}},
+		eventMsg{cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{}`}},
+		// 4th item triggers trim; welcome trimmed away
+		eventMsg{cake.Reasoning{Summary: []string{"thinking"}}},
+	} {
+		tm, _ := m.Update(msg)
+		m = tm.(Model)
+	}
+
+	// pendingCalls must reflect the left shift.
+	if idx, ok := m.pendingCalls["A"]; !ok || idx != 0 {
+		t.Errorf("pendingCalls['A'] = %d (ok=%v), want 0", idx, ok)
+	}
+	if idx, ok := m.pendingCalls["B"]; !ok || idx != 1 {
+		t.Errorf("pendingCalls['B'] = %d (ok=%v), want 1", idx, ok)
+	}
+
+	// Late output for A must find the right item.
+	tm2, _ := m.Update(eventMsg{cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"}})
+	m = tm2.(Model)
+	if !m.items[0].Tool.Done || m.items[0].Tool.Output != "OUTPUT-A" {
+		t.Errorf("tool A after output: done=%v output=%q", m.items[0].Tool.Done, m.items[0].Tool.Output)
+	}
+
+	// Layout and verify full render consistency.
+	m.width, m.height = 80, 24
+	m.layout()
+	assertCacheMatchesFullRender(t, &m, "after pre-ready trim with pending calls then layout")
+}

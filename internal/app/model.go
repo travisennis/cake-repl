@@ -228,8 +228,10 @@ func (m *Model) appendItem(it ui.Item) int {
 	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
 		over := len(m.items) - m.cfg.MaxTimelineItems
 		m.trimFront(over)
-		m.rendered = m.rendered[over:]
-		m.rebuildTimelineContent()
+		if m.ready {
+			m.rendered = m.rendered[over:]
+			m.rebuildTimelineContent()
+		}
 	}
 	if m.ready {
 		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
