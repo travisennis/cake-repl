@@ -22,6 +22,9 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    govet:
+      enable:
+        - shadow
     gosec:
       excludes: []
     revive:

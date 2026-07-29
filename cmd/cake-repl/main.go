@@ -124,7 +124,7 @@ func run() (err error) {
 	maxTimelineItems := flag.Int("max-timeline-items", 0, "limit timeline to this many entries (0 = no limit)")
 	flag.Parse()
 
-	if err := validateFlags(*showVersion, *continueFlag, *resume, flag.Args(), *configPath, *noConfig); err != nil {
+	if err = validateFlags(*showVersion, *continueFlag, *resume, flag.Args(), *configPath, *noConfig); err != nil {
 		return err
 	}
 	if *showVersion {
@@ -212,7 +212,8 @@ func run() (err error) {
 	}
 
 	if *debugLog != "" {
-		f, err := os.OpenFile(*debugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		var f *os.File
+		f, err = os.OpenFile(*debugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return fmt.Errorf("opening -debug-log: %w", err)
 		}
