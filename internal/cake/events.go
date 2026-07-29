@@ -124,11 +124,12 @@ type Usage struct {
 	TotalTokens  int `json:"total_tokens"`
 }
 
-// Unknown preserves a record whose type is not recognized. It is kept for
-// debug display and otherwise ignored.
+// Unknown preserves a record whose type is not recognized. Only the type
+// discriminator is retained; the full raw line is not copied (it is already
+// written to the debug log by the runner). The stream keeps flowing so that
+// forward-compatible decoding is cheap.
 type Unknown struct {
 	Type string
-	Raw  string
 }
 
 func (e Unknown) EventType() string { return e.Type }

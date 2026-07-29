@@ -67,6 +67,6 @@ func ParseLine(line []byte) (Event, error) {
 		}
 		return ev, nil
 	default:
-		return Unknown{Type: env.Type, Raw: string(trimmed)}, nil
+		return Unknown{Type: env.Type}, nil
 	}
 }
