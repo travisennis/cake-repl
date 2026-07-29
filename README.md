@@ -197,6 +197,12 @@ validation is available with `just release-check`.
 
 - No session browser; `/resume` needs a UUID you already know.
 - Tool output is truncated at 2,000 characters by default (configurable via `-output-limit` or config file).
+- Terminal control sequences are stripped from everything cake sends before it
+  is drawn, so a command's own ANSI colors are not shown and tabs render as
+  four spaces. This is deliberate and cannot be turned off: tool output is the
+  stdout of arbitrary commands, and escape sequences there could clear the
+  screen, write your clipboard, or forge hyperlinks. The raw bytes are still
+  recorded when `-debug-log` is set.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.

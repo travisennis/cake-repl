@@ -46,6 +46,12 @@ commands or help text (`internal/app/commands.go`), key bindings
   truncating, with continuation lines indented under the argument column; long
   single tokens (e.g. paths and bash commands) hard-wrap so the full content
   stays visible.
+  All timeline and status-line text is sanitized before styling: ANSI escape
+  sequences are stripped, tabs expand to four spaces, and remaining C0/C1
+  controls are dropped, so tool output renders as plain text without its own
+  colors. This is unconditional; see
+  [`session-and-security.md`](session-and-security.md) and
+  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
   Tool *output* truncates at the configured output limit (default 2000 bytes) on
   rune boundaries. `Ctrl+O` cycles every tool block through three session-wide
   output modes: truncated (default), full, and hidden. Full mode ignores the
@@ -80,4 +86,5 @@ commands or help text (`internal/app/commands.go`), key bindings
 - [`session-and-security.md`](session-and-security.md) — `/new` `/continue` `/resume`, `-debug-log`.
 - [`../adr/002-config-file-for-repl-defaults.md`](../adr/002-config-file-for-repl-defaults.md) — config file decision.
 - [`../adr/003-tool-output-expansion-key-binding.md`](../adr/003-tool-output-expansion-key-binding.md) — tool output expansion key binding.
+- [`../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md`](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md) — terminal-escape sanitization.
 - [`../../README.md`](../../README.md) — the user-facing reference these mirror.

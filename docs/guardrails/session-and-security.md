@@ -24,6 +24,15 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
   secrets. They go **only** to `-debug-log` (opened `0o600`), never to the
   timeline or stdout. Do not add logging that leaks raw stream content elsewhere.
+- **Terminal-injection defense (security boundary).** Stream content is
+  attacker-influenceable: tool output is the stdout of arbitrary commands and
+  the contents of arbitrary files. `ui.Sanitize` strips ANSI escape sequences,
+  expands tabs, drops the remaining C0/C1 controls and DEL, and replaces
+  invalid UTF-8. It is applied unconditionally at the render boundary
+  (`ui.RenderItem`, `ui.StatusLine`) so `CSI 2J`, `OSC 52`, and `OSC 8` cannot
+  reach the terminal from any item kind. Newline is the only preserved control
+  character. See
+  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
 - **Process lifecycle.** One cake process at a time. Cancel = SIGTERM then
   SIGKILL after `WaitDelay` (kill outright on Windows). stderr retained as a
   bounded tail for error display.
@@ -41,6 +50,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   that _did_ report a session id, or advancing run mode on a failed task.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
+- **Reopening terminal injection.** Adding a render path that bypasses
+  `ui.RenderItem`/`ui.StatusLine`, or an opt-out that lets stream escapes
+  through. Relying on glamour to discard escapes is not a defense.
 - **Cancellation races.** Treating a finished run as canceled because Ctrl+C
   arrived late — classify from the `cmd.Cancel` flag plus signal-terminated
   process status on POSIX, not the context. See `runner.go` for how the atomic

@@ -68,6 +68,11 @@ type ToolBlock struct {
 // RenderItem renders one timeline item at the given width and output limit.
 // Items render independently of each other, so callers can cache results per
 // item.
+//
+// Every item's text is [Sanitize]d here, before any styling, so that no path
+// out of the timeline can write attacker-controlled escape sequences to the
+// terminal. This is the single sanitization boundary: callers pass raw stream
+// content, and only the debug log ever sees it unmodified.
 func RenderItem(th Theme, it Item, width int, outputLimit int, toolOutputMode ToolOutputMode) string {
 	if width < 8 {
 		width = 8
@@ -75,6 +80,8 @@ func RenderItem(th Theme, it Item, width int, outputLimit int, toolOutputMode To
 	if outputLimit <= 0 {
 		outputLimit = DefaultOutputLimit
 	}
+	// it is a copy, so sanitizing Text does not mutate the caller's item.
+	it.Text = Sanitize(it.Text)
 	wrap := func(style lipgloss.Style, s string) string {
 		return style.Width(width).Render(s)
 	}
@@ -129,25 +136,33 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 	if outputLimit <= 0 {
 		outputLimit = DefaultOutputLimit
 	}
-	summary := SummarizeToolArgs(tool.Name, tool.Arguments)
-	header := renderToolHeader(th, tool.Name, summary, width)
+	// The tool block is shared with the caller, so sanitize into locals rather
+	// than writing back through the pointer. Arguments are sanitized after
+	// summarizing, not before: control characters arrive JSON-escaped
+	// as "\\u001b" and only become real control bytes once decoded.
+	name := Sanitize(tool.Name)
+	summary := Sanitize(SummarizeToolArgs(tool.Name, tool.Arguments))
+	header := renderToolHeader(th, name, summary, width)
 	lines := []string{header}
 	// Multi-line argument summaries (edit previews) follow the header.
 	if rest := strings.SplitN(summary, "\n", 2); len(rest) == 2 {
 		lines = append(lines, th.ToolArgs.Width(width).Render(rest[1]))
 	}
 	if outputMode != ToolOutputHidden {
+		// Sanitizing inside this branch keeps hidden mode from scanning output
+		// it is not going to show.
+		output := Sanitize(tool.Output)
 		switch {
 		case !tool.Done:
 			lines = append(lines, th.ToolOutput.Render("  … running"))
-		case strings.TrimSpace(tool.Output) == "":
+		case strings.TrimSpace(output) == "":
 			lines = append(lines, th.ToolOutput.Render("  (no output)"))
 		default:
 			var out string
 			if outputMode == ToolOutputFull {
-				out = strings.TrimRight(tool.Output, "\n")
+				out = strings.TrimRight(output, "\n")
 			} else {
-				out = TruncateOutput(tool.Output, outputLimit)
+				out = TruncateOutput(output, outputLimit)
 			}
 			lines = append(lines, indent(th.ToolOutput.Width(width-2).Render(out), "  "))
 		}

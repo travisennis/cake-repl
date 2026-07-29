@@ -39,10 +39,16 @@ func StatusLine(th Theme, width int, status Status) string {
 		{key: "model", value: status.Model},
 		{key: "cwd", value: status.Cwd},
 	} {
-		if field.value == "" {
+		// Session id, next-run id, and model reach here from cake or config, so
+		// they are sanitized for the same reason RenderItem sanitizes timeline
+		// text: escapes would survive styling and desync the padding math below.
+		// State is exempt because callers compose it from styled local widgets
+		// (the spinner), not from stream content.
+		value := Sanitize(field.value)
+		if value == "" {
 			continue
 		}
-		fields = append(fields, th.StatusKey.Render(field.key+":")+" "+th.StatusValue.Render(field.value))
+		fields = append(fields, th.StatusKey.Render(field.key+":")+" "+th.StatusValue.Render(value))
 	}
 
 	line := " " + stateSegment

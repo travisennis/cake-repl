@@ -23,6 +23,12 @@ const maxEditPreviews = 3
 // SummarizeToolArgs renders a concise, single-purpose summary of a tool
 // call's arguments. Tool names are matched case-insensitively; the original
 // name is left untouched by callers.
+//
+// The summary is not sanitized: decoded arguments can contain terminal control
+// sequences, and callers must pass the result through [Sanitize] before it
+// reaches the terminal. Sanitizing here instead would not work, because
+// control characters arrive JSON-escaped and only become control bytes once
+// this function decodes them.
 func SummarizeToolArgs(name, argsJSON string) string {
 	switch strings.ToLower(name) {
 	case "bash":
@@ -121,6 +127,10 @@ func summarizeWrite(argsJSON string) string {
 // TruncateOutput limits s to roughly limit bytes, preferring to cut at a
 // line boundary, and appends a marker with the original size. A limit of 0
 // or less uses DefaultOutputLimit.
+//
+// It does not sanitize: callers pass already-[Sanitize]d text, so the reported
+// size is that of the sanitized output and the byte budget is spent on
+// characters the user can actually see.
 func TruncateOutput(s string, limit int) string {
 	s = strings.TrimRight(s, "\n")
 	if limit <= 0 {
