@@ -17,7 +17,7 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.
 - **Session run-mode behavior**, which prevents session hijack.
 - **Secrets**: raw stream content goes only to the debug log, written
-  owner-only.
+  owner-only at creation (an existing file's permissions are not narrowed).
 - **The Go MSRV and the pinned lint, vulnerability, and release tools**;
   `go.mod` and the `justfile` are the authority for the versions.
 

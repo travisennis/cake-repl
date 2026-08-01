@@ -22,8 +22,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `/session`, `/help`, `/clear`, and `/exit` remain available during a run.
   Keep session transitions pure and I/O-free so they stay testable.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
-  secrets. They go **only** to `-debug-log` (opened `0o600`), never to the
-  timeline or stdout. Do not add logging that leaks raw stream content elsewhere.
+  secrets. They go **only** to `-debug-log` (opened `0o600`; the mode applies
+  at creation — an existing file's permissions are not narrowed), never to the
+  timeline or stdout. Do not add logging that leaks raw stream content
+  elsewhere.
 - **Terminal-injection defense (security boundary).** Stream content is
   attacker-influenceable: tool output is the stdout of arbitrary commands and
   the contents of arbitrary files. `ui.Sanitize` strips ANSI escape sequences,
