@@ -373,9 +373,12 @@ func (m *Model) applyEvent(ev cake.Event) {
 		}
 
 	case cake.Reasoning:
-		text := strings.TrimSpace(strings.Join(e.Summary, "\n"))
-		if text != "" {
-			m.appendItem(ui.Item{Kind: ui.KindReasoning, Text: text})
+		// Reasoning content is deliberately not rendered: providers differ
+		// widely in what they emit (summaries, raw text, or nothing at all),
+		// so the timeline shows one coalesced "(thinking)" marker per burst
+		// of reasoning events. Any other event type ends the burst.
+		if !m.lastItemIsReasoning() {
+			m.appendItem(ui.Item{Kind: ui.KindReasoning, Text: "(thinking)"})
 		}
 
 	case cake.FunctionCall:

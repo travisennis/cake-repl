@@ -31,9 +31,13 @@ commands or help text (`internal/app/commands.go`), key bindings
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
   labeled conversation sections with a slim gutter at normal widths; narrow
-  widths omit the gutter and abbreviate the assistant label. Reasoning and tool
-  output remain secondary, while task starts, info, completions, warnings, and
-  errors use distinct compact markers. The one-line status display leads with a
+  widths omit the gutter and abbreviate the assistant label. Reasoning renders
+  as a single muted `(thinking)` marker per reasoning burst: consecutive
+  `reasoning` events coalesce, any other event ends the burst, and the payload
+  (e.g. a `summary`) is never shown because providers differ in what they emit.
+  Reasoning and tool output remain secondary, while task starts, info,
+  completions, warnings, and errors use distinct compact markers. The one-line
+  status display leads with a
   bracketed idle/running state, followed by labeled session, next-run, optional
   model, and cwd context; it pads or truncates to the terminal width. The prompt
   textarea is framed as

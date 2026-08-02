@@ -4,7 +4,7 @@ A standalone terminal REPL for the [`cake`](https://github.com/travisennis/cake)
 
 `cake-repl` treats cake as the engine: each submitted prompt spawns one
 `cake --output-format stream-json` process and renders its event stream live —
-assistant messages in REPL-themed markdown, reasoning summaries, tool calls
+assistant messages in REPL-themed markdown, thinking indicators, tool calls
 grouped with their outputs, hook denials, and completion stats. Labeled user and
 assistant sections anchor the conversation while operational events remain
 compact and visually distinct.

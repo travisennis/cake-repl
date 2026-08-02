@@ -258,6 +258,14 @@ func (m *Model) firstPendingToolIdx() int {
 	return -1
 }
 
+// lastItemIsReasoning reports whether the newest timeline item is the
+// reasoning marker. Consecutive cake.Reasoning events coalesce into a single
+// "(thinking)" entry; any other event type ends the burst, and a marker
+// trimmed off the timeline simply starts a fresh one.
+func (m *Model) lastItemIsReasoning() bool {
+	return len(m.items) > 0 && m.items[len(m.items)-1].Kind == ui.KindReasoning
+}
+
 // insertItemAt inserts an item at the given index, shifting subsequent items
 // to the right, and updates the render cache and pending call indices.
 func (m *Model) insertItemAt(idx int, it ui.Item) {

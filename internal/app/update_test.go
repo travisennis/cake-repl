@@ -1058,7 +1058,7 @@ func TestAppendItemUpdatesPendingCallsOnTrim(t *testing.T) {
 
 	// A reasoning item pushes to 4, triggers trim of the front.
 	// After trim: [tool-A, tool-B, reasoning]
-	m.applyEvent(cake.Reasoning{Summary: []string{"thinking"}})
+	m.applyEvent(cake.Reasoning{})
 
 	// pendingCalls must reflect the left shift: A→0, B→1
 	if idx, ok := m.pendingCalls["A"]; !ok || idx != 0 {
@@ -1086,6 +1086,43 @@ func TestAppendItemUpdatesPendingCallsOnTrim(t *testing.T) {
 	assertCacheMatchesFullRender(t, &m, "after trim and tool A output")
 }
 
+func TestReasoningShowsOneCoalescedMarkerPerBurst(t *testing.T) {
+	m := newLaidOutModel()
+
+	// A burst of reasoning events — including one with no summary, the case
+	// that used to be invisible — coalesces into a single marker. The
+	// payload is never rendered.
+	m.applyEvent(cake.Reasoning{Summary: []string{"step one"}})
+	m.applyEvent(cake.Reasoning{})
+	m.applyEvent(cake.Reasoning{Summary: []string{"step three"}})
+	if got := lastItem(t, m); got.Kind != ui.KindReasoning || got.Text != "(thinking)" {
+		t.Fatalf("after burst: last item = %+v, want single (thinking) marker", got)
+	}
+	if n := len(m.items); n != 2 { // welcome + marker
+		t.Errorf("items after burst = %d, want 2 (welcome + one marker)", n)
+	}
+
+	// Any other event ends the burst, so the next reasoning event starts a
+	// fresh marker.
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
+	m.applyEvent(cake.Reasoning{})
+	it := lastItem(t, m)
+	if it.Kind != ui.KindReasoning || it.Text != "(thinking)" {
+		t.Fatalf("after tool + reasoning: last item = %+v, want fresh (thinking) marker", it)
+	}
+	markers := 0
+	for _, item := range m.items {
+		if item.Kind == ui.KindReasoning {
+			markers++
+		}
+	}
+	if markers != 2 {
+		t.Errorf("reasoning markers = %d, want 2 (one per burst)", markers)
+	}
+
+	assertCacheMatchesFullRender(t, &m, "after two reasoning bursts")
+}
+
 func TestAppendItemRemovesPendingCallWhenToolTrimmedAway(t *testing.T) {
 	// When a pending tool call's item is itself trimmed out of the
 	// timeline window, its pendingCalls entry must be deleted so that
@@ -1101,7 +1138,7 @@ func TestAppendItemRemovesPendingCallWhenToolTrimmedAway(t *testing.T) {
 	m.applyEvent(cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{"command":"echo b"}`})
 
 	// items: [tool-B, reasoning] (tool-A trimmed away)
-	m.applyEvent(cake.Reasoning{Summary: []string{"thinking"}})
+	m.applyEvent(cake.Reasoning{})
 
 	// A must be gone from pendingCalls since its item was trimmed.
 	if _, ok := m.pendingCalls["A"]; ok {
@@ -1172,7 +1209,7 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 		eventMsg{cake.FunctionCall{ID: "fc-1", CallID: "A", Name: "bash", Arguments: `{}`}},
 		eventMsg{cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{}`}},
 		// 4th item triggers trim; welcome trimmed away
-		eventMsg{cake.Reasoning{Summary: []string{"thinking"}}},
+		eventMsg{cake.Reasoning{}},
 	} {
 		tm, _ := m.Update(msg)
 		m = tm.(Model)
