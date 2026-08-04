@@ -21,9 +21,44 @@ func TestSummarizeBashWithCwd(t *testing.T) {
 }
 
 func TestSummarizeBashMultilineCommand(t *testing.T) {
-	got := SummarizeToolArgs("bash", `{"command":"echo one\necho two"}`)
+	got := SummarizeToolArgs("bash", `{"command":"cd /tmp\necho two"}`)
 	if strings.Contains(got, "\n") {
 		t.Errorf("multiline command should be flattened, got %q", got)
+	}
+	// The last line is the actual payload and must not be hidden behind
+	// setup lines like cd.
+	if !strings.Contains(got, "cd /tmp") || !strings.Contains(got, "echo two") {
+		t.Errorf("expected first and last lines, got %q", got)
+	}
+}
+
+func TestSummarizeBashElidesMiddleLines(t *testing.T) {
+	got := SummarizeToolArgs("bash", `{"command":"cd /repo\nexport FOO=1\nmake test"}`)
+	if !strings.Contains(got, "cd /repo") || !strings.Contains(got, "make test") {
+		t.Errorf("expected first and last lines, got %q", got)
+	}
+	if strings.Contains(got, "FOO") {
+		t.Errorf("middle lines should be elided, got %q", got)
+	}
+	if !strings.Contains(got, " … ") {
+		t.Errorf("expected ellipsis separator, got %q", got)
+	}
+}
+
+func TestSummarizeBashIgnoresBlankLines(t *testing.T) {
+	got := SummarizeToolArgs("bash", `{"command":"\ncd /tmp\n\nmake\n"}`)
+	if !strings.Contains(got, "cd /tmp") || !strings.Contains(got, "make") {
+		t.Errorf("blank lines should be ignored, got %q", got)
+	}
+}
+
+func TestSummarizeBashKeepsMarkerWhenFirstLastLinesMatch(t *testing.T) {
+	got := SummarizeToolArgs("bash", `{"command":"cd /tmp\necho hi\ncd /tmp"}`)
+	if !strings.Contains(got, " … ") {
+		t.Errorf("expected ellipsis marker even when first and last lines match, got %q", got)
+	}
+	if strings.Contains(got, "echo hi") {
+		t.Errorf("middle lines should be elided, got %q", got)
 	}
 }
 

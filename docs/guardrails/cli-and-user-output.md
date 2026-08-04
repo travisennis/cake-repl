@@ -49,7 +49,9 @@ commands or help text (`internal/app/commands.go`), key bindings
   (tool name plus argument summary) wrap to the terminal width instead of
   truncating, with continuation lines indented under the argument column; long
   single tokens (e.g. paths and bash commands) hard-wrap so the full content
-  stays visible.
+  stays visible. Multi-line bash commands show their first and last non-empty
+  lines joined by an ellipsis, so setup lines (`cd`, `export`) never hide the
+  actual payload.
   All timeline and status-line text is sanitized before styling: ANSI escape
   sequences are stripped, tabs expand to four spaces, and remaining C0/C1
   controls are dropped, so tool output renders as plain text without its own

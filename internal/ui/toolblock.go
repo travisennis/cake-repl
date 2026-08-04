@@ -52,10 +52,10 @@ func summarizeBash(argsJSON string) string {
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Command == "" {
 		return compactJSON(argsJSON)
 	}
-	// Keep the full first line of the command so the header can wrap it
-	// instead of truncating; width-based clipping happened here previously
-	// and lost the tail of long commands.
-	s := "$ " + firstLineNoLimit(args.Command)
+	// Keep the command (first and last lines for multi-line commands) so the
+	// header can wrap it instead of truncating; width-based clipping happened
+	// here previously and lost the tail of long commands.
+	s := "$ " + summarizeCommand(args.Command)
 	if args.Cwd != "" {
 		s += "  (cwd: " + args.Cwd + ")"
 	}
@@ -190,15 +190,33 @@ func firstLineOf(s string, n int) string {
 	return truncateString(s, n)
 }
 
-// firstLineNoLimit returns the first line of s without cell-based trimming.
-// A trailing "…" marks commands that continue on further lines, but no width
-// clipping is applied so callers can wrap the result themselves.
-func firstLineNoLimit(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i] + "…"
+// summarizeCommand renders a shell command for the tool header. A single-line
+// command is shown in full. A multi-line command shows its first and last
+// non-empty lines joined by " … " so setup lines (cd, export) never hide the
+// actual payload, while the opening line keeps the command's context. No width
+// clipping is applied; callers wrap the result themselves.
+func summarizeCommand(s string) string {
+	lines := nonEmptyLines(s)
+	if len(lines) == 0 {
+		return ""
 	}
-	return s
+	if len(lines) == 1 {
+		return lines[0]
+	}
+	return lines[0] + " … " + lines[len(lines)-1]
+}
+
+// nonEmptyLines splits s on newlines and returns the space-trimmed non-empty
+// lines in order.
+func nonEmptyLines(s string) []string {
+	raw := strings.Split(s, "\n")
+	lines := make([]string, 0, len(raw))
+	for _, l := range raw {
+		if t := strings.TrimSpace(l); t != "" {
+			lines = append(lines, t)
+		}
+	}
+	return lines
 }
 
 // firstLineOnly returns the portion of s before the first newline, with no
