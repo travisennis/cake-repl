@@ -1,9 +1,12 @@
 package app
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textarea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/ui"
@@ -16,6 +19,35 @@ func newLaidOutModel() Model {
 	m.width, m.height = 80, 24
 	m.layout()
 	return m
+}
+
+func TestInitSetsWindowTitleToWorkingDirectory(t *testing.T) {
+	m := New(Config{Cwd: "/tmp/project\x1b]2;injected\a"})
+	msg := m.Init()()
+	cmds, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("Init message type = %T, want tea.BatchMsg", msg)
+	}
+
+	var title string
+	var blinkFound bool
+	blinkType := reflect.TypeOf(textarea.Blink())
+	for _, cmd := range cmds {
+		cmdMsg := cmd()
+		if reflect.TypeOf(cmdMsg) == blinkType {
+			blinkFound = true
+		}
+		value := reflect.ValueOf(cmdMsg)
+		if value.IsValid() && value.Kind() == reflect.String {
+			title = value.String()
+		}
+	}
+	if want := "cake-repl: /tmp/project"; title != want {
+		t.Errorf("window title = %q, want %q", title, want)
+	}
+	if !blinkFound {
+		t.Error("Init did not preserve textarea blinking")
+	}
 }
 
 // renderItemsFull is the reference implementation for timeline join: each item

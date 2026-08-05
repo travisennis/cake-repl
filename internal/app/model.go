@@ -205,7 +205,10 @@ func (m Model) SessionData() (sessionID, cwd string) {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return textarea.Blink
+	return tea.Batch(
+		textarea.Blink,
+		tea.SetWindowTitle("cake-repl: "+ui.Sanitize(m.cfg.Cwd)),
+	)
 }
 
 // trimFront removes the first `over` items from the timeline, adjusts

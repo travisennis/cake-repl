@@ -42,7 +42,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   model, and cwd context; it pads or truncates to the terminal width. The prompt
   textarea is framed as
   a focused composer with ready/running state and concise submit, newline, and
-  help hints; its borders remain visible without color. `-no-color` /
+  help hints; its borders remain visible without color. While the TUI is
+  running, the terminal title is `cake-repl: <absolute working directory>`,
+  using the directory selected by `-cwd` or the startup directory by default.
+  `-no-color` /
   `DefaultTheme` must keep producing usable ASCII output. Markdown renders via
   glamour with compact REPL-themed headings, quotes, links, code, and emphasis;
   the ASCII profile uses text markers and strips all ANSI. Tool-block headers

@@ -51,6 +51,10 @@ cake-repl -resume <uuid>                     # resume a specific session
 cake-repl -cake-bin ../cake/target/debug/cake
 ```
 
+While running, cake-repl sets the terminal title to
+`cake-repl: <absolute working directory>`. The `-cwd` flag selects that working
+directory; otherwise cake-repl uses the directory where it was started.
+
 Flags:
 
 | Flag | Meaning |
