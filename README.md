@@ -104,11 +104,13 @@ Flags:
 ## Session behavior
 
 - A fresh start uses no session flag.
-- After a successful task, future prompts are pinned to that session via
+- Once cake reports a session id, future prompts are pinned to that session via
   `--resume <id>`, so another cake process creating a newer session in the
-  same directory cannot hijack the conversation. If cake never reported a
-  session id, the fallback is `--continue`.
-- A failed or canceled task does not advance the run mode.
+  same directory cannot hijack the conversation. If a task succeeded and cake
+  never reported a session id, the fallback is `--continue`.
+- A failed or canceled task is still pinned, so the next prompt continues the
+  session the run left behind instead of starting a new one. A task that fails
+  before reporting any session id leaves the run mode unchanged.
 - `/new` clears local session state; the next prompt starts fresh.
 - `Ctrl+N` clears the timeline and local session state immediately. If a task
   is running, it is canceled and its remaining events are discarded. Prompt

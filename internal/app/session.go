@@ -23,11 +23,14 @@ func (s *sessionState) OnTaskStart(e cake.TaskStart) {
 	s.TaskID = e.TaskID
 }
 
-// OnTaskComplete records the outcome. A successful task pins future prompts
-// to the same session via --resume <id>, so a newer session created by
-// another cake process in the same cwd cannot hijack the conversation. If no
-// session id was ever reported, it falls back to --continue. A failed task
-// does not advance the run mode.
+// OnTaskComplete records the outcome. Once a session id is known, future
+// prompts are pinned to it via --resume <id>, so a newer session created by
+// another cake process in the same cwd cannot hijack the conversation. This
+// holds whether the task succeeded or failed: cake writes a resumable session
+// file either way, and a failed run that is not pinned would be orphaned by
+// the next prompt. Only a *successful* task with no session id falls back to
+// --continue; on failure the run mode is left untouched rather than advanced
+// into the mode that is itself the hijack vector.
 func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 	s.LastComplete = &e
 	if e.SessionID != "" {
@@ -36,14 +39,13 @@ func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 	if e.TaskID != "" {
 		s.TaskID = e.TaskID
 	}
+
+	if s.pinToSession() {
+		return
+	}
 	if !e.IsError {
-		if s.SessionID != "" {
-			s.NextMode = cake.RunResume
-			s.ResumeID = s.SessionID
-		} else {
-			s.NextMode = cake.RunContinue
-			s.ResumeID = ""
-		}
+		s.NextMode = cake.RunContinue
+		s.ResumeID = ""
 	}
 }
 
@@ -52,10 +54,18 @@ func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 // session so the next submission does not accidentally create a new one. This
 // preserves the hijack-prevention boundary even when a task is cut short.
 func (s *sessionState) OnCancel() {
-	if s.SessionID != "" {
-		s.NextMode = cake.RunResume
-		s.ResumeID = s.SessionID
+	s.pinToSession()
+}
+
+// pinToSession points the next prompt at the known session id and reports
+// whether it had one to pin to.
+func (s *sessionState) pinToSession() bool {
+	if s.SessionID == "" {
+		return false
 	}
+	s.NextMode = cake.RunResume
+	s.ResumeID = s.SessionID
+	return true
 }
 
 // Reset clears all session state; the next prompt starts a fresh session.

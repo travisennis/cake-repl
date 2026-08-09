@@ -71,22 +71,48 @@ func TestNewResetsToFresh(t *testing.T) {
 	}
 }
 
-func TestFailureDoesNotAdvanceMode(t *testing.T) {
+func TestFailureWithSessionIDPinsToResume(t *testing.T) {
 	var s sessionState
+	s.OnTaskStart(cake.TaskStart{SessionID: "s-1", TaskID: "t-1"})
 	s.OnTaskComplete(failure("s-1"))
-	if mode, _ := s.RunOptions(); mode != cake.RunFresh {
-		t.Errorf("fresh + failure should stay fresh, got %v", mode)
+
+	mode, id := s.RunOptions()
+	if mode != cake.RunResume || id != "s-1" {
+		t.Errorf("after failure mode=%v id=%q, want resume pinned to s-1", mode, id)
+	}
+	if s.LastComplete == nil || !s.LastComplete.IsError {
+		t.Error("failure should still be recorded as last completion")
+	}
+}
+
+// A task can fail before ever announcing a session id. There is nothing to
+// resume, and falling back to --continue is the hijack vector, so the run mode
+// must stay where it was.
+func TestFailureWithoutSessionIDDoesNotAdvanceMode(t *testing.T) {
+	var s sessionState
+	s.OnTaskComplete(failure(""))
+	if mode, id := s.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Errorf("fresh + failure with no session id mode=%v id=%q, want fresh with empty id", mode, id)
 	}
 
 	s.UseResume("11111111-2222-3333-4444-555555555555")
-	s.OnTaskComplete(failure("s-1"))
+	s.OnTaskComplete(failure(""))
 	mode, id := s.RunOptions()
 	if mode != cake.RunResume || id != "11111111-2222-3333-4444-555555555555" {
-		t.Errorf("resume + failure should stay resume, got mode=%v id=%q", mode, id)
+		t.Errorf("resume + failure with no session id mode=%v id=%q, want resume unchanged", mode, id)
 	}
+}
 
-	if s.LastComplete == nil || !s.LastComplete.IsError {
-		t.Error("failure should still be recorded as last completion")
+// A failure reporting a session id that differs from an explicitly requested
+// one pins to the session cake actually ran, matching the success path.
+func TestFailureAfterExplicitResumePinsToReportedSession(t *testing.T) {
+	var s sessionState
+	s.UseResume("11111111-2222-3333-4444-555555555555")
+	s.OnTaskComplete(failure("s-1"))
+
+	mode, id := s.RunOptions()
+	if mode != cake.RunResume || id != "s-1" {
+		t.Errorf("after failure mode=%v id=%q, want resume pinned to s-1", mode, id)
 	}
 }
 

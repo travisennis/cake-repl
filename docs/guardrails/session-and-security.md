@@ -6,15 +6,17 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 
 ## Compatibility surfaces
 
-- **Session pinning (security boundary).** After a successful task,
-  `sessionState` pins future prompts to `--resume <session-id>`. This prevents
-  another cake process that creates a newer session in the same cwd from
-  **hijacking** the conversation. Fallback is `--continue` only when no session
-  id was ever reported. A failed task must not advance the run mode. A canceled
-  task preserves the pin to a session id that was already announced, so the
-  next submission does not accidentally start a fresh session.
-- **Run-mode transitions.** `RunFresh` → (success) → `RunResume`; `/new` resets
-  to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
+- **Session pinning (security boundary).** Once a session id has been
+  announced, `sessionState` pins future prompts to `--resume <session-id>`.
+  This prevents another cake process that creates a newer session in the same
+  cwd from **hijacking** the conversation. The pin applies on success, failure,
+  and cancellation alike: cake writes a resumable session file in every case,
+  so the next submission must not accidentally start a fresh session and orphan
+  the work. Fallback to `--continue` is reserved for a **successful** task that
+  reported no session id; a failed task with no session id leaves the run mode
+  untouched rather than selecting `--continue`.
+- **Run-mode transitions.** `RunFresh` → (any completion reporting a session
+  id) → `RunResume`; `/new` resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
   drains an active run without letting its late events or cancellation restore
   the old session pin; `/continue` and `/resume` set the next mode explicitly.
   **Active-run restriction:** `/new`, `/continue`, and `/resume` are rejected
@@ -42,14 +44,18 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 ## Required checks / test focus
 
 - `just test` for `session_test.go` (cover every transition, especially
-  success-pins-resume and failure-does-not-advance).
+  success-pins-resume, failure-pins-resume, and failure-without-a-session-id-
+  does-not-advance).
 - `just test-race` for any `runner.go` change.
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
 
 ## Common failure modes
 
-- **Reintroducing the hijack.** Falling back to `--continue` after a success
-  that _did_ report a session id, or advancing run mode on a failed task.
+- **Reintroducing the hijack.** Falling back to `--continue` after a completion
+  that _did_ report a session id, or selecting `--continue` on a failed task.
+- **Orphaning a session.** Leaving the run mode at `RunFresh` after a failure
+  that reported a session id, so the user's next prompt silently starts a new
+  session and abandons everything the failed run wrote.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Reopening terminal injection.** Adding a render path that bypasses
