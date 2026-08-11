@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -34,26 +33,6 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.w.Write(p)
-}
-
-// sessionFilePath returns the path where cake stores the session file for the
-// given session ID. It respects $CAKE_DATA_DIR when set, otherwise uses
-// ~/.local/share/cake/sessions/<id>.jsonl.
-func sessionFilePath(home, sessionID string) string {
-	if d := os.Getenv("CAKE_DATA_DIR"); d != "" {
-		return filepath.Join(d, "sessions", sessionID+".jsonl")
-	}
-	return filepath.Join(home, ".local", "share", "cake", "sessions", sessionID+".jsonl")
-}
-
-// displayPath replaces a leading home directory prefix with ~ for compact
-// display. Paths not under home (e.g. a custom $CAKE_DATA_DIR) are returned
-// unchanged.
-func displayPath(home, path string) string {
-	if home != "" && strings.HasPrefix(path, home) {
-		return "~" + strings.TrimPrefix(path, home)
-	}
-	return path
 }
 
 // validateFlags checks the mutually exclusive / incompatible flag combinations
@@ -235,11 +214,8 @@ func run() (err error) {
 	}
 	if mod, ok := m.(app.Model); ok {
 		if sessionID, _ := mod.SessionData(); sessionID != "" {
-			home, _ := os.UserHomeDir()
 			fmt.Fprintf(os.Stderr, "\nResume this session with:\n")
 			fmt.Fprintf(os.Stderr, "cake-repl -resume %s\n", sessionID)
-			fmt.Fprintf(os.Stderr, "file: %s\n",
-				displayPath(home, sessionFilePath(home, sessionID)))
 		}
 	}
 	return nil
