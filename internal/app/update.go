@@ -13,20 +13,43 @@ import (
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
-// eventMsg delivers one decoded cake stream event.
-type eventMsg struct{ ev cake.Event }
+// maxEventsPerBatch bounds how many stream events one Update applies, so a
+// fast cake stream cannot starve the event loop (spinner, key handling).
+const maxEventsPerBatch = 10
+
+// eventsMsg delivers a batch of decoded cake stream events, applied in order
+// with a single viewport sync at the end of the Update.
+type eventsMsg struct{ evs []cake.Event }
 
 // runDoneMsg delivers the terminal state of a cake subprocess.
 type runDoneMsg struct{ res cake.Result }
 
-// waitForRun pulls the next event from a run, or its final result once the
-// event stream is closed. It is re-issued after every event.
+// waitForRun pulls the next batch of events from a run, or its final result
+// once the event stream is closed. It is re-issued after every batch.
 func waitForRun(run *cake.Run) tea.Cmd {
 	return func() tea.Msg {
-		if ev, ok := <-run.Events; ok {
-			return eventMsg{ev}
+		ev, ok := <-run.Events
+		if !ok {
+			return runDoneMsg{res: <-run.Result}
 		}
-		return runDoneMsg{res: <-run.Result}
+		evs := []cake.Event{ev}
+		// Drain the events already queued behind the first one so a burst of K
+		// events costs one Update (and one viewport sync) instead of K. The
+		// bound keeps a single Update from starving the event loop.
+		for len(evs) < maxEventsPerBatch {
+			select {
+			case ev, ok := <-run.Events:
+				if !ok {
+					// The stream closed mid-drain; the next waitForRun delivers
+					// runDoneMsg.
+					return eventsMsg{evs: evs}
+				}
+				evs = append(evs, ev)
+			default:
+				return eventsMsg{evs: evs}
+			}
+		}
+		return eventsMsg{evs: evs}
 	}
 }
 
@@ -36,6 +59,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
+		m.syncViewport()
 		return m, nil
 
 	case spinner.TickMsg:
@@ -46,10 +70,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
 
-	case eventMsg:
+	case eventsMsg:
 		if !m.newSessionPending {
-			m.applyEvent(msg.ev)
+			for _, ev := range msg.evs {
+				m.applyEvent(ev)
+			}
 		}
+		m.syncViewport()
 		return m, waitForRun(m.run)
 
 	case runDoneMsg:
@@ -66,7 +93,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		mm, cmd := m.handleKey(msg)
+		m = mm.(Model)
+		m.syncViewport()
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -476,6 +506,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "cake exited before completing the task"})
 	}
 
+	m.syncViewport()
 	if m.exitAfter {
 		return m, tea.Quit
 	}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -340,7 +341,7 @@ func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
 
 	// A final old-run event can race with cancellation. Update must drain it
 	// without adding it to the fresh timeline.
-	tm, _ = m.Update(eventMsg{ev: cake.Message{Role: "assistant", Content: "late old output"}})
+	tm, _ = m.Update(eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "late old output"}}})
 	m = tm.(Model)
 	if len(m.items) != 1 || m.items[0].Text != "New session" {
 		t.Fatalf("late event crossed boundary: %#v", m.items)
@@ -360,6 +361,119 @@ func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
 	if len(m.items) != 1 || m.items[0].Text != "New session" {
 		t.Errorf("cancel result crossed boundary: %#v", m.items)
 	}
+}
+
+func TestWaitForRunBatchesQueuedEvents(t *testing.T) {
+	events := make(chan cake.Event, maxEventsPerBatch)
+	result := make(chan cake.Result, 1)
+	for i := range 4 {
+		events <- cake.Message{Role: "assistant", Content: fmt.Sprintf("msg %d", i)}
+	}
+	run := &cake.Run{Events: events, Result: result}
+
+	msg := waitForRun(run)()
+	got, ok := msg.(eventsMsg)
+	if !ok {
+		t.Fatalf("waitForRun message type = %T, want eventsMsg", msg)
+	}
+	if len(got.evs) != 4 {
+		t.Fatalf("batch size = %d, want 4", len(got.evs))
+	}
+	for i, ev := range got.evs {
+		m, ok := ev.(cake.Message)
+		if !ok || m.Content != fmt.Sprintf("msg %d", i) {
+			t.Fatalf("event %d = %#v, want msg %d in order", i, ev, i)
+		}
+	}
+}
+
+func TestWaitForRunRespectsBatchBound(t *testing.T) {
+	events := make(chan cake.Event, maxEventsPerBatch+5)
+	result := make(chan cake.Result, 1)
+	for range maxEventsPerBatch + 5 {
+		events <- cake.Reasoning{}
+	}
+	run := &cake.Run{Events: events, Result: result}
+
+	msg := waitForRun(run)()
+	got, ok := msg.(eventsMsg)
+	if !ok {
+		t.Fatalf("waitForRun message type = %T, want eventsMsg", msg)
+	}
+	if len(got.evs) != maxEventsPerBatch {
+		t.Fatalf("batch size = %d, want maxEventsPerBatch %d", len(got.evs), maxEventsPerBatch)
+	}
+}
+
+func TestWaitForRunClosedChannelReturnsRunDone(t *testing.T) {
+	events := make(chan cake.Event)
+	close(events)
+	result := make(chan cake.Result, 1)
+	result <- cake.Result{ExitCode: 0}
+	run := &cake.Run{Events: events, Result: result}
+
+	msg := waitForRun(run)()
+	if _, ok := msg.(runDoneMsg); !ok {
+		t.Fatalf("waitForRun message type = %T, want runDoneMsg", msg)
+	}
+}
+
+func TestWaitForRunCloseMidDrainReturnsPartialBatchThenRunDone(t *testing.T) {
+	events := make(chan cake.Event, maxEventsPerBatch)
+	result := make(chan cake.Result, 1)
+	for i := range 3 {
+		events <- cake.Message{Role: "assistant", Content: fmt.Sprintf("msg %d", i)}
+	}
+	close(events)
+	result <- cake.Result{ExitCode: 0}
+	run := &cake.Run{Events: events, Result: result}
+
+	// The stream closes after some events are already queued: waitForRun
+	// returns the drained partial batch, and the next waitForRun delivers
+	// the run's final result.
+	msg := waitForRun(run)()
+	got, ok := msg.(eventsMsg)
+	if !ok {
+		t.Fatalf("first waitForRun message type = %T, want eventsMsg", msg)
+	}
+	if len(got.evs) != 3 {
+		t.Fatalf("partial batch size = %d, want 3", len(got.evs))
+	}
+
+	msg = waitForRun(run)()
+	if _, ok := msg.(runDoneMsg); !ok {
+		t.Fatalf("second waitForRun message type = %T, want runDoneMsg", msg)
+	}
+}
+
+func TestEventBatchAppliesAllEventsWithSingleSync(t *testing.T) {
+	m := newLaidOutModel()
+	m.running = true
+	m.run = &cake.Run{} // re-issued waitForRun is never executed here.
+
+	before := len(m.items)
+	evs := make([]cake.Event, 0, 5)
+	for i := range 5 {
+		evs = append(evs, cake.Message{Role: "assistant", Content: fmt.Sprintf("msg %d", i)})
+	}
+	tm, cmd := m.Update(eventsMsg{evs: evs})
+	got := tm.(Model)
+
+	if cmd == nil {
+		t.Fatal("Update did not re-issue waitForRun")
+	}
+	if len(got.items) != before+5 {
+		t.Fatalf("items = %d, want %d", len(got.items), before+5)
+	}
+	// One sync pushed the whole batch: the viewport already shows every
+	// event, and nothing is left dirty for the next Update.
+	if !strings.Contains(got.timeline.View(), "msg 4") {
+		t.Fatal("viewport does not show the batch content after one Update")
+	}
+	if got.timelineDirty {
+		t.Error("sync left the viewport payload dirty")
+	}
+	assertCacheMatchesFullRender(t, &got, "after event batch")
 }
 
 func TestSubmitEmptyInputIsNoop(t *testing.T) {
@@ -1174,10 +1288,10 @@ func TestPreReadyTrimDoesNotPanic(t *testing.T) {
 	// Sending events through Update before any layout exercises the
 	// pre-ready path.
 	for _, msg := range []tea.Msg{
-		eventMsg{cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"}},
-		eventMsg{cake.Message{Role: "assistant", Content: "hello"}},
-		eventMsg{cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`}},
-		eventMsg{cake.FunctionCallOutput{CallID: "c-1", Output: "output"}},
+		eventsMsg{evs: []cake.Event{cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"}}},
+		eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "hello"}}},
+		eventsMsg{evs: []cake.Event{cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`}}},
+		eventsMsg{evs: []cake.Event{cake.FunctionCallOutput{CallID: "c-1", Output: "output"}}},
 	} {
 		tm, _ := m.Update(msg)
 		m = tm.(Model)
@@ -1206,10 +1320,10 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 	m := New(Config{MaxTimelineItems: 3})
 	// items: [welcome] → send events before layout
 	for _, msg := range []tea.Msg{
-		eventMsg{cake.FunctionCall{ID: "fc-1", CallID: "A", Name: "bash", Arguments: `{}`}},
-		eventMsg{cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{}`}},
+		eventsMsg{evs: []cake.Event{cake.FunctionCall{ID: "fc-1", CallID: "A", Name: "bash", Arguments: `{}`}}},
+		eventsMsg{evs: []cake.Event{cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{}`}}},
 		// 4th item triggers trim; welcome trimmed away
-		eventMsg{cake.Reasoning{}},
+		eventsMsg{evs: []cake.Event{cake.Reasoning{}}},
 	} {
 		tm, _ := m.Update(msg)
 		m = tm.(Model)
@@ -1224,7 +1338,7 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 	}
 
 	// Late output for A must find the right item.
-	tm2, _ := m.Update(eventMsg{cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"}})
+	tm2, _ := m.Update(eventsMsg{evs: []cake.Event{cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"}}})
 	m = tm2.(Model)
 	if !m.items[0].Tool.Done || m.items[0].Tool.Output != "OUTPUT-A" {
 		t.Errorf("tool A after output: done=%v output=%q", m.items[0].Tool.Done, m.items[0].Tool.Output)

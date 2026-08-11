@@ -73,12 +73,16 @@ type Model struct {
 	// blocks appended later in this REPL session.
 	toolOutputMode ui.ToolOutputMode
 
-	// rendered caches one rendered string per item at renderedWidth.
-	// timelineContent caches the viewport payload so appends do not join the
-	// full rendered slice on the hot path.
-	rendered        []string
-	renderedWidth   int
-	timelineContent string
+	// rendered caches one rendered string per item at renderedWidth and is the
+	// source of truth for the viewport payload: syncViewport joins it with a
+	// double newline once per Update. timelineDirty records whether a mutation
+	// since the last sync needs a viewport push, so a burst of events costs one
+	// viewport.SetContent per Update instead of one per event. SetContent still
+	// re-parses the whole payload, so per-event cost stays linear in the
+	// timeline size; coalescing only removes the per-event constant.
+	rendered      []string
+	renderedWidth int
+	timelineDirty bool
 
 	// completion state for Tab cycling; zero values mean no active cycle.
 	completionPrefix  string
@@ -225,7 +229,8 @@ func (m *Model) trimFront(over int) {
 }
 
 // appendItem adds a timeline item, renders it into the cache, and returns
-// its index.
+// its index. It marks the viewport payload dirty; the Update that applied the
+// event syncs it once via syncViewport.
 func (m *Model) appendItem(it ui.Item) int {
 	m.items = append(m.items, it)
 	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
@@ -233,14 +238,11 @@ func (m *Model) appendItem(it ui.Item) int {
 		m.trimFront(over)
 		if m.ready {
 			m.rendered = m.rendered[over:]
-			m.rebuildTimelineContent()
+			m.timelineDirty = true
 		}
 	}
 	if m.ready {
-		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-		m.rendered = append(m.rendered, rendered)
-		m.appendTimelineContent(rendered)
-		m.syncViewport()
+		m.appendTimelineContent(ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode))
 	}
 	return len(m.items) - 1
 }
@@ -297,8 +299,7 @@ func (m *Model) insertItemAt(idx int, it ui.Item) {
 		m.rendered = append(m.rendered, "") // make room
 		copy(m.rendered[idx+1:], m.rendered[idx:])
 		m.rendered[idx] = rendered
-		m.rebuildTimelineContent()
-		m.syncViewport()
+		m.timelineDirty = true
 	}
 }
 
@@ -309,8 +310,7 @@ func (m *Model) rerenderItem(idx int) {
 		return
 	}
 	m.rendered[idx] = ui.RenderItem(m.theme, m.items[idx], m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-	m.rebuildTimelineContent()
-	m.syncViewport()
+	m.timelineDirty = true
 }
 
 // rerenderToolItems refreshes every tool item's cached rendering while
@@ -324,8 +324,7 @@ func (m *Model) rerenderToolItems() {
 			m.rendered[i] = ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
 		}
 	}
-	m.rebuildTimelineContent()
-	m.syncViewport()
+	m.timelineDirty = true
 }
 
 // rebuildTimeline re-renders every item at the current viewport width. Width
@@ -339,28 +338,36 @@ func (m *Model) rebuildTimeline() {
 	for _, it := range m.items {
 		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode))
 	}
-	m.rebuildTimelineContent()
-	m.syncViewport()
+	m.timelineDirty = true
 }
 
+// appendTimelineContent extends the render cache with one item's rendering.
+// The viewport payload is joined lazily at sync time, so appending never
+// copies the accumulated timeline string.
 func (m *Model) appendTimelineContent(rendered string) {
-	if m.timelineContent != "" {
-		m.timelineContent += "\n\n"
-	}
-	m.timelineContent += rendered
+	m.rendered = append(m.rendered, rendered)
+	m.timelineDirty = true
 }
 
-func (m *Model) rebuildTimelineContent() {
-	m.timelineContent = strings.Join(m.rendered, "\n\n")
+// rebuildTimelineContent returns the viewport payload: every cached rendering
+// joined with a double newline. syncViewport recomputes it once per Update.
+func (m *Model) rebuildTimelineContent() string {
+	return strings.Join(m.rendered, "\n\n")
 }
 
-// syncViewport pushes the cached timeline content into the viewport, keeping
-// the view pinned to the bottom if it was there already. Otherwise it restores
+// syncViewport pushes the joined render cache into the viewport, keeping the
+// view pinned to the bottom if it was there already. Otherwise it restores
 // the previous scroll offset so a single item re-render does not move the view.
+// It is a no-op unless a mutation marked the cache dirty, so one Update with a
+// burst of events costs one SetContent instead of one per event.
 func (m *Model) syncViewport() {
+	if !m.timelineDirty {
+		return
+	}
+	m.timelineDirty = false
 	atBottom := m.timeline.AtBottom()
 	yOffset := m.timeline.YOffset
-	m.timeline.SetContent(m.timelineContent)
+	m.timeline.SetContent(m.rebuildTimelineContent())
 	if atBottom {
 		m.timeline.GotoBottom()
 	} else {

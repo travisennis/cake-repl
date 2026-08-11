@@ -64,16 +64,14 @@ func renderItemsFull(th ui.Theme, items []ui.Item, width int, outputLimit int, t
 }
 
 // assertCacheMatchesFullRender checks the incremental render cache against
-// the documented RenderItem + double-newline join.
+// the documented RenderItem + double-newline join. The viewport payload is
+// the same join, computed lazily at sync time.
 func assertCacheMatchesFullRender(t *testing.T, m *Model, step string) {
 	t.Helper()
 	want := renderItemsFull(m.theme, m.items, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
 	got := strings.Join(m.rendered, "\n\n")
 	if got != want {
 		t.Fatalf("%s: cached render diverged from full render\ngot:\n%s\nwant:\n%s", step, got, want)
-	}
-	if m.timelineContent != want {
-		t.Fatalf("%s: timeline content diverged from full render\ngot:\n%s\nwant:\n%s", step, m.timelineContent, want)
 	}
 }
 
@@ -144,17 +142,20 @@ func TestLayoutAccountsForPromptComposerChrome(t *testing.T) {
 	}
 }
 
-func TestAppendItemExtendsTimelineContentWithoutFullJoin(t *testing.T) {
+func TestAppendItemExtendsRenderCacheWithoutRebuild(t *testing.T) {
 	m := newLaidOutModel()
-	before := m.timelineContent
-	rendered := ui.RenderItem(m.theme, ui.Item{Kind: ui.KindAssistant, Text: "hello"}, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-
+	before := len(m.rendered)
 	m.rendered[0] = "sentinel"
 	m.appendItem(ui.Item{Kind: ui.KindAssistant, Text: "hello"})
 
-	want := before + "\n\n" + rendered
-	if m.timelineContent != want {
-		t.Fatalf("append rebuilt content from rendered cache\ngot:\n%s\nwant:\n%s", m.timelineContent, want)
+	if m.rendered[0] != "sentinel" {
+		t.Fatal("append rebuilt existing cache entries")
+	}
+	if len(m.rendered) != before+1 {
+		t.Fatalf("render cache length = %d, want %d", len(m.rendered), before+1)
+	}
+	if !m.timelineDirty {
+		t.Error("append did not mark the viewport payload dirty")
 	}
 }
 
@@ -172,12 +173,15 @@ func TestToolOutputRerenderPreservesBottomPinning(t *testing.T) {
 		t.Fatal("test setup did not reach bottom")
 	}
 
+	// Production drives applyEvent through Update, which syncs the viewport
+	// once per batch; mirror that here so the pinning logic runs.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "hi"})
+	m.syncViewport()
 
 	if !m.timeline.AtBottom() {
 		t.Fatal("tool output rerender should preserve bottom pinning")
 	}
-	if !strings.Contains(m.timelineContent, "hi") {
+	if !strings.Contains(strings.Join(m.rendered, "\n\n"), "hi") {
 		t.Fatal("tool output rerender did not update timeline content")
 	}
 	assertCacheMatchesFullRender(t, &m, "after pinned tool output rerender")
@@ -238,12 +242,15 @@ func TestClearResetsRenderCache(t *testing.T) {
 
 	tm, _ := m.execCommand(Command{Kind: CmdClear})
 	got := tm.(Model)
+	// Production syncs once per Update after the command handler runs; mirror
+	// that here so the cleared payload is pushed to the viewport.
+	got.syncViewport()
 
 	if len(got.items) != 0 || len(got.rendered) != 0 {
 		t.Errorf("clear left items=%d rendered=%d", len(got.items), len(got.rendered))
 	}
-	if got.timelineContent != "" {
-		t.Errorf("clear left timelineContent=%q", got.timelineContent)
+	if got.timelineDirty {
+		t.Errorf("clear left the viewport payload dirty")
 	}
 	if got.toolOutputMode != ui.ToolOutputHidden {
 		t.Errorf("clear reset tool output mode: got %v, want hidden", got.toolOutputMode)

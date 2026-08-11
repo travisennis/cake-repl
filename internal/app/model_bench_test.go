@@ -12,9 +12,10 @@ import (
 )
 
 // Timeline hot-path benchmarks. They separate the three costs every event
-// pays — rendering the new item, maintaining the cached timeline string, and
-// handing that string to the Bubble viewport — so an optimization can target
-// the dominant layer instead of the most visible one. See task 059.
+// pays — rendering the new item, maintaining the cached timeline, and
+// handing the payload to the Bubble viewport — so an optimization can target
+// the dominant layer instead of the most visible one. See task 059 for the
+// baseline and task 054 for the coalescing change these benchmarks verify.
 //
 // Everything here is hermetic: no cake binary, no terminal, fixed dimensions
 // and fixed payloads.
@@ -168,24 +169,29 @@ func BenchmarkTimelineRenderItem(b *testing.B) {
 	})
 }
 
-// BenchmarkTimelineAppendContent measures only the append-path cache
-// extension (`timelineContent += rendered`), with no viewport work.
-// Restoring the base string between iterations is O(1) because Go strings are
-// immutable, so the loop measures one append onto a timeline of size n.
+// BenchmarkTimelineAppendContent measures the append-path cache extension
+// (one entry added to the render slice, payload marked dirty), with no
+// viewport work. Restoring the base slice between iterations is O(1) — a
+// slice-header assignment — so the loop measures one append onto a timeline
+// of size n. Task 054 made this O(1): the old `timelineContent += rendered`
+// copied the whole accumulated string on every append.
 func BenchmarkTimelineAppendContent(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, w benchWorkload, _ int) {
 		rendered := ui.RenderItem(m.theme, w.newItem, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-		base := m.timelineContent
+		base := m.rendered[:len(m.rendered)-1]
 		b.ResetTimer()
 		for range b.N {
-			m.timelineContent = base
+			m.rendered = base
+			m.timelineDirty = false
 			m.appendTimelineContent(rendered)
 		}
 	})
 }
 
-// BenchmarkTimelineRebuildContent measures the full strings.Join that every
-// in-place item update performs via rerenderItem, with no viewport work.
+// BenchmarkTimelineRebuildContent measures the strings.Join that
+// syncViewport performs once per Update to build the viewport payload, with
+// no viewport work. Task 054 moved the join from every in-place item update
+// to the single sync at the end of the Update.
 func BenchmarkTimelineRebuildContent(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, _ benchWorkload, _ int) {
 		b.ResetTimer()
@@ -197,10 +203,11 @@ func BenchmarkTimelineRebuildContent(b *testing.B) {
 
 // BenchmarkTimelineViewportSetContent measures Bubble viewport ingestion of
 // already-rendered content. This is the cost the app cannot remove by
-// changing how it builds the timeline string.
+// changing how it builds the timeline string; task 054 attacks how often it
+// runs instead.
 func BenchmarkTimelineViewportSetContent(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, _ benchWorkload, _ int) {
-		content := m.timelineContent
+		content := m.rebuildTimelineContent()
 		b.ResetTimer()
 		for range b.N {
 			m.timeline.SetContent(content)
@@ -209,9 +216,9 @@ func BenchmarkTimelineViewportSetContent(b *testing.B) {
 }
 
 // BenchmarkTimelineAppendEndToEnd measures the whole append hot path for one
-// event: render, cache extension, and viewport sync. The per-iteration reset
-// is O(1) — a slice reslice and a string header assignment — so each iteration
-// appends onto a timeline of size n.
+// event as one Update pays it after task 054: render, cache extension, join,
+// and a single viewport sync. The per-iteration reset is O(1) — slice
+// reslices and a bool — so each iteration appends onto a timeline of size n.
 func BenchmarkTimelineAppendEndToEnd(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, w benchWorkload, n int) {
 		it := w.newItem
@@ -220,18 +227,19 @@ func BenchmarkTimelineAppendEndToEnd(b *testing.B) {
 		// production that growth is amortized across many appends.
 		m.items = append(make([]ui.Item, 0, n+1), m.items...)
 		m.rendered = append(make([]string, 0, n+1), m.rendered...)
-		items, rendered, base := m.items, m.rendered, m.timelineContent
+		items, rendered := m.items, m.rendered
 		b.ResetTimer()
 		for range b.N {
-			m.items, m.rendered, m.timelineContent = items, rendered, base
+			m.items, m.rendered, m.timelineDirty = items, rendered, false
 			m.appendItem(it)
+			m.syncViewport()
 		}
 	})
 }
 
 // BenchmarkTimelineToolOutputEndToEnd measures the FunctionCallOutput hot
-// path: an in-place item mutation followed by a full re-render of that item, a
-// full timeline rebuild, and a viewport sync.
+// path as one Update pays it after task 054: an in-place item mutation, a
+// re-render of that item, and a single viewport sync.
 func BenchmarkTimelineToolOutputEndToEnd(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, _ benchWorkload, _ int) {
 		idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
@@ -244,6 +252,50 @@ func BenchmarkTimelineToolOutputEndToEnd(b *testing.B) {
 			tool.Output, tool.Done = "", false
 			m.pendingCalls[benchCallID] = idx
 			m.applyEvent(cake.FunctionCallOutput{CallID: benchCallID, Output: benchToolOutput})
+			m.syncViewport()
+		}
+	})
+}
+
+// BenchmarkTimelineBurstCoalesced measures a burst of maxEventsPerBatch
+// appended events with a single viewport sync: one SetContent per burst, the
+// shape the eventsMsg path pays after task 054. Per-event SetContent count is
+// 1/K.
+func BenchmarkTimelineBurstCoalesced(b *testing.B) {
+	runBenchCases(b, func(b *testing.B, m *Model, w benchWorkload, n int) {
+		it := w.newItem
+		m.items = append(make([]ui.Item, 0, n+maxEventsPerBatch), m.items...)
+		m.rendered = append(make([]string, 0, n+maxEventsPerBatch), m.rendered...)
+		items, rendered := m.items, m.rendered
+		b.ResetTimer()
+		for range b.N {
+			m.items, m.rendered, m.timelineDirty = items, rendered, false
+			for range maxEventsPerBatch {
+				m.appendItem(it)
+			}
+			m.syncViewport()
+		}
+	})
+}
+
+// BenchmarkTimelineBurstPerEventSync measures the same burst with the
+// pre-task-054 shape: a viewport sync after every event (K SetContent calls
+// per burst). It is the "before" instrument: at the same sizes and workloads
+// the coalesced burst must cost less by roughly (K-1) × the per-event
+// SetContent term.
+func BenchmarkTimelineBurstPerEventSync(b *testing.B) {
+	runBenchCases(b, func(b *testing.B, m *Model, w benchWorkload, n int) {
+		it := w.newItem
+		m.items = append(make([]ui.Item, 0, n+maxEventsPerBatch), m.items...)
+		m.rendered = append(make([]string, 0, n+maxEventsPerBatch), m.rendered...)
+		items, rendered := m.items, m.rendered
+		b.ResetTimer()
+		for range b.N {
+			m.items, m.rendered, m.timelineDirty = items, rendered, false
+			for range maxEventsPerBatch {
+				m.appendItem(it)
+				m.syncViewport()
+			}
 		}
 	})
 }
