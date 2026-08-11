@@ -193,6 +193,58 @@ func TestRenderItem_WidthCorrectWithControlBytes(t *testing.T) {
 	}
 }
 
+// TestRenderItem_TabSeparatedTableAligns covers the behavior the tab stops
+// exist for: tab-separated tool output (column -t, go test, df) lines up in
+// the rendered timeline. In the no-color profile, the three body rows must
+// place their second column on the same cell, and no tab byte may reach the
+// rendered output.
+func TestRenderItem_TabSeparatedTableAligns(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	th := DefaultTheme()
+	got := RenderItem(th, Item{Kind: KindTool, Tool: &ToolBlock{
+		Name: "bash", Arguments: `{"command":"column -t"}`,
+		Output: "name\tvalue\nalpha\t1\nlongnm\t2\n", Done: true,
+	}}, 80, DefaultOutputLimit, ToolOutputTruncated)
+
+	if strings.Contains(got, "\t") {
+		t.Fatalf("tab byte survived rendering: %q", got)
+	}
+	var cols []int
+	for _, line := range strings.Split(got, "\n") {
+		body, ok := strings.CutPrefix(line, "  ")
+		if !ok {
+			continue // header and other chrome, not a body row
+		}
+		var marker string
+		switch {
+		case strings.HasPrefix(body, "name"):
+			marker = "value"
+		case strings.HasPrefix(body, "alpha"):
+			marker = "1"
+		case strings.HasPrefix(body, "longnm"):
+			marker = "2"
+		default:
+			continue
+		}
+		i := strings.Index(body, marker)
+		if i < 0 {
+			t.Fatalf("marker %q missing from body row %q", marker, body)
+		}
+		cols = append(cols, 2+lipgloss.Width(body[:i]))
+	}
+	if len(cols) != 3 {
+		t.Fatalf("expected 3 body rows with a second column, got %d in %q", len(cols), got)
+	}
+	for _, c := range cols[1:] {
+		if c != cols[0] {
+			t.Errorf("second column does not line up: %v", cols)
+		}
+	}
+}
+
 // TestStatusLine_StripsControlSequences covers the status bar, whose session
 // id and model text originate outside the REPL.
 func TestStatusLine_StripsControlSequences(t *testing.T) {

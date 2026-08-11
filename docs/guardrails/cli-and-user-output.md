@@ -56,9 +56,9 @@ commands or help text (`internal/app/commands.go`), key bindings
   lines joined by an ellipsis, so setup lines (`cd`, `export`) never hide the
   actual payload.
   All timeline and status-line text is sanitized before styling: ANSI escape
-  sequences are stripped, tabs expand to four spaces, and remaining C0/C1
-  controls are dropped, so tool output renders as plain text without its own
-  colors. This is unconditional; see
+  sequences are stripped, tabs expand to the next eight-column stop, and
+  remaining C0/C1 controls are dropped, so tool output renders as plain text
+  without its own colors. This is unconditional; see
   [`session-and-security.md`](session-and-security.md) and
   [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
   Tool *output* truncates at the configured output limit (default 2000 bytes) on

@@ -52,12 +52,17 @@ Chosen option: 3, because it covers every item kind by construction, keeps
 `internal/ui` pure, and leaves `internal/app` and the debug log holding the raw
 bytes.
 
-`ui.Sanitize` removes all ANSI escape sequences, expands tabs to spaces, drops
-the remaining C0 and C1 control characters and DEL, and replaces invalid UTF-8
-with U+FFFD. Newline is the only control character preserved, because callers
-depend on it for line structure. Tabs are expanded rather than kept because
+`ui.Sanitize` removes all ANSI escape sequences, expands tabs to the next
+conventional eight-column stop, drops the remaining C0 and C1 control
+characters and DEL, and replaces invalid UTF-8 with U+FFFD. Newline is the
+only control character preserved, because callers depend on it for line
+structure. Tabs are expanded rather than kept because
 terminals advance them to the next tab stop while width measurement counts them
 as zero cells, which is exactly the desynchronization this ADR is closing.
+Tab stops are relative to column zero of each sanitized string and reset after
+every newline, and the column counts rendered cells (so CJK, emoji, and
+combining sequences advance it correctly), which keeps tab-separated output
+column-aligned.
 
 Sanitization is unconditional. There is no opt-out and no "render tool output
 as-is" mode: an opt-out would be a per-item trust decision that nothing in the
@@ -80,8 +85,13 @@ available for re-rendering on resize.
 - Bad, because ANSI colors produced by tools (for example `ls --color` or a
   compiler's diagnostics) are no longer shown in tool output; they render as
   plain text.
-- Bad, because tabs in tool output render as fixed four-space runs rather than
-  true tab stops, so column-aligned command output can shift.
+- Good, because tabs expand to the next eight-column stop, matching the
+  conventional terminal default, so tab-separated output (`column -t`,
+  `go test`, `df`, hand-made ASCII tables) stays column-aligned as it would in
+  a normal terminal.
+- Neutral, because the expansion uses the conventional eight-column default
+  rather than a user-configured tab width, and the rendered text holds spaces,
+  not tab bytes.
 
 ## More Information
 
