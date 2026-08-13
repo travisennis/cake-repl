@@ -356,6 +356,7 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 		ResumeID: resumeID,
 		Model:    m.cfg.Model,
 		Profile:  m.cfg.Profile,
+		AddDirs:  m.cfg.AddDirs,
 		DebugLog: m.cfg.DebugLog,
 	})
 	if err != nil {

@@ -20,6 +20,7 @@ It communicates only through:
 - `cake --output-format stream-json` (NDJSON records on stdout),
 - `--continue` / `--resume <uuid>` session selection,
 - `--model` / `--profile` pass-through flags,
+- `--add-dir <dir>` read-only sandbox directories (repeatable),
 - `--` to terminate flag parsing before the prompt argument.
 
 This boundary is the project's reason to exist. Changes that cross it are out of

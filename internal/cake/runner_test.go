@@ -363,6 +363,16 @@ func TestOptionsArgs(t *testing.T) {
 			want: []string{"--output-format", "stream-json", "--model", "gpt-x", "--profile", "fast", "--", "hi"},
 		},
 		{
+			name: "add dirs",
+			opts: Options{Prompt: "hi", AddDirs: []string{"vendor", "/abs/path"}},
+			want: []string{"--output-format", "stream-json", "--add-dir", "vendor", "--add-dir", "/abs/path", "--", "hi"},
+		},
+		{
+			name: "passthrough with add dirs",
+			opts: Options{Prompt: "hi", Model: "gpt-x", Profile: "fast", AddDirs: []string{"vendor"}},
+			want: []string{"--output-format", "stream-json", "--model", "gpt-x", "--profile", "fast", "--add-dir", "vendor", "--", "hi"},
+		},
+		{
 			name: "flag-like prompt",
 			opts: Options{Prompt: "-v means what in grep?", Mode: RunFresh},
 			want: []string{"--output-format", "stream-json", "--", "-v means what in grep?"},

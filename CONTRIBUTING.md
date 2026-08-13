@@ -115,8 +115,9 @@ Details on the test layout and the fake-cake harness live in
   or `just ci`.
 - **Preserve the cake engine contract.** Only run cake as
   `--output-format stream-json` with `--continue`/`--resume`/`--model`/
-  `--profile`. Never read cake session files, parse its human text, or import
-  cake internals. The REPL drives cake purely through the NDJSON event stream.
+  `--profile`/`--add-dir`. Never read cake session files, parse its human text,
+  or import cake internals. The REPL drives cake purely through the NDJSON event
+  stream.
 - **`just ci` is the final pre-handoff gate.** For code, config, or dependency
   changes, run `just ci` before calling the work done. For doc-only changes,
   skip it and explain the skip.

@@ -8,7 +8,9 @@ consumes cake events. This is the project's core external contract.
 
 - **cake invocation.** cake is always run as `cake --output-format stream-json`
   with at most one of `--continue` / `--resume <uuid>`, optional `--model` /
-  `--profile`, and `-- <prompt>` last. `--` must stay so a prompt beginning with
+  `--profile`, optional repeated `--add-dir <dir>` (read-only sandbox
+  directories; cake resolves relative paths against its own cwd), and
+  `-- <prompt>` last. `--` must stay so a prompt beginning with
   `-` is never parsed as a flag.
 - **stream-json schema.** The typed events in `events.go` (`task_start`,
   `message`, `reasoning`, `function_call`, `function_call_output`, `hook_event`,

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,5 +146,23 @@ func TestResumeUUIDIsSessionID(t *testing.T) {
 	}
 	if app.IsSessionID("not-a-uuid") {
 		t.Error("IsSessionID accepted invalid input")
+	}
+}
+
+func TestStringListFlag(t *testing.T) {
+	var dirs stringList
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.Var(&dirs, "add-dir", "")
+	if err := fs.Parse([]string{"-add-dir", "vendor", "-add-dir=/abs/path"}); err != nil {
+		t.Fatalf("Parse = %v", err)
+	}
+	want := []string{"vendor", "/abs/path"}
+	if len(dirs) != len(want) {
+		t.Fatalf("got %v, want %v", dirs, want)
+	}
+	for i := range want {
+		if dirs[i] != want[i] {
+			t.Fatalf("got %v, want %v", dirs, want)
+		}
 	}
 }

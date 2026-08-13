@@ -10,8 +10,8 @@ NDJSON event stream live.
 Compatibility surfaces — preserve unless the task explicitly changes them:
 
 - **cake contract**: run cake only in stream-json output mode with the
-  documented session, model, and profile flags; never read cake session files,
-  parse its human text, or import its internals.
+  documented session, model, profile, and add-dir flags; never read cake session
+  files, parse its human text, or import its internals.
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.

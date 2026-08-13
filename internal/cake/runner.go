@@ -47,6 +47,7 @@ type Options struct {
 	ResumeID string
 	Model    string
 	Profile  string
+	AddDirs  []string
 	DebugLog io.Writer
 
 	afterWait func()
@@ -67,6 +68,11 @@ func (o Options) Args() []string {
 	}
 	if o.Profile != "" {
 		args = append(args, "--profile", o.Profile)
+	}
+	// --add-dir grants cake read-only sandbox access to extra directories;
+	// cake resolves relative paths against its own working directory (Cwd).
+	for _, dir := range o.AddDirs {
+		args = append(args, "--add-dir", dir)
 	}
 	// "--" ends flag parsing so a prompt starting with "-" (or matching a
 	// cake subcommand name) is always treated as the prompt.

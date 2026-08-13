@@ -8,13 +8,14 @@ commands or help text (`internal/app/commands.go`), key bindings
 ## Compatibility surfaces
 
 - **CLI flags.** `-cake-bin`, `-continue`, `-resume <uuid>`, `-model`,
-  `-profile`, `-cwd`, `-no-color`, `-debug-log`, `-history-file`,
-  `-config <path>`, `-no-config`, `-output-limit <n>`,
-  `-max-timeline-items <n>`, `-version`. Names, defaults, and validation
+  `-profile`, `-add-dir <dir>` (repeatable), `-cwd`, `-no-color`,
+  `-debug-log`, `-history-file`, `-config <path>`, `-no-config`,
+  `-output-limit <n>`, `-max-timeline-items <n>`, `-version`. Names,
+  defaults, and validation
   (mutually exclusive `-continue`/`-resume`, mutually exclusive
   `-config`/`-no-config`, uuid shape, positional args
-  rejected) are user-facing. `-continue`, `-resume`, `-model`, and `-profile`
-  pass-through must stay aligned with the cake contract.
+  rejected) are user-facing. `-continue`, `-resume`, `-model`, `-profile`, and
+  `-add-dir` pass-through must stay aligned with the cake contract.
 - **Config file shape.** TOML config supports only stable REPL defaults:
   `cake-bin`, `model`, `profile`, `output-limit`, and
   `max-timeline-items`. Merge order is hardcoded defaults < XDG config <

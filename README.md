@@ -14,7 +14,7 @@ turn, the next prompt automatically continues the same cake session.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output and its
-`--continue`/`--resume` session flags.
+documented session, model, profile, and add-dir flags.
 
 ## Requirements
 
@@ -54,6 +54,8 @@ cake-repl -cake-bin ../cake/target/debug/cake
 While running, cake-repl sets the terminal title to
 `cake-repl: <absolute working directory>`. The `-cwd` flag selects that working
 directory; otherwise cake-repl uses the directory where it was started.
+Relative `-add-dir` paths resolve against that working directory, and cake
+ignores paths that do not exist or are not directories.
 
 Flags:
 
@@ -64,6 +66,7 @@ Flags:
 | `-resume <uuid>` | resume a specific cake session on the first prompt |
 | `-model <name>` | passed through to cake |
 | `-profile <name>` | passed through to cake |
+| `-add-dir <dir>` | add a directory to cake's sandbox as read-only; repeatable |
 | `-cwd <path>` | run cake from this directory (default: current directory) |
 | `-no-color` | disable styling |
 | `-debug-log <path>` | append cake-repl diagnostics (raw stream lines, skipped events, exits) to a file |

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -33,6 +34,17 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.w.Write(p)
+}
+
+// stringList collects repeated flag values in order so -add-dir can be given
+// once per directory, matching cake's repeatable --add-dir flag.
+type stringList []string
+
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+
+func (s *stringList) Set(v string) error {
+	*s = append(*s, v)
+	return nil
 }
 
 // validateFlags checks the mutually exclusive / incompatible flag combinations
@@ -92,6 +104,8 @@ func run() (err error) {
 	resume := flag.String("resume", "", "resume a specific cake session uuid on the first prompt")
 	model := flag.String("model", "", "model name passed through to cake")
 	profile := flag.String("profile", "", "behavior profile passed through to cake")
+	var addDirs stringList
+	flag.Var(&addDirs, "add-dir", "directory to add to cake's sandbox as read-only (repeatable)")
 	cwd := flag.String("cwd", "", "working directory to run cake from (default: current directory)")
 	noColor := flag.Bool("no-color", false, "disable styling")
 	debugLog := flag.String("debug-log", "", "write cake-repl debug output to this file")
@@ -158,6 +172,7 @@ func run() (err error) {
 		Cwd:              dir,
 		Model:            *model,
 		Profile:          *profile,
+		AddDirs:          addDirs,
 		HistoryFile:      *historyFile,
 		OutputLimit:      *outputLimit,
 		MaxTimelineItems: *maxTimelineItems,
