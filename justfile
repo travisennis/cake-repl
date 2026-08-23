@@ -1,6 +1,6 @@
-golangci_lint_version := "v2.12.2"
-goreleaser_version := "v2.16.0"
-govulncheck_version := "v1.3.0"
+golangci_lint_version := "v2.13.1"
+goreleaser_version := "v2.17.1"
+govulncheck_version := "v1.7.0"
 
 # go install puts binaries in GOBIN when set, GOPATH/bin otherwise. Resolve
 # the same directory and put it first on PATH so recipes prefer the pinned
