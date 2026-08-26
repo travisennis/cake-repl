@@ -27,7 +27,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   secrets. They go **only** to `-debug-log` (opened `0o600`; the mode applies
   at creation — an existing file's permissions are not narrowed), never to the
   timeline or stdout. Do not add logging that leaks raw stream content
-  elsewhere.
+  elsewhere. The one exception is an explicit user action: `Ctrl+Y` copies the
+  raw (unsanitized) markdown of the most recent assistant response to the
+  system clipboard on request, and never automatically. Pasting it into a
+  terminal can reintroduce escaped content, so the user owns that risk.
 - **Terminal-injection defense (security boundary).** Stream content is
   attacker-influenceable: tool output is the stdout of arbitrary commands and
   the contents of arbitrary files. `ui.Sanitize` strips ANSI escape sequences,

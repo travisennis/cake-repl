@@ -100,6 +100,7 @@ keybindings
   ctrl+n           start a new session (cancels a running task)
   ctrl+u           clear input
   ctrl+o           cycle all tool output: truncated / full / hidden
+  ctrl+y           copy last assistant response (markdown)
   tab              complete slash commands
   up/down          recall prompt history (at the input's first/last line)
   pgup/pgdn        scroll timeline

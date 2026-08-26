@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -89,6 +90,10 @@ type Model struct {
 	completionPrefix  string
 	completionMatches []string
 	completionIdx     int
+
+	// clipboard writes text to the system clipboard. It is a field so tests
+	// can stub out the platform helper; New defaults to the OS clipboard.
+	clipboard func(string) error
 }
 
 // New builds the initial model.
@@ -114,6 +119,7 @@ func New(cfg Config) Model {
 		input:        input,
 		spin:         spin,
 		pendingCalls: map[string]int{},
+		clipboard:    clipboard.WriteAll,
 		session: sessionState{
 			NextMode: cfg.InitialMode,
 			ResumeID: cfg.ResumeID,
@@ -262,6 +268,20 @@ func (m *Model) firstPendingToolIdx() int {
 		return i
 	}
 	return -1
+}
+
+// lastAssistantMarkdown returns the raw markdown text of the most recent
+// assistant message on the timeline, or ok=false when no assistant message
+// has arrived yet. Content is copied as received from cake, not sanitized:
+// the clipboard receives the same markdown source the user sees rendered.
+func (m Model) lastAssistantMarkdown() (text string, ok bool) {
+	for i := len(m.items) - 1; i >= 0; i-- {
+		it := m.items[i]
+		if it.Kind == ui.KindAssistant && strings.TrimSpace(it.Text) != "" {
+			return it.Text, true
+		}
+	}
+	return "", false
 }
 
 // lastItemIsReasoning reports whether the newest timeline item is the

@@ -27,7 +27,7 @@ commands or help text (`internal/app/commands.go`), key bindings
   remains the cancel-and-reset operation during an active run.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
-  through truncated/full/hidden), `Up`/`Down` (history), `PgUp`/`PgDn`
+  through truncated/full/hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll).
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
@@ -69,6 +69,14 @@ commands or help text (`internal/app/commands.go`), key bindings
   to tool blocks added later and survives `/clear`. Only tool items are
   re-rendered on toggle; cached non-tool renders and the viewport scroll offset
   are preserved.
+  `Ctrl+Y` copies the raw markdown source of the most recent `KindAssistant`
+  timeline item (skipping trailing tool/completion items) to the system
+  clipboard via the platform helper: `pbcopy` on macOS, `xclip`/`xsel` on
+  Linux, `clip` on Windows. The copy is user-initiated and one-shot, so raw
+  stream content leaves the REPL only on an explicit keypress, never
+  automatically. The outcome is reported as a timeline item: an info notice
+  with the copied character count on success, a warning when no assistant
+  response exists yet, or an error when the clipboard helper fails.
 
 ## Required checks / test focus
 

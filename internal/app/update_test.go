@@ -281,6 +281,86 @@ func TestHandleKeyToggleToolOutput(t *testing.T) {
 	}
 }
 
+func TestHandleKeyCopyLastAssistantCopiesLatestMarkdown(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: "first response"})
+	m.applyEvent(cake.Message{Role: "assistant", Content: "# latest\n\nwith `code`"})
+
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlY}, m.keys.CopyLastAssistant) {
+		t.Fatal("ctrl+y binding does not match ctrl+y key msg")
+	}
+
+	var copied string
+	m.clipboard = func(s string) error { copied = s; return nil }
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	got := tm.(Model)
+
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+	if copied != "# latest\n\nwith `code`" {
+		t.Errorf("copied = %q, want the most recent assistant markdown", copied)
+	}
+	last := lastItem(t, got)
+	if last.Kind != ui.KindInfo || !strings.Contains(last.Text, "copied") {
+		t.Errorf("last item = %+v, want copy confirmation info item", last)
+	}
+}
+
+func TestCopyLastAssistantSkipsNonAssistantTrailingItems(t *testing.T) {
+	// Tool calls and completion stats land after the assistant message; the
+	// copy must reach back past them to the assistant markdown.
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: "the markdown"})
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "out"})
+	m.applyEvent(cake.TaskComplete{Type: "task_complete", Subtype: "success", SessionID: "s-1", TaskID: "t-1"})
+
+	var copied string
+	m.clipboard = func(s string) error { copied = s; return nil }
+	tm, _ := m.copyLastAssistant()
+	m = tm.(Model)
+
+	if copied != "the markdown" {
+		t.Errorf("copied = %q, want assistant markdown behind trailing items", copied)
+	}
+	last := lastItem(t, m)
+	if last.Kind != ui.KindInfo || last.Text != "copied 12 chars to clipboard" {
+		t.Errorf("last item = %+v, want copy confirmation", last)
+	}
+}
+
+func TestCopyLastAssistantWithoutAssistantMessageWarns(t *testing.T) {
+	m := newLaidOutModel() // only the startup info item
+
+	var called bool
+	m.clipboard = func(s string) error { called = true; return nil }
+	tm, _ := m.copyLastAssistant()
+	got := tm.(Model)
+
+	if called {
+		t.Error("clipboard was written with no assistant response to copy")
+	}
+	last := lastItem(t, got)
+	if last.Kind != ui.KindWarning || !strings.Contains(last.Text, "no assistant response") {
+		t.Errorf("last item = %+v, want no-response warning", last)
+	}
+}
+
+func TestCopyLastAssistantReportsClipboardFailure(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: "some markdown"})
+
+	m.clipboard = func(string) error { return fmt.Errorf("xclip not found") }
+	tm, _ := m.copyLastAssistant()
+	got := tm.(Model)
+
+	last := lastItem(t, got)
+	if last.Kind != ui.KindError || !strings.Contains(last.Text, "copy failed: xclip not found") {
+		t.Errorf("last item = %+v, want copy-failure error item", last)
+	}
+}
+
 func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Model = "gpt-x"

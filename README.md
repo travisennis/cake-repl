@@ -88,9 +88,16 @@ Flags:
 | `Ctrl+N` | start a new session (cancels a running task) |
 | `Ctrl+U` | clear input |
 | `Ctrl+O` | cycle all tool output: truncated / full / hidden |
+| `Ctrl+Y` | copy the last assistant response (markdown) to the clipboard |
 | `Up` / `Down` | recall prompt history (at the input's first/last line) |
 | `PgUp` / `PgDn` | scroll timeline |
 | `Mouse wheel` | scroll timeline |
+
+`Ctrl+Y` copies the raw markdown source of the most recent assistant message to
+the system clipboard. The REPL uses the platform clipboard helpers: `pbcopy` on
+macOS, `xclip`/`xsel` on Linux, and `clip` on Windows. If no assistant message
+has arrived yet, or the clipboard helper is unavailable, the timeline shows a
+brief notice instead.
 
 ## Slash commands
 

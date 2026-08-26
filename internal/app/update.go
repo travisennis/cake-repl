@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -135,6 +136,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.ToggleToolOutput):
 		return m.toggleToolOutput()
 
+	case key.Matches(msg, m.keys.CopyLastAssistant):
+		return m.copyLastAssistant()
+
 	// Up/down recall prompt history only at the input's edge; inside a
 	// multi-line input they keep moving the cursor.
 	case key.Matches(msg, m.keys.HistoryPrev):
@@ -190,6 +194,25 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 func (m Model) toggleToolOutput() (tea.Model, tea.Cmd) {
 	m.toolOutputMode = m.toolOutputMode.Cycle()
 	m.rerenderToolItems()
+	return m, nil
+}
+
+// copyLastAssistant copies the raw markdown of the most recent assistant
+// message to the system clipboard and reports the outcome on the timeline so
+// the action always has visible feedback. Copying is a one-shot best-effort
+// write, like persistHistory: a failure appends an error item instead of
+// interrupting the REPL.
+func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
+	text, ok := m.lastAssistantMarkdown()
+	if !ok {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "no assistant response to copy"})
+		return m, nil
+	}
+	if err := m.clipboard(text); err != nil {
+		m.appendItem(ui.Item{Kind: ui.KindError, Text: "copy failed: " + err.Error()})
+		return m, nil
+	}
+	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: fmt.Sprintf("copied %d chars to clipboard", utf8.RuneCountInString(text))})
 	return m, nil
 }
 
