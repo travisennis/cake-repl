@@ -63,9 +63,13 @@ commands or help text (`internal/app/commands.go`), key bindings
   [`session-and-security.md`](session-and-security.md) and
   [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
   Tool *output* truncates at the configured output limit (default 2000 bytes) on
-  rune boundaries. `Ctrl+O` cycles every tool block through three session-wide
+  rune boundaries. Independently, at most the first 1 MiB of any single tool
+  result is *retained* for the session, cut at ingest with the same
+  "… truncated (N bytes total)" marker, so one oversized result cannot pin tens
+  of MB of memory. `Ctrl+O` cycles every tool block through three session-wide
   output modes: truncated (default), full, and hidden. Full mode ignores the
-  output limit and shows the complete raw output. The current mode also applies
+  output limit and shows everything retained (including the ingest-cut marker
+  when bytes were dropped). The current mode also applies
   to tool blocks added later and survives `/clear`. Only tool items are
   re-rendered on toggle; cached non-tool renders and the viewport scroll offset
   are preserved.

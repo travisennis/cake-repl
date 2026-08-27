@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -61,6 +62,13 @@ const benchReasoningText = "The append path extends a cached string, then the vi
 // benchToolOutput is a realistic multi-line tool result that stays under
 // ui.DefaultOutputLimit, so truncation never changes the measured payload.
 var benchToolOutput = strings.Repeat("internal/app/model.go:301: appendTimelineContent copies the timeline\n", 12)
+
+// benchHugeOutput is a tool result far above the retention ceiling — the case
+// that used to pin tens of MB for the life of the session. "x" has no
+// newlines so the cap math is exact.
+const benchHugeOutputSize = 50 << 20 // 50 MiB
+
+var benchHugeOutput = strings.Repeat("x", benchHugeOutputSize)
 
 // benchWorkload builds the timeline items for one traffic pattern.
 type benchWorkload struct {
@@ -298,4 +306,60 @@ func BenchmarkTimelineBurstPerEventSync(b *testing.B) {
 			}
 		}
 	})
+}
+
+// retainedPayloadBytes sums the string bytes one model pins for its timeline:
+// item payloads (text, tool arguments, retained tool output) plus the render
+// cache. The viewport's own line-split copy is Bubble internals and is
+// excluded; it is proportional to the joined rendered payload, so this sum
+// tracks the same retention policy. The sum is deterministic — no GC
+// involved — so retained-bytes numbers stay comparable between machines and
+// runs.
+func retainedPayloadBytes(m *Model) int64 {
+	var n int64
+	for i := range m.items {
+		it := &m.items[i]
+		n += int64(len(it.Text))
+		if it.Tool != nil {
+			n += int64(len(it.Tool.Arguments) + len(it.Tool.Output))
+		}
+	}
+	for i := range m.rendered {
+		n += int64(len(m.rendered[i]))
+	}
+	return n
+}
+
+// BenchmarkTimelineRetainedMemory reports the bytes one representative
+// tool-call session pins, with and without an oversized tool result. It is the
+// task 065 before/after instrument: the oversized-result case used to retain
+// the full output for the life of the session, and now retains only the
+// ingest ceiling plus its marker. Run with -count=6 and read the retained-B
+// column; the -benchmem allocs are secondary.
+func BenchmarkTimelineRetainedMemory(b *testing.B) {
+	forceColorProfile(b)
+
+	run := func(name string, huge bool) {
+		b.Run(name, func(b *testing.B) {
+			m := newBenchModel(benchWorkloads[1], 200)
+			if huge {
+				idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
+					Name:      "bash",
+					Arguments: `{"command":"cat huge.bin"}`,
+				}})
+				m.pendingCalls["c-huge"] = idx
+				m.applyEvent(cake.FunctionCallOutput{CallID: "c-huge", Output: benchHugeOutput})
+				m.syncViewport()
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(retainedPayloadBytes(&m)), "retained-B")
+			b.StartTimer()
+			for range b.N {
+				runtime.KeepAlive(m)
+			}
+		})
+	}
+
+	run("normal-tools", false)
+	run("oversized-output", true)
 }

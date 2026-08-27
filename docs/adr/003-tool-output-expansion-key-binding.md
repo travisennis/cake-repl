@@ -58,6 +58,10 @@ output. The key binding is added to the REPL key map and mirrored in the
 
 - Task: [010](../../.ahm/tasks/completed/010.md)
 - Guardrail: [`docs/guardrails/cli-and-user-output.md`](../guardrails/cli-and-user-output.md)
+- The "full output is stored in the item data" claim above is bounded by
+  [ADR 010](010-bound-per-tool-result-retention-and-record-the-unbounded-timeline-default.md):
+  the REPL retains at most the first 1 MiB of any single tool result, and full
+  mode shows everything retained.
 
 ## Superseding Decision (2026-07-18)
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -256,4 +257,90 @@ func TestClearResetsRenderCache(t *testing.T) {
 		t.Errorf("clear reset tool output mode: got %v, want hidden", got.toolOutputMode)
 	}
 	assertCacheMatchesFullRender(t, &got, "after /clear")
+}
+
+func TestClearReleasesRenderedBackingArray(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: strings.Repeat("hello ", 100)})
+	if cap(m.rendered) == 0 {
+		t.Fatal("setup: render cache has no backing array to release")
+	}
+
+	tm, _ := m.execCommand(Command{Kind: CmdClear})
+	got := tm.(Model)
+	got.syncViewport()
+
+	if got.rendered != nil {
+		t.Errorf("clear kept the render cache backing array (len=%d cap=%d); old rendered strings stay pinned", len(got.rendered), cap(got.rendered))
+	}
+}
+
+func TestNewSessionReleasesRenderedBackingArray(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: strings.Repeat("hello ", 100)})
+
+	tm, _ := m.startNewSession()
+	got := tm.(Model)
+	got.syncViewport()
+
+	if len(got.rendered) != 1 || cap(got.rendered) != 1 {
+		t.Errorf("new session cache len=%d cap=%d, want 1/1 (fresh backing array, old strings released)", len(got.rendered), cap(got.rendered))
+	}
+	if len(got.items) != 1 || got.items[0].Kind != ui.KindInfo {
+		t.Errorf("new session items = %+v, want the info banner only", got.items)
+	}
+}
+
+func TestToolOutputRetentionCapAppliesAtIngest(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.FunctionCall{CallID: "c-1", Name: "bash", Arguments: `{"command":"cat big.bin"}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x", 2<<20)})
+
+	tool := m.items[len(m.items)-1].Tool
+	if len(tool.Output) >= 2<<20 {
+		t.Fatalf("retained %d bytes of oversized output; want the ingest cap applied", len(tool.Output))
+	}
+	if len(tool.Output) >= maxRetainedToolOutputBytes+128 {
+		t.Errorf("retained %d bytes, want <= ceiling %d plus marker slack", len(tool.Output), maxRetainedToolOutputBytes)
+	}
+	if !strings.Contains(tool.Output, "truncated") {
+		t.Errorf("oversized output kept no truncation marker: %q", tool.Output)
+	}
+
+	// Normal-sized output passes through byte-identical (trailing newlines
+	// included), so Ctrl+O full mode is unchanged for realistic results. The
+	// orphan branch (unknown call id) applies the same cap.
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-unknown", Output: "hello"})
+	if last := m.items[len(m.items)-1]; last.Tool.Output != "hello" {
+		t.Errorf("orphan normal output = %q, want verbatim 'hello'", last.Tool.Output)
+	}
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-unknown", Output: "hello\n"})
+	if last := m.items[len(m.items)-1]; last.Tool.Output != "hello\n" {
+		t.Errorf("orphan newline-terminated output = %q, want verbatim 'hello\\n'", last.Tool.Output)
+	}
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-unknown", Output: strings.Repeat("y", 2<<20)})
+	if last := m.items[len(m.items)-1]; len(last.Tool.Output) >= 2<<20 {
+		t.Errorf("orphan oversized output retained %d bytes; want the ingest cap applied", len(last.Tool.Output))
+	}
+}
+
+func TestMaxTimelineItemsTrimReleasesTrimmedPayloads(t *testing.T) {
+	m := New(Config{MaxTimelineItems: 3})
+	m.width, m.height = 80, 24
+	m.layout()
+	for i := range 5 {
+		m.applyEvent(cake.FunctionCall{CallID: fmt.Sprintf("c-%d", i), Name: "bash", Arguments: `{}`})
+		m.applyEvent(cake.FunctionCallOutput{CallID: fmt.Sprintf("c-%d", i), Output: strings.Repeat("x", (i+1)<<10)})
+	}
+
+	if len(m.items) != 3 || len(m.rendered) != 3 {
+		t.Fatalf("timeline after trim: items=%d rendered=%d, want 3/3", len(m.items), len(m.rendered))
+	}
+	// trimFront copies survivors into a fresh exact-size slice; extra capacity
+	// would mean the old backing array (and the trimmed items' payloads) is
+	// still reachable.
+	if cap(m.items) != len(m.items) {
+		t.Errorf("items cap=%d > len=%d; trimmed item payloads stay pinned", cap(m.items), len(m.items))
+	}
+	assertCacheMatchesFullRender(t, &m, "after capped trim")
 }

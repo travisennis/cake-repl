@@ -18,6 +18,29 @@ import (
 // fast cake stream cannot starve the event loop (spinner, key handling).
 const maxEventsPerBatch = 10
 
+// maxRetainedToolOutputBytes is the hard ceiling on how much of one tool
+// result the timeline keeps in memory. It is deliberately far above the
+// render-time output-limit (default 2000 bytes): the limit decides what is
+// drawn, while this bound decides what the session pins, so Ctrl+O full mode
+// stays useful for realistic output without letting a single oversized result
+// hold tens of MB for the life of the session. Output beyond the ceiling is
+// cut at ingest with the standard truncation marker.
+const maxRetainedToolOutputBytes = 1 << 20 // 1 MiB
+
+// capRetainedToolOutput applies the retention ceiling to one tool result at
+// ingest. Output at or below the ceiling passes through byte-identical, so
+// Ctrl+O full mode is unchanged for realistic results. Larger output is cut
+// via [ui.TruncateOutput], which is rune-safe and appends the standard
+// "… truncated (N bytes total)" marker users already see in truncated mode;
+// in Ctrl+O full mode that marker is what tells the user bytes were dropped
+// for memory.
+func capRetainedToolOutput(output string) string {
+	if len(output) <= maxRetainedToolOutputBytes {
+		return output
+	}
+	return ui.TruncateOutput(output, maxRetainedToolOutputBytes)
+}
+
 // eventsMsg delivers a batch of decoded cake stream events, applied in order
 // with a single viewport sync at the end of the Update.
 type eventsMsg struct{ evs []cake.Event }
@@ -444,7 +467,7 @@ func (m *Model) applyEvent(ev cake.Event) {
 
 	case cake.FunctionCallOutput:
 		if idx, ok := m.pendingCalls[e.CallID]; ok && idx < len(m.items) && m.items[idx].Tool != nil {
-			m.items[idx].Tool.Output = e.Output
+			m.items[idx].Tool.Output = capRetainedToolOutput(e.Output)
 			m.items[idx].Tool.Done = true
 			delete(m.pendingCalls, e.CallID)
 			m.rerenderItem(idx)
@@ -452,7 +475,7 @@ func (m *Model) applyEvent(ev cake.Event) {
 			m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
 				Name:      "(tool output)",
 				Arguments: "{}",
-				Output:    e.Output,
+				Output:    capRetainedToolOutput(e.Output),
 				Done:      true,
 			}})
 		}

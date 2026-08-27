@@ -223,9 +223,15 @@ func (m Model) Init() tea.Cmd {
 }
 
 // trimFront removes the first `over` items from the timeline, adjusts
-// pendingCalls indices, and drops entries for trimmed-away pending calls.
+// pendingCalls indices, and drops entries for trimmed-away pending calls. The
+// survivors are copied into a fresh slice so the trimmed items' payloads
+// (tool outputs, assistant text) are released: reslicing would keep them
+// reachable through the old backing array, so -max-timeline-items would bound
+// the visible timeline but not the memory it pins.
 func (m *Model) trimFront(over int) {
-	m.items = m.items[over:]
+	kept := make([]ui.Item, len(m.items)-over)
+	copy(kept, m.items[over:])
+	m.items = kept
 	for callID, callIdx := range m.pendingCalls {
 		if callIdx < over {
 			delete(m.pendingCalls, callID)
@@ -244,7 +250,13 @@ func (m *Model) appendItem(it ui.Item) int {
 		over := len(m.items) - m.cfg.MaxTimelineItems
 		m.trimFront(over)
 		if m.ready {
-			m.rendered = m.rendered[over:]
+			// Copy the surviving renders too: reslicing would keep the old
+			// backing array (and the trimmed strings) reachable. The O(n) copy
+			// per trim over the cap is the cost of actually releasing the
+			// trimmed entries.
+			kept := make([]string, len(m.rendered)-over)
+			copy(kept, m.rendered[over:])
+			m.rendered = kept
 			m.timelineDirty = true
 		}
 	}
@@ -310,6 +322,10 @@ func (m *Model) insertItemAt(idx int, it ui.Item) {
 		over := len(m.items) - m.cfg.MaxTimelineItems
 		m.trimFront(over)
 		if m.ready {
+			// Drop the render cache before rebuilding: rebuild reslices to
+			// length zero, which would otherwise keep the pre-trim strings
+			// reachable through the old backing array.
+			m.rendered = nil
 			m.rebuildTimeline()
 		}
 		return
@@ -355,6 +371,13 @@ func (m *Model) rebuildTimeline() {
 		return
 	}
 	m.renderedWidth = m.timeline.Width
+	if len(m.items) == 0 {
+		// /clear and Ctrl+N empty the timeline; drop the backing array too, or
+		// reslicing to zero would keep every old rendered string pinned.
+		m.rendered = nil
+		m.timelineDirty = true
+		return
+	}
 	m.rendered = m.rendered[:0]
 	for _, it := range m.items {
 		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode))

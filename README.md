@@ -212,7 +212,18 @@ validation is available with `just release-check`.
 ## Known limitations
 
 - No session browser; `/resume` needs a UUID you already know.
-- Tool output is truncated at 2,000 characters by default (configurable via `-output-limit` or config file).
+- Tool output is truncated at 2,000 characters by default (configurable via
+  `-output-limit` or config file). Independently of that limit, the REPL
+  retains at most the first 1 MiB of any single tool result for the life of
+  the session: a larger result is cut at ingest with a "… truncated (N bytes
+  total)" line appended, so it cannot pin tens of MB of memory. `Ctrl+O`
+  full mode shows everything that was retained (including that marker);
+  output up to 1 MiB is retained verbatim.
+- The timeline keeps every entry by default (`-max-timeline-items` defaults to
+  no limit). This is deliberate: each entry's memory is bounded (see the tool
+  output ceiling above; rendered forms are capped by `-output-limit`), and
+  trimming by default would silently drop scroll-back history. Set
+  `-max-timeline-items` to bound how many entries are kept.
 - Terminal control sequences are stripped from everything cake sends before it
   is drawn, so a command's own ANSI colors are not shown and tabs expand to
   eight-column stops. This is deliberate and cannot be turned off: tool output
