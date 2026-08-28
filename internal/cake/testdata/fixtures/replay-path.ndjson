@@ -1,0 +1,9 @@
+{"type":"session_meta","session_id":"11111111-2222-3333-4444-555555555555","cwd":"/tmp/project","future_metadata":true}
+{"type":"task_start","session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task"}
+{"type":"prompt_context","session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task","prompt":"previous prompt","extra":"ignored"}
+{"type":"message","role":"user","content":"previous prompt"}
+{"type":"reasoning","id":"r-1","summary":[{"type":"summary_text","text":"short summary"}]}
+{"type":"message","role":"assistant","content":"previous answer"}
+{"type":"function_call","id":"fc-1","call_id":"call-1","name":"bash","arguments":"{\"command\":\"pwd\"}"}
+{"type":"function_call_output","call_id":"call-1","output":"/tmp/project"}
+{"type":"task_complete","subtype":"success","is_error":false,"session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task"}

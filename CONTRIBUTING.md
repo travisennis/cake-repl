@@ -113,11 +113,12 @@ Details on the test layout and the fake-cake harness live in
   is `TestSmokeRealCake`, which is gated behind the `integration` build tag
   *and* `CAKE_REAL_SMOKE=1` so it never runs from `just test`, `just test-race`,
   or `just ci`.
-- **Preserve the cake engine contract.** Only run cake as
+- **Preserve the cake engine contract.** Live prompts run only as
   `--output-format stream-json` with `--continue`/`--resume`/`--model`/
-  `--profile`/`--add-dir`. Never read cake session files, parse its human text,
-  or import cake internals. The REPL drives cake purely through the NDJSON event
-  stream.
+  `--profile`/`--add-dir` and `--` before the prompt. Startup `-resume` may
+  additionally run the read-only `cake --output-format stream-json replay
+  <uuid>` command. Never read cake session files, parse its human text, or
+  import cake internals. The REPL drives cake purely through the NDJSON stream.
 - **`just ci` is the final pre-handoff gate.** For code, config, or dependency
   changes, run `just ci` before calling the work done. For doc-only changes,
   skip it and explain the skip.

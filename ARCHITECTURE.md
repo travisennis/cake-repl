@@ -3,7 +3,8 @@
 `cake-repl` is a single-binary Go terminal REPL (Bubble Tea TUI) that drives the
 external [`cake`](https://github.com/travisennis/cake) CLI as an engine. Each
 submitted prompt spawns one `cake --output-format stream-json` subprocess and
-renders its NDJSON event stream live.
+renders its NDJSON event stream live. When startup receives `-resume <uuid>`, a
+read-only replay stream hydrates the local timeline before the first prompt.
 
 ## System boundary: cake is an external process
 
@@ -18,6 +19,8 @@ NDJSON output**. cake-repl must never:
 It communicates only through:
 
 - `cake --output-format stream-json` (NDJSON records on stdout),
+- `cake --output-format stream-json replay <uuid>` for read-only transcript
+  hydration,
 - `--continue` / `--resume <uuid>` session selection,
 - `--model` / `--profile` pass-through flags,
 - `--add-dir <dir>` read-only sandbox directories (repeatable),
@@ -33,9 +36,9 @@ scope unless the cake contract itself has changed. See
 cmd/cake-repl/main.go    Entry point: flag parsing, validation, Bubble Tea program startup.
 internal/config/         TOML config-file loading for REPL startup defaults.
 internal/cake/           cake-as-engine: subprocess lifecycle + stream-json decoding.
-  events.go              Typed event structs and the Event interface (the wire schema).
+  events.go              Typed live and replay event structs and the Event interface (the wire schema).
   parser.go              ParseLine: one NDJSON line -> typed Event (forward-compatible).
-  runner.go              Start/Run: subprocess, cancellation, stderr tail, ParseError events.
+  runner.go              Start/Replay: subprocess lifecycle, cancellation, stderr tail, ParseError events.
 internal/app/            Bubble Tea state machine (the REPL itself).
   model.go               Model struct, layout, timeline render cache.
   update.go              Event/key/command handling (the Update loop).
@@ -59,6 +62,11 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
 - **Forward-compatible decoding.** Unknown event types decode to `Unknown` and
   unknown fields are ignored, so a newer cake never breaks the stream. Malformed
   lines surface as synthetic `ParseError` events; the stream keeps flowing.
+- **Replay stays read-only.** Startup `-resume <uuid>` hydrates the timeline from
+  cake's supported replay stream before accepting a new prompt. Replay runs in a
+  separate hydration state, so it does not appear as a live task; failures warn
+  and preserve the explicit `--resume <uuid>` next-run pin. See
+  [`docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md`](docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md).
 - **Pure rendering.** `internal/ui` is side-effect-free and takes data in,
   strings out. The timeline is rendered through a per-item cache; width changes
   and `/clear` trigger a full re-render, while global tool-output mode changes

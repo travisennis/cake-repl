@@ -58,10 +58,14 @@ type Model struct {
 	timeline viewport.Model
 	spin     spinner.Model
 
-	running     bool
-	run         *cake.Run
-	sawComplete bool
-	exitAfter   bool
+	running       bool
+	run           *cake.Run
+	hydrating     bool
+	replayPending bool
+	replayRun     *cake.Run
+	replayWarn    bool
+	sawComplete   bool
+	exitAfter     bool
 	// newSessionPending is true while an old run canceled by Ctrl+N is being
 	// drained. Its remaining events and cancellation result belong before the
 	// new-session boundary and must not affect the fresh state.
@@ -113,13 +117,15 @@ func New(cfg Config) Model {
 	spin.Spinner = spinner.MiniDot
 
 	m := Model{
-		cfg:          cfg,
-		theme:        th,
-		keys:         defaultKeyMap(),
-		input:        input,
-		spin:         spin,
-		pendingCalls: map[string]int{},
-		clipboard:    clipboard.WriteAll,
+		cfg:           cfg,
+		theme:         th,
+		keys:          defaultKeyMap(),
+		input:         input,
+		spin:          spin,
+		pendingCalls:  map[string]int{},
+		clipboard:     clipboard.WriteAll,
+		hydrating:     cfg.ResumeID != "",
+		replayPending: cfg.ResumeID != "",
 		session: sessionState{
 			NextMode: cfg.InitialMode,
 			ResumeID: cfg.ResumeID,
@@ -199,6 +205,9 @@ func (m Model) CancelRunning() {
 	if m.run != nil {
 		m.run.Cancel()
 	}
+	if m.replayRun != nil {
+		m.replayRun.Cancel()
+	}
 }
 
 // SessionData returns the current session ID and working directory for
@@ -216,10 +225,14 @@ func (m Model) SessionData() (sessionID, cwd string) {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		textarea.Blink,
-		tea.SetWindowTitle("cake-repl: "+ui.Sanitize(m.cfg.Cwd)),
-	)
+		tea.SetWindowTitle("cake-repl: " + ui.Sanitize(m.cfg.Cwd)),
+	}
+	if m.hydrating {
+		cmds = append(cmds, startReplayCmd(m.cfg))
+	}
+	return tea.Batch(cmds...)
 }
 
 // trimFront removes the first `over` items from the timeline, adjusts

@@ -134,6 +134,88 @@ func TestParseLineUnknownFieldsIgnored(t *testing.T) {
 	}
 }
 
+func TestParseLineReplayRecords(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want Event
+	}{
+		{
+			name: "session metadata",
+			line: `{"type":"session_meta","session_id":"s-1","cwd":"/tmp/project","new_field":true}`,
+			want: SessionMeta{SessionID: "s-1", Cwd: "/tmp/project"},
+		},
+		{
+			name: "prompt context",
+			line: `{"type":"prompt_context","session_id":"s-1","task_id":"t-1","prompt":"check this","extra":{"future":true}}`,
+			want: PromptContext{SessionID: "s-1", TaskID: "t-1", Prompt: "check this"},
+		},
+		{
+			name: "skill activation",
+			line: `{"type":"skill_activated","name":"review","description":"Review code","unknown":"ignored"}`,
+			want: SkillActivated{Name: "review", Description: "Review code"},
+		},
+		{
+			name: "replay error",
+			line: `{"type":"replay_error","session_id":"s-1","kind":"session_not_found","error":"missing","exit_code":3}`,
+			want: ReplayError{SessionID: "s-1", Kind: "session_not_found", Error: "missing", ExitCode: 3},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseLine([]byte(tt.line))
+			if err != nil {
+				t.Fatalf("ParseLine: %v", err)
+			}
+			if got.EventType() != tt.want.EventType() {
+				t.Fatalf("event type = %q, want %q", got.EventType(), tt.want.EventType())
+			}
+			switch want := tt.want.(type) {
+			case SessionMeta:
+				if got := got.(SessionMeta); got.SessionID != want.SessionID || got.Cwd != want.Cwd {
+					t.Errorf("event = %+v, want %+v", got, want)
+				}
+			case PromptContext:
+				if got := got.(PromptContext); got.SessionID != want.SessionID || got.TaskID != want.TaskID || got.Prompt != want.Prompt {
+					t.Errorf("event = %+v, want %+v", got, want)
+				}
+			case SkillActivated:
+				if got := got.(SkillActivated); got.Name != want.Name || got.Description != want.Description {
+					t.Errorf("event = %+v, want %+v", got, want)
+				}
+			case ReplayError:
+				if got := got.(ReplayError); got.Kind != want.Kind || got.Error != want.Error || got.ExitCode != want.ExitCode {
+					t.Errorf("event = %+v, want %+v", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestParseLineReasoningTypedSummary(t *testing.T) {
+	line := `{"type":"reasoning","id":"r-1","summary":[{"type":"summary_text","text":"typed summary"},"legacy summary"]}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	r, ok := ev.(Reasoning)
+	if !ok {
+		t.Fatalf("got %T, want Reasoning", ev)
+	}
+	if len(r.Summary) != 2 || r.Summary[0] != "typed summary" || r.Summary[1] != "legacy summary" {
+		t.Errorf("summary = %#v", r.Summary)
+	}
+}
+
+func TestParseLineUnknownReasoningSummaryShapeKeepsEvent(t *testing.T) {
+	line := `{"type":"reasoning","id":"r-1","summary":{"provider":"future"}}`
+	if ev, err := ParseLine([]byte(line)); err != nil {
+		t.Fatalf("ParseLine returned error for unknown summary shape: %v", err)
+	} else if _, ok := ev.(Reasoning); !ok {
+		t.Fatalf("got %T, want Reasoning", ev)
+	}
+}
+
 func TestParseLineMalformed(t *testing.T) {
 	_, err := ParseLine([]byte(`{"type":"message", busted`))
 	if err == nil {

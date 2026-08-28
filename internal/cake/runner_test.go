@@ -336,6 +336,65 @@ func TestTailBuffer(t *testing.T) {
 	}
 }
 
+func TestRunnerReplayUsesStreamJSONCommand(t *testing.T) {
+	argsPath := filepath.Join(t.TempDir(), "args")
+	t.Setenv("ARGS_FILE", argsPath)
+	t.Setenv("REPLAY_FIXTURE", filepath.Join("testdata", "fixtures", "replay-path.ndjson"))
+	bin := writeFakeCake(t, `
+printf '%s\n' "$@" > "$ARGS_FILE"
+cat "$REPLAY_FIXTURE"
+`)
+	run, err := Replay(ReplayOptions{
+		Bin:       bin,
+		SessionID: "11111111-2222-3333-4444-555555555555",
+	})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	events, res := collect(t, run)
+	if res.ExitCode != 0 || res.Canceled || res.Err != nil {
+		t.Fatalf("unexpected replay result: %+v", res)
+	}
+	if len(events) != 9 {
+		t.Fatalf("got %d replay events, want 9: %#v", len(events), events)
+	}
+	if _, ok := events[0].(SessionMeta); !ok {
+		t.Errorf("event 0 is %T, want SessionMeta", events[0])
+	}
+	if reasoning, ok := events[4].(Reasoning); !ok || len(reasoning.Summary) != 1 || reasoning.Summary[0] != "short summary" {
+		t.Errorf("event 4 = %#v, want typed reasoning summary", events[4])
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("reading captured args: %v", err)
+	}
+	wantArgs := "--output-format\nstream-json\nreplay\n11111111-2222-3333-4444-555555555555\n"
+	if string(args) != wantArgs {
+		t.Errorf("replay args = %q, want %q", args, wantArgs)
+	}
+}
+
+func TestRunnerReplayStructuredFailureStreamsWarningEvent(t *testing.T) {
+	bin := writeFakeCake(t, `
+printf '%s\n' '{"type":"replay_error","session_id":"11111111-2222-3333-4444-555555555555","kind":"session_not_found","error":"missing","exit_code":3}'
+exit 3
+`)
+	run, err := Replay(ReplayOptions{Bin: bin, SessionID: "11111111-2222-3333-4444-555555555555"})
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	events, res := collect(t, run)
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want one: %#v", len(events), events)
+	}
+	if replayErr, ok := events[0].(ReplayError); !ok || replayErr.Kind != "session_not_found" || replayErr.ExitCode != 3 {
+		t.Errorf("event = %#v, want structured ReplayError", events[0])
+	}
+	if res.ExitCode != 3 || res.Canceled {
+		t.Errorf("result = %+v, want exit code 3", res)
+	}
+}
+
 func TestOptionsArgs(t *testing.T) {
 	tests := []struct {
 		name string

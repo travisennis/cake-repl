@@ -51,10 +51,36 @@ type Options struct {
 	DebugLog io.Writer
 
 	afterWait func()
+	replay    bool
+}
+
+// ReplayOptions configures a read-only replay of an existing cake session.
+type ReplayOptions struct {
+	Bin       string
+	Cwd       string
+	SessionID string
+	DebugLog  io.Writer
+}
+
+// Replay launches cake's supported stream-json session replay command. Replay
+// uses the same event parser and subprocess lifecycle as a live invocation but
+// never supplies a prompt or starts a new task.
+func Replay(opts ReplayOptions) (*Run, error) {
+	return Start(Options{
+		Bin:      opts.Bin,
+		Cwd:      opts.Cwd,
+		ResumeID: opts.SessionID,
+		DebugLog: opts.DebugLog,
+		replay:   true,
+	})
 }
 
 // Args returns the cake CLI arguments for these options.
 func (o Options) Args() []string {
+	if o.replay {
+		return []string{"--output-format", "stream-json", "replay", o.ResumeID}
+	}
+
 	args := []string{"--output-format", "stream-json"}
 	switch o.Mode {
 	case RunContinue:
@@ -96,7 +122,7 @@ type ParseError struct {
 
 func (e ParseError) EventType() string { return "parse_error" }
 
-// Run is one live cake subprocess. Events is closed when stdout reaches EOF;
+// Run is one cake subprocess. Events is closed when stdout reaches EOF;
 // Result then delivers exactly one value.
 type Run struct {
 	Events <-chan Event

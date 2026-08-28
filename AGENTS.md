@@ -5,13 +5,15 @@
 `cake-repl` is a single-binary Go terminal REPL (Bubble Tea TUI) that drives the
 external [`cake`](https://github.com/travisennis/cake) CLI as an engine: each
 prompt spawns one `cake --output-format stream-json` process and renders its
-NDJSON event stream live.
+NDJSON event stream live. A startup `-resume` also uses cake's read-only
+`replay <uuid>` stream to hydrate the visible timeline.
 
 Compatibility surfaces — preserve unless the task explicitly changes them:
 
 - **cake contract**: run cake only in stream-json output mode with the
-  documented session, model, profile, and add-dir flags; never read cake session
-  files, parse its human text, or import its internals.
+  documented live session, model, profile, and add-dir flags, or the supported
+  read-only `replay <uuid>` command; never read cake session files, parse its
+  human text, or import its internals.
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.
@@ -57,7 +59,8 @@ Consult:
 - [cake integration and stream-json](docs/guardrails/cake-integration-and-stream-json.md),
   for the engine contract and the decoding rules — this is the core external
   contract.
-- [`ARCHITECTURE.md`](ARCHITECTURE.md), for engine isolation and the module map.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md), for engine isolation, replay hydration,
+  and the module map.
 
 Decode forward-compatibly; never cross the engine boundary.
 
@@ -87,6 +90,8 @@ Consult:
   for why run mode pins to resume.
 - [ADR 004](docs/adr/004-ctrl-n-creates-an-isolated-new-session-boundary.md), for
   the new-session boundary.
+- [ADR 011](docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md), for
+  the replay invocation and hydration decision.
 
 Preserve session-hijack prevention and never leak raw stream content.
 

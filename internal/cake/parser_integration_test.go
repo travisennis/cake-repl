@@ -128,6 +128,28 @@ func TestParseStreamMinimal(t *testing.T) {
 	}
 }
 
+func TestParseStreamReplayPath(t *testing.T) {
+	events := parseFixture(t, "replay-path")
+	wantTypes(t, events,
+		"session_meta", "task_start", "prompt_context", "message", "reasoning",
+		"message", "function_call", "function_call_output", "task_complete")
+
+	meta, ok := events[0].(SessionMeta)
+	if !ok || meta.SessionID != "11111111-2222-3333-4444-555555555555" {
+		t.Errorf("event 0 = %#v, want session metadata", events[0])
+	}
+	context, ok := events[2].(PromptContext)
+	if !ok || context.TaskID != "old-task" || context.Prompt != "previous prompt" {
+		t.Errorf("event 2 = %#v, want prompt context", events[2])
+	}
+	if user, ok := events[3].(Message); !ok || user.Role != "user" || user.Content != "previous prompt" {
+		t.Errorf("event 3 = %#v, want replayed user message", events[3])
+	}
+	if _, ok := events[6].(FunctionCall); !ok {
+		t.Errorf("event 6 = %T, want FunctionCall", events[6])
+	}
+}
+
 func TestParseStreamUnknownTypeKeepsStreaming(t *testing.T) {
 	events := parseFixture(t, "unknown-type")
 	wantTypes(t, events, "task_start", "future_feature", "task_complete")

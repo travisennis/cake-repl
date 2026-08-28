@@ -53,13 +53,88 @@ func (e Message) EventType() string { return "message" }
 
 // Reasoning carries model reasoning summaries when the provider emits them.
 type Reasoning struct {
-	Type      string   `json:"type"`
-	ID        string   `json:"id"`
-	Summary   []string `json:"summary,omitempty"`
-	Timestamp string   `json:"timestamp,omitempty"`
+	Type      string           `json:"type"`
+	ID        string           `json:"id"`
+	Summary   ReasoningSummary `json:"summary,omitempty"`
+	Timestamp string           `json:"timestamp,omitempty"`
+}
+
+// ReasoningSummary accepts both the historical string array and the typed
+// summary objects emitted by newer providers. The UI intentionally does not
+// render this provider-specific content, but decoding it must not turn a
+// replay stream into a parse error.
+type ReasoningSummary []string
+
+func (s *ReasoningSummary) UnmarshalJSON(data []byte) error {
+	var values []json.RawMessage
+	if err := json.Unmarshal(data, &values); err != nil {
+		return nil // Ignore an unfamiliar provider-specific summary shape.
+	}
+	out := make(ReasoningSummary, 0, len(values))
+	for _, value := range values {
+		var text string
+		if json.Unmarshal(value, &text) == nil {
+			out = append(out, text)
+			continue
+		}
+		var object struct {
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(value, &object) == nil && object.Text != "" {
+			out = append(out, object.Text)
+		}
+	}
+	*s = out
+	return nil
 }
 
 func (e Reasoning) EventType() string { return "reasoning" }
+
+// SessionMeta describes session-level metadata in a replay stream. Fields not
+// needed by the REPL are deliberately ignored so cake can add metadata.
+type SessionMeta struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+	Cwd       string `json:"cwd,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Profile   string `json:"profile,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+func (e SessionMeta) EventType() string { return "session_meta" }
+
+// PromptContext records context associated with one replayed prompt.
+type PromptContext struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	Prompt    string `json:"prompt,omitempty"`
+	Cwd       string `json:"cwd,omitempty"`
+}
+
+func (e PromptContext) EventType() string { return "prompt_context" }
+
+// SkillActivated reports a skill that was active for a replayed task.
+type SkillActivated struct {
+	Type        string `json:"type"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Path        string `json:"path,omitempty"`
+}
+
+func (e SkillActivated) EventType() string { return "skill_activated" }
+
+// ReplayError is the structured failure record emitted by cake replay.
+type ReplayError struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+	Kind      string `json:"kind"`
+	Error     string `json:"error"`
+	ExitCode  int    `json:"exit_code"`
+}
+
+func (e ReplayError) EventType() string { return "replay_error" }
 
 // FunctionCall is a tool invocation requested by the model.
 type FunctionCall struct {

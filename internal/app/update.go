@@ -77,6 +77,58 @@ func waitForRun(run *cake.Run) tea.Cmd {
 	}
 }
 
+// replayStartedMsg reports the subprocess created for startup hydration.
+type replayStartedMsg struct {
+	run *cake.Run
+	err error
+}
+
+// replayEventsMsg delivers a batch of replay records in stream order.
+type replayEventsMsg struct{ evs []cake.Event }
+
+// replayDoneMsg delivers the terminal state of a replay subprocess.
+type replayDoneMsg struct{ res cake.Result }
+
+// startReplayCmd starts the read-only replay without making the live prompt
+// state look busy. The command runs outside the Update loop because starting a
+// subprocess can block briefly.
+func startReplayCmd(cfg Config) tea.Cmd {
+	return func() tea.Msg {
+		run, err := cake.Replay(cake.ReplayOptions{
+			Bin:       cfg.CakeBin,
+			Cwd:       cfg.Cwd,
+			SessionID: cfg.ResumeID,
+			DebugLog:  cfg.DebugLog,
+		})
+		return replayStartedMsg{run: run, err: err}
+	}
+}
+
+// waitForReplay pulls the next batch of events from a replay run, or its final
+// result once the event stream is closed. It mirrors waitForRun but keeps
+// hydration separate from a live prompt run.
+func waitForReplay(run *cake.Run) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-run.Events
+		if !ok {
+			return replayDoneMsg{res: <-run.Result}
+		}
+		evs := []cake.Event{ev}
+		for len(evs) < maxEventsPerBatch {
+			select {
+			case ev, ok := <-run.Events:
+				if !ok {
+					return replayEventsMsg{evs: evs}
+				}
+				evs = append(evs, ev)
+			default:
+				return replayEventsMsg{evs: evs}
+			}
+		}
+		return replayEventsMsg{evs: evs}
+	}
+}
+
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -93,6 +145,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
+
+	case replayStartedMsg:
+		if msg.err != nil {
+			if m.replayPending {
+				m.replayPending = false
+				if m.hydrating {
+					m.hydrating = false
+					m.replayWarn = true
+					m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay unavailable: " + msg.err.Error()})
+				}
+			}
+			if m.exitAfter {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		m.replayRun = msg.run
+		if m.exitAfter || !m.hydrating {
+			m.replayRun.Cancel()
+		}
+		return m, waitForReplay(m.replayRun)
+
+	case replayEventsMsg:
+		if m.hydrating {
+			for _, ev := range msg.evs {
+				m.applyReplayEvent(ev)
+			}
+			m.syncViewport()
+		}
+		if m.replayRun == nil {
+			return m, nil
+		}
+		return m, waitForReplay(m.replayRun)
+
+	case replayDoneMsg:
+		return m.finishReplay(msg.res)
 
 	case eventsMsg:
 		if !m.newSessionPending {
@@ -133,6 +221,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.CancelQuit):
 		if m.running {
 			m.run.Cancel()
+			return m, nil
+		}
+		if m.hydrating || m.replayPending {
+			m.exitAfter = true
+			if m.replayRun != nil {
+				m.replayRun.Cancel()
+			}
 			return m, nil
 		}
 		return m, tea.Quit
@@ -195,16 +290,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // startNewSession creates an immediate visual and session-state boundary.
-// When a run is active, its process is canceled and drained normally, but its
-// remaining events are suppressed so they cannot enter or re-pin the new
-// session.
+// When a live run or replay is active, its process is canceled and drained
+// normally, but its remaining events are suppressed so they cannot enter or
+// re-pin the new session.
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if m.running {
 		m.newSessionPending = true
 		m.run.Cancel()
 	}
+	if m.hydrating {
+		if m.replayRun != nil {
+			m.replayRun.Cancel()
+		}
+		// Keep consuming the canceled replay in the background, but suppress its
+		// records after this new-session boundary.
+		m.hydrating = false
+	}
 	m.session.Reset()
 	m.sawComplete = false
+	m.replayWarn = false
 	m.items = nil
 	m.pendingCalls = map[string]int{}
 	m.rebuildTimeline()
@@ -317,6 +421,11 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m.execCommand(cmd)
 	}
 
+	if m.hydrating || m.replayPending || m.replayRun != nil {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "waiting for session history to load…"})
+		return m, nil
+	}
+
 	if m.newSessionPending {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "waiting for the canceled task to exit…"})
 		return m, nil
@@ -330,6 +439,11 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
+	if (m.hydrating || m.replayPending || m.replayRun != nil) &&
+		(cmd.Kind == CmdNew || cmd.Kind == CmdContinue || cmd.Kind == CmdResume) {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "wait for session history to load first"})
+		return m, nil
+	}
 	if m.running && (cmd.Kind == CmdNew || cmd.Kind == CmdContinue || cmd.Kind == CmdResume) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "finish or cancel the running task first"})
 		return m, nil
@@ -344,6 +458,14 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 			m.exitAfter = true
 			m.run.Cancel()
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling task, then exiting…"})
+			return m, nil
+		}
+		if m.hydrating || m.replayPending {
+			m.exitAfter = true
+			if m.replayRun != nil {
+				m.replayRun.Cancel()
+			}
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling session history load, then exiting…"})
 			return m, nil
 		}
 		return m, tea.Quit
@@ -423,10 +545,41 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyEvent(ev cake.Event) {
+	m.applyEventMode(ev, false)
+}
+
+func (m *Model) applyReplayEvent(ev cake.Event) {
+	m.applyEventMode(ev, true)
+}
+
+func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 	switch e := ev.(type) {
 	case cake.TaskStart:
 		m.session.OnTaskStart(e)
 		m.appendItem(ui.Item{Kind: ui.KindTaskStart, Text: "task started · session " + ui.ShortID(e.SessionID)})
+
+	case cake.SessionMeta:
+		if replay && e.SessionID != "" {
+			m.session.SessionID = e.SessionID
+		}
+
+	case cake.PromptContext:
+		if replay {
+			if e.SessionID != "" {
+				m.session.SessionID = e.SessionID
+			}
+			if e.TaskID != "" {
+				m.session.TaskID = e.TaskID
+			}
+		}
+
+	case cake.SkillActivated:
+		// Skill metadata is useful to the engine but has no dedicated timeline
+		// representation. Keep it out of user output and debug-log a compact
+		// diagnostic when configured.
+		if e.Name != "" {
+			m.logDebug("skill activated: " + e.Name)
+		}
 
 	case cake.Message:
 		switch e.Role {
@@ -444,7 +597,10 @@ func (m *Model) applyEvent(ev cake.Event) {
 				}
 			}
 		case "user":
-			// The submitted prompt is already on the timeline.
+			if replay && strings.TrimSpace(e.Content) != "" {
+				m.appendItem(ui.Item{Kind: ui.KindUser, Text: e.Content})
+			}
+			// The submitted prompt is already on the timeline for live runs.
 		default:
 			m.logDebug(fmt.Sprintf("%s message: %s", e.Role, e.Content))
 		}
@@ -500,7 +656,23 @@ func (m *Model) applyEvent(ev cake.Event) {
 			m.appendItem(ui.Item{Kind: ui.KindComplete, Text: completionSummary(e)})
 		}
 
+	case cake.ReplayError:
+		if replay {
+			text := "session replay failed"
+			if e.Kind != "" {
+				text += " (" + e.Kind + ")"
+			}
+			if e.Error != "" {
+				text += ": " + e.Error
+			}
+			m.replayWarn = true
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
+		}
+
 	case cake.ParseError:
+		if replay {
+			m.replayWarn = true
+		}
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "malformed stream line: " + e.Line})
 
 	case cake.Unknown:
@@ -516,6 +688,54 @@ func (m *Model) logDebug(text string) {
 	}
 }
 
+func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
+	m.replayRun = nil
+	m.replayPending = false
+	if !m.hydrating {
+		if m.exitAfter {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+	m.hydrating = false
+
+	if !m.replayWarn {
+		switch {
+		case res.Canceled:
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay canceled"})
+		case res.Err != nil:
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay failed: " + res.Err.Error()})
+		case res.ExitCode != 0:
+			text := fmt.Sprintf("session replay failed with exit code %d", res.ExitCode)
+			if res.Stderr != "" {
+				text += "\n" + ui.TruncateOutput(res.Stderr, m.cfg.OutputLimit)
+			}
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
+		}
+	}
+	m.finishPendingTools()
+	m.syncViewport()
+	if m.exitAfter {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// finishPendingTools marks tool calls that never received an output as done,
+// so a tool block does not keep showing "… running" once the stream has
+// ended. Live runs and startup replay both reach this state: a task ends
+// mid-call, or a replay transcript ends at a partial tail.
+func (m *Model) finishPendingTools() {
+	for callID, idx := range m.pendingCalls {
+		if idx < len(m.items) && m.items[idx].Tool != nil {
+			m.items[idx].Tool.Done = true
+			m.items[idx].Tool.Output = "(no output — task ended)"
+			m.rerenderItem(idx)
+		}
+		delete(m.pendingCalls, callID)
+	}
+}
+
 func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	m.running = false
 	m.run = nil
@@ -527,15 +747,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Any tool call still waiting for output will never get one.
-	for callID, idx := range m.pendingCalls {
-		if idx < len(m.items) && m.items[idx].Tool != nil {
-			m.items[idx].Tool.Done = true
-			m.items[idx].Tool.Output = "(no output — task ended)"
-			m.rerenderItem(idx)
-		}
-		delete(m.pendingCalls, callID)
-	}
+	m.finishPendingTools()
 
 	switch {
 	case res.Canceled:

@@ -29,6 +29,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll).
+- **Startup resume.** `-resume <uuid>` first invokes the read-only
+  `cake --output-format stream-json replay <uuid>` command. It hydrates the
+  visible timeline before the first prompt; failures show a warning and keep
+  the explicit resume pin usable.
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
   labeled conversation sections with a slim gutter at normal widths; narrow

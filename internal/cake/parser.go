@@ -42,6 +42,30 @@ func ParseLine(line []byte) (Event, error) {
 			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
 		}
 		return ev, nil
+	case "session_meta":
+		var ev SessionMeta
+		if err := json.Unmarshal(env.Raw, &ev); err != nil {
+			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
+		}
+		return ev, nil
+	case "prompt_context":
+		var ev PromptContext
+		if err := json.Unmarshal(env.Raw, &ev); err != nil {
+			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
+		}
+		return ev, nil
+	case "skill_activated":
+		var ev SkillActivated
+		if err := json.Unmarshal(env.Raw, &ev); err != nil {
+			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
+		}
+		return ev, nil
+	case "replay_error":
+		var ev ReplayError
+		if err := json.Unmarshal(env.Raw, &ev); err != nil {
+			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
+		}
+		return ev, nil
 	case "function_call":
 		var ev FunctionCall
 		if err := json.Unmarshal(env.Raw, &ev); err != nil {

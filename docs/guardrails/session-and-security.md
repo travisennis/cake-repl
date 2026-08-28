@@ -15,6 +15,13 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   the work. Fallback to `--continue` is reserved for a **successful** task that
   reported no session id; a failed task with no session id leaves the run mode
   untouched rather than selecting `--continue`.
+- **Session hydration.** Startup `-resume <uuid>` launches the read-only cake
+  replay command before accepting a new prompt. Ordered replay events hydrate
+  the local timeline; metadata restores known session/task ids, and replayed
+  user messages are rendered because no prompt was submitted by the REPL.
+  Hydration is not a live task, so the running state remains idle. A replay
+  failure or unsupported cake binary produces a warning and leaves the explicit
+  `--resume <uuid>` pin unchanged so the user can continue.
 - **Run-mode transitions.** `RunFresh` → (any completion reporting a session
   id) → `RunResume`; `/new` resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
   drains an active run without letting its late events or cancellation restore
@@ -40,9 +47,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   reach the terminal from any item kind. Newline is the only preserved control
   character. See
   [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
-- **Process lifecycle.** One cake process at a time. Cancel = SIGTERM then
-  SIGKILL after `WaitDelay` (kill outright on Windows). stderr retained as a
-  bounded tail for error display.
+- **Process lifecycle.** One cake process at a time, including while replay
+  hydration is active. Cancel = SIGTERM then SIGKILL after `WaitDelay` (kill
+  outright on Windows). stderr retained as a bounded tail for error display.
+- **Replay isolation.** Replay is read-only and must not alter the session run
+  mode or create a new session. Its late events are discarded after `Ctrl+N`,
+  and a canceled replay is drained before another cake process starts.
 
 ## Required checks / test focus
 

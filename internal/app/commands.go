@@ -88,6 +88,7 @@ const HelpText = `commands
   /new             start a fresh cake session on the next prompt
   /continue        continue cake's latest session on the next prompt
   /resume <uuid>   resume a specific cake session on the next prompt
+                   (startup -resume also reloads visible history)
   /session         show session id, task id, cwd, run mode, last result
   /clear           clear the timeline (session state is kept)
 

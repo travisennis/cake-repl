@@ -101,7 +101,7 @@ func main() {
 func run() (err error) {
 	cakeBin := flag.String("cake-bin", "cake", "cake executable to run")
 	continueFlag := flag.Bool("continue", false, "continue cake's latest session on the first prompt")
-	resume := flag.String("resume", "", "resume a specific cake session uuid on the first prompt")
+	resume := flag.String("resume", "", "resume a specific cake session and reload its visible history")
 	model := flag.String("model", "", "model name passed through to cake")
 	profile := flag.String("profile", "", "behavior profile passed through to cake")
 	var addDirs stringList

@@ -5,21 +5,26 @@ A standalone terminal REPL for the [`cake`](https://github.com/travisennis/cake)
 `cake-repl` treats cake as the engine: each submitted prompt spawns one
 `cake --output-format stream-json` process and renders its event stream live —
 assistant messages in REPL-themed markdown, thinking indicators, tool calls
-grouped with their outputs, hook denials, and completion stats. Labeled user and
-assistant sections anchor the conversation while operational events remain
-compact and visually distinct.
+grouped with their outputs, hook denials, and completion stats. When `-resume`
+is supplied, cake-repl first replays that session through
+`cake --output-format stream-json replay <uuid>` to hydrate the visible timeline.
+Labeled user and assistant sections anchor the conversation while operational
+events remain compact and visually distinct.
 The status line leads with current idle/running state, followed by labeled
 session, next-run, model, and working-directory context. After a successful
 turn, the next prompt automatically continues the same cake session.
 
 It never links to cake internals, parses human text output, or reads cake's
-session files. The only contract is cake's stream-json NDJSON output and its
-documented session, model, profile, and add-dir flags.
+session files. The only contract is cake's stream-json NDJSON output, the
+supported `replay <uuid>` command, and its documented session, model, profile,
+and add-dir flags.
 
 ## Requirements
 
 - Go 1.26.3 or newer to build.
 - `cake` installed and on `PATH`, or point at a binary with `-cake-bin`.
+  Startup `-resume` history hydration requires cake 0.1.0 or a newer build
+  that supports `cake --output-format stream-json replay <uuid>`.
 
 ## Build
 
@@ -47,7 +52,7 @@ Make sure that directory is on your `PATH`.
 ```bash
 cake-repl                                     # fresh session on first prompt
 cake-repl -continue                          # continue latest session for this directory
-cake-repl -resume <uuid>                     # resume a specific session
+cake-repl -resume <uuid>                     # replay history, then resume a specific session
 cake-repl -cake-bin ../cake/target/debug/cake
 ```
 
@@ -63,7 +68,7 @@ Flags:
 |---|---|
 | `-cake-bin <path>` | cake executable to run (default `cake`) |
 | `-continue` | continue cake's latest session on the first prompt |
-| `-resume <uuid>` | resume a specific cake session on the first prompt |
+| `-resume <uuid>` | replay visible history when supported, then resume a specific cake session on the first prompt |
 | `-model <name>` | passed through to cake |
 | `-profile <name>` | passed through to cake |
 | `-add-dir <dir>` | add a directory to cake's sandbox as read-only; repeatable |
@@ -114,6 +119,14 @@ brief notice instead.
 ## Session behavior
 
 - A fresh start uses no session flag.
+- When started with `-resume <uuid>`, cake-repl first invokes cake's read-only
+  `cake --output-format stream-json replay <uuid>` command and hydrates the
+  visible timeline from its ordered events. Replay metadata is not shown as
+  transcript text, while replayed user and assistant messages, tools, task
+  boundaries, and completion records are shown.
+- Replay failures (including an older cake binary without replay support) show a
+  non-fatal warning. The input remains available, and the first new prompt still
+  uses `cake --resume <uuid>`.
 - Once cake reports a session id, future prompts are pinned to that session via
   `--resume <id>`, so another cake process creating a newer session in the
   same directory cannot hijack the conversation. If a task succeeded and cake
@@ -186,8 +199,8 @@ just test
 ```
 
 Integration tests drive the subprocess runner with fake cake shell scripts
-replaying NDJSON fixtures (successful streams, malformed lines, non-zero exits,
-cancellation), so they run without a real cake binary.
+replaying NDJSON fixtures (successful live and replay streams, malformed lines,
+non-zero exits, cancellation), so they run without a real cake binary.
 
 One opt-in smoke test does use a real cake. It needs the `integration` build
 tag and `CAKE_REAL_SMOKE=1`, and it makes a model-backed cake request that can
@@ -211,7 +224,9 @@ validation is available with `just release-check`.
 
 ## Known limitations
 
-- No session browser; `/resume` needs a UUID you already know.
+- No session browser; `/resume` needs a UUID you already know. Startup `-resume`
+  history hydration requires a cake binary that supports `replay`; if replay is
+  unavailable, cake-repl shows a warning and still lets you continue the session.
 - Tool output is truncated at 2,000 characters by default (configurable via
   `-output-limit` or config file). Independently of that limit, the REPL
   retains at most the first 1 MiB of any single tool result for the life of
