@@ -110,6 +110,11 @@ func New(cfg Config) Model {
 	input.BlurredStyle.Placeholder = th.Placeholder
 	input.ShowLineNumbers = false
 	input.CharLimit = 0
+	// No line cap: pasting a long multi-line prompt must not freeze the Enter
+	// (newline) key once the bubble textarea's default MaxHeight (99 lines) is
+	// reached. Pasting bypasses MaxHeight, so a >99-line paste left Enter as a
+	// no-op. Unbounded lets the prompt grow and scroll like the rest of the UI.
+	input.MaxHeight = 0
 	input.SetHeight(minInputHeight)
 	input.Focus()
 
