@@ -21,7 +21,7 @@ and add-dir flags.
 
 ## Requirements
 
-- Go 1.26.3 or newer to build.
+- Go 1.26.6 or newer to build.
 - `cake` installed and on `PATH`, or point at a binary with `-cake-bin`.
   Startup `-resume` history hydration requires cake 0.1.0 or a newer build
   that supports `cake --output-format stream-json replay <uuid>`.
