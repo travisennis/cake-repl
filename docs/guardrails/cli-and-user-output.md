@@ -35,8 +35,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   the explicit resume pin usable.
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
-  labeled conversation sections with a slim gutter at normal widths; narrow
-  widths omit the gutter and abbreviate the assistant label. Reasoning renders
+  labeled conversation sections; user content retains a slim gutter at normal
+  widths, while assistant response bodies have no decorative prefix so multiline
+  selections copy cleanly. Narrow terminals omit the user gutter and abbreviate
+  the assistant label. Reasoning renders
   as a single muted `(thinking)` marker per reasoning burst: consecutive
   `reasoning` events coalesce, any other event ends the burst, and the payload
   (e.g. a `summary`) is never shown because providers differ in what they emit.

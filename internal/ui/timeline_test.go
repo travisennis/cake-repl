@@ -287,7 +287,7 @@ func TestRenderItem_ConversationHierarchyAndWidth(t *testing.T) {
 		wantGutter bool
 	}{
 		{name: "user anchor", item: Item{Kind: KindUser, Text: "a long user prompt that wraps"}, width: 18, wantLabel: "── YOU", wantBody: "prompt", wantGutter: true},
-		{name: "assistant section", item: Item{Kind: KindAssistant, Text: "An assistant reply that wraps cleanly."}, width: 18, wantLabel: "── ASSISTANT", wantBody: "reply", wantGutter: true},
+		{name: "assistant section", item: Item{Kind: KindAssistant, Text: "An assistant reply that wraps cleanly."}, width: 18, wantLabel: "── ASSISTANT", wantBody: "reply", wantGutter: false},
 		{name: "narrow assistant", item: Item{Kind: KindAssistant, Text: "reply"}, width: 8, wantLabel: "── AI", wantBody: "reply", wantGutter: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -307,6 +307,27 @@ func TestRenderItem_ConversationHierarchyAndWidth(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRenderItem_AssistantMultilineBodyHasNoGutter(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	got := RenderItem(DefaultTheme(), Item{
+		Kind: KindAssistant,
+		Text: "first line\nsecond line\nthird line",
+	}, 80, DefaultOutputLimit, ToolOutputTruncated)
+	for _, line := range strings.Split(got, "\n")[1:] {
+		if strings.HasPrefix(line, "│ ") {
+			t.Errorf("assistant body has a decorative gutter that interferes with selection:\n%s", got)
+		}
+	}
+	for _, want := range []string{"first line", "second line", "third line"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("assistant body is missing %q:\n%s", want, got)
+		}
 	}
 }
 

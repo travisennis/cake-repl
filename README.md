@@ -8,8 +8,9 @@ assistant messages in REPL-themed markdown, thinking indicators, tool calls
 grouped with their outputs, hook denials, and completion stats. When `-resume`
 is supplied, cake-repl first replays that session through
 `cake --output-format stream-json replay <uuid>` to hydrate the visible timeline.
-Labeled user and assistant sections anchor the conversation while operational
-events remain compact and visually distinct.
+Labeled user and assistant sections anchor the conversation. Assistant response
+bodies have no decorative prefix, so multiline terminal selections can be copied
+cleanly; operational events remain compact and visually distinct.
 The status line leads with current idle/running state, followed by labeled
 session, next-run, model, and working-directory context. After a successful
 turn, the next prompt automatically continues the same cake session.

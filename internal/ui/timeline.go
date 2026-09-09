@@ -87,11 +87,11 @@ func RenderItem(th Theme, it Item, width int, outputLimit int, toolOutputMode To
 	}
 	switch it.Kind {
 	case KindUser:
-		header, gutter, bodyWidth := conversationFrame(th, th.UserLabel, "YOU", "YOU", width)
+		header, gutter, bodyWidth := conversationFrame(th, th.UserLabel, "YOU", "YOU", width, true)
 		return header + "\n" + indent(th.UserText.Width(bodyWidth).Render(it.Text), gutter)
 	case KindAssistant:
-		header, gutter, bodyWidth := conversationFrame(th, th.Assistant, "ASSISTANT", "AI", width)
-		return header + "\n" + indent(RenderMarkdown(it.Text, bodyWidth), gutter)
+		header, _, bodyWidth := conversationFrame(th, th.Assistant, "ASSISTANT", "AI", width, false)
+		return header + "\n" + RenderMarkdown(it.Text, bodyWidth)
 	case KindReasoning:
 		return wrap(th.Reasoning, "  · "+it.Text)
 	case KindTool:
@@ -116,13 +116,13 @@ func RenderItem(th Theme, it Item, width int, outputLimit int, toolOutputMode To
 // conversationFrame returns a section label, optional body gutter, and the
 // width available to the body. Very narrow terminals omit the gutter and use
 // a short label so every rendered line stays within the supplied width.
-func conversationFrame(th Theme, labelStyle lipgloss.Style, label, narrowLabel string, width int) (header, gutter string, bodyWidth int) {
+func conversationFrame(th Theme, labelStyle lipgloss.Style, label, narrowLabel string, width int, showGutter bool) (header, gutter string, bodyWidth int) {
 	if width < 12 {
 		label = narrowLabel
 	}
 	header = th.TimelineSeparator.Render("── ") + labelStyle.Render(label)
 	bodyWidth = width
-	if width >= 10 {
+	if showGutter && width >= 10 {
 		gutter = th.TimelineAccent.Render("│ ")
 		bodyWidth -= 2
 	}
