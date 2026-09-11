@@ -22,7 +22,7 @@ It communicates only through:
 - `cake --output-format stream-json replay <uuid>` for read-only transcript
   hydration,
 - `--continue` / `--resume <uuid>` session selection,
-- `--model` / `--profile` pass-through flags,
+- `--model` / `--profile` / `--tools <names>` pass-through flags,
 - `--add-dir <dir>` read-only sandbox directories (repeatable),
 - `--` to terminate flag parsing before the prompt argument.
 

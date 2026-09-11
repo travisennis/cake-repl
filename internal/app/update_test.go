@@ -915,6 +915,8 @@ func TestExecCommandSessionInfo(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Cwd = "/tmp/proj"
 	m.cfg.Model = "gpt-x"
+	m.cfg.Profile = "fast"
+	m.cfg.Tools = "bash,read"
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"})
 
 	tm, _ := m.execCommand(Command{Kind: CmdSession})
@@ -929,6 +931,8 @@ func TestExecCommandSessionInfo(t *testing.T) {
 		"cwd:      /tmp/proj",
 		"next run: fresh",
 		"model:    gpt-x",
+		"profile:  fast",
+		"tools:    bash,read",
 	} {
 		if !strings.Contains(it.Text, want) {
 			t.Errorf("session info missing %q:\n%s", want, it.Text)

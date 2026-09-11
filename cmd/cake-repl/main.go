@@ -104,6 +104,7 @@ func run() (err error) {
 	resume := flag.String("resume", "", "resume a specific cake session and reload its visible history")
 	model := flag.String("model", "", "model name passed through to cake")
 	profile := flag.String("profile", "", "behavior profile passed through to cake")
+	tools := flag.String("tools", "", "comma-separated tool names passed through to cake (restricts the session to these tools)")
 	var addDirs stringList
 	flag.Var(&addDirs, "add-dir", "directory to add to cake's sandbox as read-only (repeatable)")
 	cwd := flag.String("cwd", "", "working directory to run cake from (default: current directory)")
@@ -172,6 +173,7 @@ func run() (err error) {
 		Cwd:              dir,
 		Model:            *model,
 		Profile:          *profile,
+		Tools:            *tools,
 		AddDirs:          addDirs,
 		HistoryFile:      *historyFile,
 		OutputLimit:      *outputLimit,

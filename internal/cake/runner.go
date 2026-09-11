@@ -47,6 +47,7 @@ type Options struct {
 	ResumeID string
 	Model    string
 	Profile  string
+	Tools    string
 	AddDirs  []string
 	DebugLog io.Writer
 
@@ -99,6 +100,12 @@ func (o Options) Args() []string {
 	// cake resolves relative paths against its own working directory (Cwd).
 	for _, dir := range o.AddDirs {
 		args = append(args, "--add-dir", dir)
+	}
+	// --tools restricts the session to a comma-separated list of registered
+	// tool names, replacing the config/profile tool selection for this run.
+	// The names are passed through opaquely; cake owns the registry.
+	if o.Tools != "" {
+		args = append(args, "--tools", o.Tools)
 	}
 	// "--" ends flag parsing so a prompt starting with "-" (or matching a
 	// cake subcommand name) is always treated as the prompt.

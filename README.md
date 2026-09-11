@@ -18,7 +18,7 @@ turn, the next prompt automatically continues the same cake session.
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output, the
 supported `replay <uuid>` command, and its documented session, model, profile,
-and add-dir flags.
+tools, and add-dir flags.
 
 ## Requirements
 
@@ -72,6 +72,7 @@ Flags:
 | `-resume <uuid>` | replay visible history when supported, then resume a specific cake session on the first prompt |
 | `-model <name>` | passed through to cake |
 | `-profile <name>` | passed through to cake |
+| `-tools <names>` | restrict cake to a comma-separated list of registered tool names; passed through to cake |
 | `-add-dir <dir>` | add a directory to cake's sandbox as read-only; repeatable |
 | `-cwd <path>` | run cake from this directory (default: current directory) |
 | `-no-color` | disable styling |

@@ -524,6 +524,7 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 		ResumeID: resumeID,
 		Model:    m.cfg.Model,
 		Profile:  m.cfg.Profile,
+		Tools:    m.cfg.Tools,
 		AddDirs:  m.cfg.AddDirs,
 		DebugLog: m.cfg.DebugLog,
 	})
@@ -795,6 +796,9 @@ func (m Model) sessionInfo() string {
 	}
 	if m.cfg.Profile != "" {
 		lines = append(lines, "profile:  "+m.cfg.Profile)
+	}
+	if m.cfg.Tools != "" {
+		lines = append(lines, "tools:    "+m.cfg.Tools)
 	}
 	if c := m.session.LastComplete; c != nil {
 		outcome := "success"

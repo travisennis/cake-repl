@@ -8,10 +8,11 @@ consumes cake events. This is the project's core external contract.
 
 - **cake invocation.** Live prompts run as `cake --output-format stream-json`
   with at most one of `--continue` / `--resume <uuid>`, optional `--model` /
-  `--profile`, optional repeated `--add-dir <dir>` (read-only sandbox
-  directories; cake resolves relative paths against its own cwd), and
-  `-- <prompt>` last. Startup resume hydration runs the separate read-only
-  command `cake --output-format stream-json replay <uuid>` with no prompt.
+  `--profile` / `--tools <names>`, optional repeated `--add-dir <dir>`
+  (read-only sandbox directories; cake resolves relative paths against its own
+  cwd), and `-- <prompt>` last. Startup resume hydration runs the separate
+  read-only command `cake --output-format stream-json replay <uuid>` with no
+  prompt.
   `--` must stay so a prompt beginning with `-` is never parsed as a flag.
 - **stream-json schema.** The typed events in `events.go` (`task_start`,
   `session_meta`, `prompt_context`, `message`, `reasoning`, `function_call`,

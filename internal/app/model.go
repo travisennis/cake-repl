@@ -25,6 +25,7 @@ type Config struct {
 	Cwd              string
 	Model            string
 	Profile          string
+	Tools            string
 	AddDirs          []string
 	InitialMode      cake.RunMode
 	ResumeID         string
