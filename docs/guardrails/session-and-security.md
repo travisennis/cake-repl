@@ -12,9 +12,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   cwd from **hijacking** the conversation. The pin applies on success, failure,
   and cancellation alike: cake writes a resumable session file in every case,
   so the next submission must not accidentally start a fresh session and orphan
-  the work. Fallback to `--continue` is reserved for a **successful** task that
-  reported no session id; a failed task with no session id leaves the run mode
-  untouched rather than selecting `--continue`.
+  the work. If a task reports no session id, the current run mode remains
+  unchanged; the REPL never selects an unrelated latest session.
 - **Session hydration.** Startup `-resume <uuid>` launches the read-only cake
   replay command before accepting a new prompt. Ordered replay events hydrate
   the local timeline; metadata restores known session/task ids, and replayed
@@ -25,10 +24,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Run-mode transitions.** `RunFresh` → (any completion reporting a session
   id) → `RunResume`; `/new` resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
   drains an active run without letting its late events or cancellation restore
-  the old session pin; `/continue` and `/resume` set the next mode explicitly.
-  **Active-run restriction:** `/new`, `/continue`, and `/resume` are rejected
-  while a task is running with a warning to finish or cancel first. Only
-  `/session`, `/help`, `/clear`, and `/exit` remain available during a run.
+  the old session pin; `/resume` sets the next mode explicitly. An initial
+  `--fork` is consumed by its first fresh prompt, then the resulting session
+  is pinned with `--resume`. **Active-run restriction:** `/new` and `/resume`
+  are rejected while a task is running with a warning to finish or cancel
+  first. Only `/session`, `/help`, `/clear`, and `/exit` remain available
+  during a run.
   Keep session transitions pure and I/O-free so they stay testable.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
   secrets. They go **only** to `-debug-log` (opened `0o600`; the mode applies
@@ -64,8 +65,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 
 ## Common failure modes
 
-- **Reintroducing the hijack.** Falling back to `--continue` after a completion
-  that _did_ report a session id, or selecting `--continue` on a failed task.
+- **Reintroducing the hijack.** Selecting an unrelated latest session after a
+  completion that did not report a session id, instead of leaving the current
+  run mode unchanged or requiring an explicit `/resume`.
 - **Orphaning a session.** Leaving the run mode at `RunFresh` after a failure
   that reported a session id, so the user's next prompt silently starts a new
   session and abandons everything the failed run wrote.

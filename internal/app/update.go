@@ -440,11 +440,11 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 
 func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 	if (m.hydrating || m.replayPending || m.replayRun != nil) &&
-		(cmd.Kind == CmdNew || cmd.Kind == CmdContinue || cmd.Kind == CmdResume) {
+		(cmd.Kind == CmdNew || cmd.Kind == CmdResume) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "wait for session history to load first"})
 		return m, nil
 	}
-	if m.running && (cmd.Kind == CmdNew || cmd.Kind == CmdContinue || cmd.Kind == CmdResume) {
+	if m.running && (cmd.Kind == CmdNew || cmd.Kind == CmdResume) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "finish or cancel the running task first"})
 		return m, nil
 	}
@@ -473,10 +473,6 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 	case CmdNew:
 		m.session.Reset()
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt starts a fresh cake session"})
-
-	case CmdContinue:
-		m.session.UseContinue()
-		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt continues cake's latest session"})
 
 	case CmdResume:
 		m.session.UseResume(cmd.Arg)
@@ -517,16 +513,25 @@ func (m Model) persistHistory(text string) {
 func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	mode, resumeID := m.session.RunOptions()
 	run, err := cake.Start(cake.Options{
-		Bin:      m.cfg.CakeBin,
-		Cwd:      m.cfg.Cwd,
-		Prompt:   prompt,
-		Mode:     mode,
-		ResumeID: resumeID,
-		Model:    m.cfg.Model,
-		Profile:  m.cfg.Profile,
-		Tools:    m.cfg.Tools,
-		AddDirs:  m.cfg.AddDirs,
-		DebugLog: m.cfg.DebugLog,
+		Bin:          m.cfg.CakeBin,
+		Cwd:          m.cfg.Cwd,
+		Prompt:       prompt,
+		Mode:         mode,
+		ResumeID:     resumeID,
+		Model:        m.cfg.Model,
+		Profile:      m.cfg.Profile,
+		Tools:        m.cfg.Tools,
+		NoTools:      m.cfg.NoTools,
+		AddDirs:      m.cfg.AddDirs,
+		ToolboxDirs:  m.cfg.ToolboxDirs,
+		Sandbox:      m.cfg.Sandbox,
+		NoSkills:     m.cfg.NoSkills,
+		Skills:       m.cfg.Skills,
+		SystemPrompt: m.cfg.SystemPrompt,
+		Fork:         m.cfg.Fork,
+		ForkID:       m.cfg.ForkID,
+		NoSession:    m.cfg.NoSession,
+		DebugLog:     m.cfg.DebugLog,
 	})
 	if err != nil {
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
@@ -536,6 +541,9 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	m.run = run
 	m.running = true
 	m.sawComplete = false
+	// A fork creates one fresh session boundary. Once the process has
+	// started, future prompts must use the session pin rather than fork again.
+	m.cfg.Fork = false
 	if m.history.Add(prompt) {
 		m.persistHistory(prompt)
 	}

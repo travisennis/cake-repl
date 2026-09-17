@@ -62,8 +62,9 @@ The config file contract is:
 - Support only stable REPL defaults: `cake-bin`, `model`, `profile`,
   `output-limit`, and `max-timeline-items`.
 - Exclude session-specific or invocation-specific values such as `cwd`,
-  `continue`, `resume`, `debug-log`, `history-file`, `config`, `no-config`, and
-  `version`.
+  `fork`, `resume`, `no-session`, `debug-log`, `history-file`, `config`,
+  `no-config`, and `version`. The cake invocation controls remain startup-only
+  CLI flags rather than persisted defaults.
 - Provide `-config <path>` to load a single explicit config file instead of the
   default paths.
 - Provide `-no-config` to skip all config loading.

@@ -20,7 +20,6 @@ func TestParseCommandKnown(t *testing.T) {
 		{"/quit", CmdExit},
 		{"/q", CmdExit},
 		{"/new", CmdNew},
-		{"/continue", CmdContinue},
 		{"/session", CmdSession},
 		{"/clear", CmdClear},
 		{"  /HELP  ", CmdHelp},
@@ -63,5 +62,12 @@ func TestParseCommandUnknown(t *testing.T) {
 	_, ok, err := ParseCommand("/frobnicate")
 	if !ok || err == nil {
 		t.Errorf("unknown command should be ok=true with error, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestParseCommandContinueRemoved(t *testing.T) {
+	_, ok, err := ParseCommand("/continue")
+	if !ok || err == nil {
+		t.Errorf("removed /continue should be rejected, got ok=%v err=%v", ok, err)
 	}
 }

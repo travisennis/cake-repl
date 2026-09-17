@@ -57,6 +57,44 @@ func drainRun(t *testing.T, run *cake.Run) {
 	}
 }
 
+func TestForkIsConsumedAfterFirstRun(t *testing.T) {
+	argsPath := filepath.Join(t.TempDir(), "args")
+	t.Setenv("ARGS_FILE", argsPath)
+	bin := writeFakeCake(t, `
+printf '%s\n' "$@" >> "$ARGS_FILE"
+`)
+
+	m := New(Config{
+		CakeBin: bin,
+		Cwd:     t.TempDir(),
+		Fork:    true,
+		ForkID:  "11111111-2222-3333-4444-555555555555",
+	})
+
+	tm, _ := m.startRun("first")
+	m = tm.(Model)
+	drainRun(t, m.run)
+	if m.cfg.Fork {
+		t.Fatal("fork remained enabled after the first run")
+	}
+
+	tm, _ = m.startRun("second")
+	m = tm.(Model)
+	drainRun(t, m.run)
+
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("reading captured args: %v", err)
+	}
+	argText := string(args)
+	if !strings.Contains(argText, "--fork\n11111111-2222-3333-4444-555555555555\n--\nfirst\n") {
+		t.Errorf("first invocation args = %q", argText)
+	}
+	if strings.Contains(argText, "--fork\n11111111-2222-3333-4444-555555555555\n--\nsecond\n") {
+		t.Errorf("second invocation forked again: %q", argText)
+	}
+}
+
 func TestDescribeHookDecisionVisibility(t *testing.T) {
 	// Cake's full vocabulary (hooks.rs): none|deny|stop|error, plus allow
 	// for resolved_decision. Only the benign two (and an absent field) are
@@ -846,7 +884,6 @@ func TestExecSessionCommandsRejectedWhenRunning(t *testing.T) {
 		input string
 	}{
 		{"new", "/new"},
-		{"continue", "/continue"},
 		{"resume", "/resume aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
 	}
 
@@ -893,12 +930,6 @@ func TestExecCommandSessionModes(t *testing.T) {
 	got := tm.(Model)
 	if mode, resumeID := got.session.RunOptions(); mode != cake.RunResume || resumeID != id {
 		t.Errorf("after /resume: mode=%v id=%q, want resume %q", mode, resumeID, id)
-	}
-
-	tm, _ = got.execCommand(Command{Kind: CmdContinue})
-	got = tm.(Model)
-	if mode, resumeID := got.session.RunOptions(); mode != cake.RunContinue || resumeID != "" {
-		t.Errorf("after /continue: mode=%v id=%q, want continue with no id", mode, resumeID)
 	}
 
 	tm, _ = got.execCommand(Command{Kind: CmdNew})

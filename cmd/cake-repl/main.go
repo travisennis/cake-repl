@@ -47,21 +47,70 @@ func (s *stringList) Set(v string) error {
 	return nil
 }
 
+// optionalString accepts an optional value after normalization. It tracks
+// whether the flag was supplied so -fork can distinguish "fork latest" from
+// the flag being absent.
+type optionalString struct {
+	set   bool
+	value string
+}
+
+func (s *optionalString) String() string { return s.value }
+
+func (s *optionalString) Set(v string) error {
+	s.set = true
+	s.value = v
+	return nil
+}
+
+// IsBoolFlag lets the standard flag package accept a bare -fork. A separate
+// normalization step still supports the optional UUID value.
+func (s *optionalString) IsBoolFlag() bool { return true }
+
+// normalizeForkArgs turns cake's optional --fork [<uuid>] syntax into the
+// standard flag package's --fork=<uuid> form. A bare --fork becomes --fork=.
+func normalizeForkArgs(args []string) []string {
+	normalized := make([]string, 0, len(args))
+	parsingFlags := true
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			parsingFlags = false
+			normalized = append(normalized, arg)
+			continue
+		}
+		if parsingFlags && (arg == "-fork" || arg == "--fork") {
+			if i+1 < len(args) && args[i+1] != "--" && !strings.HasPrefix(args[i+1], "-") {
+				normalized = append(normalized, arg+"="+args[i+1])
+				i++
+			} else {
+				normalized = append(normalized, arg+"=")
+			}
+			continue
+		}
+		normalized = append(normalized, arg)
+	}
+	return normalized
+}
+
 // validateFlags checks the mutually exclusive / incompatible flag combinations
 // and returns an error when validation fails. When showVersion is true it
 // short-circuits and returns nil so the caller handles --version separately.
-func validateFlags(showVersion bool, continueFlag bool, resume string, args []string, configPath string, noConfig bool) error {
+func validateFlags(showVersion bool, resume string, fork bool, forkID string, args []string, configPath string, noConfig bool) error {
 	if showVersion {
 		return nil
 	}
 	if len(args) > 0 {
 		return fmt.Errorf("unexpected argument %q (prompts are entered inside the REPL)", args[0])
 	}
-	if continueFlag && resume != "" {
-		return fmt.Errorf("-continue and -resume are mutually exclusive")
+	if fork && resume != "" {
+		return fmt.Errorf("-fork and -resume are mutually exclusive")
 	}
 	if resume != "" && !app.IsSessionID(resume) {
 		return fmt.Errorf("invalid -resume uuid: %s", resume)
+	}
+	if forkID != "" && !app.IsSessionID(forkID) {
+		return fmt.Errorf("invalid -fork uuid: %s", forkID)
 	}
 	if configPath != "" && noConfig {
 		return fmt.Errorf("-config and -no-config are mutually exclusive")
@@ -100,13 +149,22 @@ func main() {
 
 func run() (err error) {
 	cakeBin := flag.String("cake-bin", "cake", "cake executable to run")
-	continueFlag := flag.Bool("continue", false, "continue cake's latest session on the first prompt")
 	resume := flag.String("resume", "", "resume a specific cake session and reload its visible history")
+	var fork optionalString
+	flag.Var(&fork, "fork", "fork the latest cake session, or the specified session UUID")
+	noSession := flag.Bool("no-session", false, "do not save the cake session to disk")
 	model := flag.String("model", "", "model name passed through to cake")
 	profile := flag.String("profile", "", "behavior profile passed through to cake")
 	tools := flag.String("tools", "", "comma-separated tool names passed through to cake (restricts the session to these tools)")
+	noTools := flag.Bool("no-tools", false, "expose no tools to cake")
 	var addDirs stringList
 	flag.Var(&addDirs, "add-dir", "directory to add to cake's sandbox as read-only (repeatable)")
+	var toolboxDirs stringList
+	flag.Var(&toolboxDirs, "toolbox", "directory of user-defined cake tools (repeatable)")
+	sandbox := flag.String("sandbox", "", "sandbox policy passed through to cake")
+	noSkills := flag.Bool("no-skills", false, "disable all cake skills")
+	skills := flag.String("skills", "", "comma-separated skill names passed through to cake")
+	systemPrompt := flag.String("system-prompt", "", "path to a custom cake system prompt file")
 	cwd := flag.String("cwd", "", "working directory to run cake from (default: current directory)")
 	noColor := flag.Bool("no-color", false, "disable styling")
 	debugLog := flag.String("debug-log", "", "write cake-repl debug output to this file")
@@ -116,9 +174,11 @@ func run() (err error) {
 	noConfig := flag.Bool("no-config", false, "skip loading config file")
 	outputLimit := flag.Int("output-limit", 0, "truncate tool output after this many characters (0 = use internal default 2000)")
 	maxTimelineItems := flag.Int("max-timeline-items", 0, "limit timeline to this many entries (0 = no limit)")
-	flag.Parse()
+	if err = flag.CommandLine.Parse(normalizeForkArgs(os.Args[1:])); err != nil {
+		return err
+	}
 
-	if err = validateFlags(*showVersion, *continueFlag, *resume, flag.Args(), *configPath, *noConfig); err != nil {
+	if err = validateFlags(*showVersion, *resume, fork.set, fork.value, flag.Args(), *configPath, *noConfig); err != nil {
 		return err
 	}
 	if *showVersion {
@@ -174,7 +234,16 @@ func run() (err error) {
 		Model:            *model,
 		Profile:          *profile,
 		Tools:            *tools,
+		NoTools:          *noTools,
 		AddDirs:          addDirs,
+		ToolboxDirs:      toolboxDirs,
+		Sandbox:          *sandbox,
+		NoSkills:         *noSkills,
+		Skills:           *skills,
+		SystemPrompt:     *systemPrompt,
+		Fork:             fork.set,
+		ForkID:           fork.value,
+		NoSession:        *noSession,
 		HistoryFile:      *historyFile,
 		OutputLimit:      *outputLimit,
 		MaxTimelineItems: *maxTimelineItems,
@@ -199,12 +268,9 @@ func run() (err error) {
 		}
 	}
 
-	switch {
-	case *resume != "":
+	if *resume != "" {
 		cfg.InitialMode = cake.RunResume
 		cfg.ResumeID = *resume
-	case *continueFlag:
-		cfg.InitialMode = cake.RunContinue
 	}
 
 	if *debugLog != "" {

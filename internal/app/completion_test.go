@@ -20,12 +20,11 @@ func TestCompleteSlash(t *testing.T) {
 	}{
 		{"no slash", "hello", nil, nil, false},
 		{"empty string", "", nil, nil, false},
-		{"just slash", "/", nil, []string{"/help", "/exit", "/new", "/continue", "/resume", "/session", "/clear", "/quit", "/q"}, true},
+		{"just slash", "/", nil, []string{"/help", "/exit", "/new", "/resume", "/session", "/clear", "/quit", "/q"}, true},
 		{"partial help", "/h", nil, []string{"/help"}, true},
 		{"partial help lower", "/he", nil, []string{"/help"}, true},
 		{"partial exit", "/ex", nil, []string{"/exit"}, true},
 		{"partial new", "/n", nil, []string{"/new"}, true},
-		{"partial continue", "/co", nil, []string{"/continue"}, true},
 		{"partial resume", "/re", nil, []string{"/resume"}, true},
 		{"partial session", "/se", nil, []string{"/session"}, true},
 		{"partial clear", "/cl", nil, []string{"/clear"}, true},

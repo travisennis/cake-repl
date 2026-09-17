@@ -115,6 +115,9 @@ User-visible slash commands that override the state machine:
 
 ## More Information
 
+- **Partially superseded by [ADR 012](012-remove-continue-and-expose-cake-session-controls.md).**
+  The explicit `--resume` pinning and hijack-prevention rationale remain in
+  force; the `--continue` fallback and manual continue mode were removed.
 - Implementation: `internal/app/session.go` (the `sessionState` struct and its
   methods, including `OnCancel` for the cancellation pin).
 - Tests: `internal/app/session_test.go` (ten cases covering all transitions

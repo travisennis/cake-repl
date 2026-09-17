@@ -11,7 +11,8 @@ NDJSON event stream live. A startup `-resume` also uses cake's read-only
 Compatibility surfaces — preserve unless the task explicitly changes them:
 
 - **cake contract**: run cake only in stream-json output mode with the
-  documented live session, model, profile, tools, and add-dir flags, or the
+  documented live session, fork, no-session, model, profile, tools, no-tools,
+  add-dir, toolbox, sandbox, no-skills, skills, and system-prompt flags, or the
   supported read-only `replay <uuid>` command; never read cake session files,
   parse its human text, or import its internals.
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.

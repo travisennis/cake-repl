@@ -124,7 +124,7 @@ func TestHandleTabComplete(t *testing.T) {
 	// --- 6. bare slash starts a multi-match cycle ---
 	t.Run("bare slash starts cycle", func(t *testing.T) {
 		m := newLaidOutModel()
-		m.input.SetValue("/") // matches all 9 commands
+		m.input.SetValue("/") // matches all 8 commands
 
 		tm, _ := m.handleTabComplete()
 		got := tm.(Model)
@@ -135,8 +135,8 @@ func TestHandleTabComplete(t *testing.T) {
 		if got.completionPrefix != "/" {
 			t.Errorf("completionPrefix = %q, want %q", got.completionPrefix, "/")
 		}
-		if len(got.completionMatches) != 9 {
-			t.Errorf("completionMatches has %d entries, want 9", len(got.completionMatches))
+		if len(got.completionMatches) != 8 {
+			t.Errorf("completionMatches has %d entries, want 8", len(got.completionMatches))
 		}
 		if got.completionIdx != 0 {
 			t.Errorf("completionIdx = %d, want 0", got.completionIdx)
@@ -218,14 +218,14 @@ func TestHandleTabCompleteBareSlashCycle(t *testing.T) {
 		t.Errorf("input after first Tab = %q, want %q", got1.input.Value(), "/help")
 	}
 
-	// Advance through remaining 8 matches (indices 1..8) then wrap back to "/".
+	// Advance through remaining 7 matches (indices 1..7) then wrap back to "/".
 	cur := got1
-	for i := 0; i < 9; i++ {
+	for i := 0; i < 8; i++ {
 		next, _ := cur.handleTabComplete()
 		cur = next.(Model)
 	}
 
-	// After 9 more Tabs (8 advances + 1 wrap), we should be back at "/" with
+	// After 8 more Tabs (7 advances + 1 wrap), we should be back at "/" with
 	// no active cycle.
 	if cur.input.Value() != "/" {
 		t.Errorf("input after full cycle + wrap = %q, want %q", cur.input.Value(), "/")

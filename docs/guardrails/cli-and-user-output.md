@@ -7,24 +7,26 @@ commands or help text (`internal/app/commands.go`), key bindings
 
 ## Compatibility surfaces
 
-- **CLI flags.** `-cake-bin`, `-continue`, `-resume <uuid>`, `-model`,
-  `-profile`, `-tools <names>`, `-add-dir <dir>` (repeatable), `-cwd`,
-  `-no-color`, `-debug-log`, `-history-file`, `-config <path>`, `-no-config`,
-  `-output-limit <n>`, `-max-timeline-items <n>`, `-version`. Names,
-  defaults, and validation
-  (mutually exclusive `-continue`/`-resume`, mutually exclusive
-  `-config`/`-no-config`, uuid shape, positional args
-  rejected) are user-facing. `-continue`, `-resume`, `-model`, `-profile`,
-  `-tools`, and `-add-dir` pass-through must stay aligned with the cake
-  contract.
+- **CLI flags.** `-cake-bin`, `-fork [<uuid>]`, `-resume <uuid>`,
+  `-no-session`, `-model`, `-profile`, `-tools <names>`, `-no-tools`,
+  `-add-dir <dir>` (repeatable), `-toolbox <dir>` (repeatable),
+  `-sandbox <policy>`, `-no-skills`, `-skills <names>`,
+  `-system-prompt <path>`, `-cwd`, `-no-color`, `-debug-log`,
+  `-history-file`, `-config <path>`, `-no-config`, `-output-limit <n>`,
+  `-max-timeline-items <n>`, `-version`. Names, defaults, and validation
+  (mutually exclusive `-fork`/`-resume`, mutually exclusive
+  `-config`/`-no-config`, uuid shape, positional args rejected) are
+  user-facing. The cake pass-through flags must stay aligned with the cake
+  contract. `-fork` applies to the initial fresh prompt; later prompts use
+  the pinned session when one is reported.
 - **Config file shape.** TOML config supports only stable REPL defaults:
   `cake-bin`, `model`, `profile`, `output-limit`, and
   `max-timeline-items`. Merge order is hardcoded defaults < XDG config <
   project-local config < CLI flags. Session-specific values must stay out of
   config.
-- **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/continue`,
-  `/resume <uuid>`, `/session`, `/clear`. Keep parsing, behavior, and names
-  stable. `/new`, `/continue`, and `/resume` require an idle REPL; `Ctrl+N`
+- **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
+  `/session`, `/clear`. Keep parsing, behavior, and names stable. `/new` and
+  `/resume` require an idle REPL; `Ctrl+N`
   remains the cancel-and-reset operation during an active run.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
@@ -112,7 +114,7 @@ commands or help text (`internal/app/commands.go`), key bindings
 ## Related docs
 
 - [`cake-integration-and-stream-json.md`](cake-integration-and-stream-json.md) — event source.
-- [`session-and-security.md`](session-and-security.md) — `/new` `/continue` `/resume`, `-debug-log`.
+- [`session-and-security.md`](session-and-security.md) — `/new` `/resume`, `-debug-log`.
 - [`../adr/002-config-file-for-repl-defaults.md`](../adr/002-config-file-for-repl-defaults.md) — config file decision.
 - [`../adr/003-tool-output-expansion-key-binding.md`](../adr/003-tool-output-expansion-key-binding.md) — tool output expansion key binding.
 - [`../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md`](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md) — terminal-escape sanitization.

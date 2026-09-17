@@ -28,9 +28,8 @@ func (s *sessionState) OnTaskStart(e cake.TaskStart) {
 // another cake process in the same cwd cannot hijack the conversation. This
 // holds whether the task succeeded or failed: cake writes a resumable session
 // file either way, and a failed run that is not pinned would be orphaned by
-// the next prompt. Only a *successful* task with no session id falls back to
-// --continue; on failure the run mode is left untouched rather than advanced
-// into the mode that is itself the hijack vector.
+// the next prompt. When no session id is reported, the current run mode is
+// left unchanged.
 func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 	s.LastComplete = &e
 	if e.SessionID != "" {
@@ -40,13 +39,7 @@ func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 		s.TaskID = e.TaskID
 	}
 
-	if s.pinToSession() {
-		return
-	}
-	if !e.IsError {
-		s.NextMode = cake.RunContinue
-		s.ResumeID = ""
-	}
+	s.pinToSession()
 }
 
 // OnCancel records that the current run was interrupted by the user. If a
@@ -57,26 +50,19 @@ func (s *sessionState) OnCancel() {
 	s.pinToSession()
 }
 
-// pinToSession points the next prompt at the known session id and reports
-// whether it had one to pin to.
-func (s *sessionState) pinToSession() bool {
+// pinToSession points the next prompt at the known session id. When there is
+// no known id, the current run mode remains unchanged.
+func (s *sessionState) pinToSession() {
 	if s.SessionID == "" {
-		return false
+		return
 	}
 	s.NextMode = cake.RunResume
 	s.ResumeID = s.SessionID
-	return true
 }
 
 // Reset clears all session state; the next prompt starts a fresh session.
 func (s *sessionState) Reset() {
 	*s = sessionState{NextMode: cake.RunFresh}
-}
-
-// UseContinue makes the next prompt continue cake's latest session.
-func (s *sessionState) UseContinue() {
-	s.NextMode = cake.RunContinue
-	s.ResumeID = ""
 }
 
 // UseResume makes the next prompt resume a specific session.

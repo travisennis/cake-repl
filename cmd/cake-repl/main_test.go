@@ -11,34 +11,41 @@ import (
 
 func TestValidateFlagsVersionShortCircuits(t *testing.T) {
 	// --version should return nil even when other flags are invalid.
-	if err := validateFlags(true, true, "not-a-uuid", []string{"surprise!"}, "/path", true); err != nil {
+	if err := validateFlags(true, "not-a-uuid", true, "not-a-uuid", []string{"surprise!"}, "/path", true); err != nil {
 		t.Errorf("validateFlags(true, …) = %v, want nil", err)
 	}
 }
 
 func TestValidateFlags(t *testing.T) {
 	tests := []struct {
-		name         string
-		showVersion  bool
-		continueFlag bool
-		resume       string
-		args         []string
-		configPath   string
-		noConfig     bool
-		wantErr      bool
+		name        string
+		showVersion bool
+		resume      string
+		fork        bool
+		forkID      string
+		args        []string
+		configPath  string
+		noConfig    bool
+		wantErr     bool
 	}{
 		{
 			name:    "no flags, no args",
 			wantErr: false,
 		},
 		{
-			name:         "--continue alone",
-			continueFlag: true,
-			wantErr:      false,
-		},
-		{
 			name:    "--resume with valid uuid",
 			resume:  "11111111-2222-3333-4444-555555555555",
+			wantErr: false,
+		},
+		{
+			name:    "--fork latest",
+			fork:    true,
+			wantErr: false,
+		},
+		{
+			name:    "--fork with valid uuid",
+			fork:    true,
+			forkID:  "11111111-2222-3333-4444-555555555555",
 			wantErr: false,
 		},
 		{
@@ -47,10 +54,16 @@ func TestValidateFlags(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:         "--continue and --resume both set",
-			continueFlag: true,
-			resume:       "11111111-2222-3333-4444-555555555555",
-			wantErr:      true,
+			name:    "--fork and --resume both set",
+			fork:    true,
+			resume:  "11111111-2222-3333-4444-555555555555",
+			wantErr: true,
+		},
+		{
+			name:    "--fork with invalid uuid",
+			fork:    true,
+			forkID:  "not-a-uuid",
+			wantErr: true,
 		},
 		{
 			name:    "positional argument present",
@@ -71,10 +84,10 @@ func TestValidateFlags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateFlags(tt.showVersion, tt.continueFlag, tt.resume, tt.args, tt.configPath, tt.noConfig)
+			err := validateFlags(tt.showVersion, tt.resume, tt.fork, tt.forkID, tt.args, tt.configPath, tt.noConfig)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateFlags(%v, %v, %q, %v, %q, %v) = %v, wantErr=%v",
-					tt.showVersion, tt.continueFlag, tt.resume, tt.args, tt.configPath, tt.noConfig, err, tt.wantErr)
+				t.Errorf("validateFlags(%v, %q, %v, %q, %v, %q, %v) = %v, wantErr=%v",
+					tt.showVersion, tt.resume, tt.fork, tt.forkID, tt.args, tt.configPath, tt.noConfig, err, tt.wantErr)
 			}
 		})
 	}
@@ -82,7 +95,7 @@ func TestValidateFlags(t *testing.T) {
 
 func TestValidateFlagsVersionShortCircuitSkipsArgCheck(t *testing.T) {
 	// showVersion=true must not fail even with positional arguments.
-	if err := validateFlags(true, false, "", []string{"oops"}, "", false); err != nil {
+	if err := validateFlags(true, "", false, "", []string{"oops"}, "", false); err != nil {
 		t.Errorf("validateFlags(true, …) with args = %v, want nil", err)
 	}
 }
@@ -146,6 +159,32 @@ func TestResumeUUIDIsSessionID(t *testing.T) {
 	}
 	if app.IsSessionID("not-a-uuid") {
 		t.Error("IsSessionID accepted invalid input")
+	}
+}
+
+func TestNormalizeForkArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "latest", args: []string{"-fork"}, want: []string{"-fork="}},
+		{name: "uuid with separate value", args: []string{"--fork", "11111111-2222-3333-4444-555555555555"}, want: []string{"--fork=11111111-2222-3333-4444-555555555555"}},
+		{name: "next flag means latest", args: []string{"--fork", "--no-session"}, want: []string{"--fork=", "--no-session"}},
+		{name: "after terminator is prompt text", args: []string{"--", "--fork", "uuid"}, want: []string{"--", "--fork", "uuid"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeForkArgs(tt.args)
+			if len(got) != len(tt.want) {
+				t.Fatalf("normalizeForkArgs(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("normalizeForkArgs(%v)[%d] = %q, want %q", tt.args, i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }
 

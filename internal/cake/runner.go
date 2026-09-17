@@ -21,35 +21,38 @@ type RunMode int
 const (
 	// RunFresh starts a new cake session (no session flag).
 	RunFresh RunMode = iota
-	// RunContinue passes --continue to use the latest session for the cwd.
-	RunContinue
 	// RunResume passes --resume <uuid> for a specific session.
 	RunResume
 )
 
 func (m RunMode) String() string {
-	switch m {
-	case RunContinue:
-		return "continue"
-	case RunResume:
+	if m == RunResume {
 		return "resume"
-	default:
-		return "fresh"
 	}
+	return "fresh"
 }
 
 // Options configures one cake invocation.
 type Options struct {
-	Bin      string
-	Cwd      string
-	Prompt   string
-	Mode     RunMode
-	ResumeID string
-	Model    string
-	Profile  string
-	Tools    string
-	AddDirs  []string
-	DebugLog io.Writer
+	Bin          string
+	Cwd          string
+	Prompt       string
+	Mode         RunMode
+	ResumeID     string
+	Fork         bool
+	ForkID       string
+	NoSession    bool
+	Model        string
+	Profile      string
+	Tools        string
+	NoTools      bool
+	ToolboxDirs  []string
+	Sandbox      string
+	NoSkills     bool
+	Skills       string
+	SystemPrompt string
+	AddDirs      []string
+	DebugLog     io.Writer
 
 	afterWait func()
 	replay    bool
@@ -84,11 +87,20 @@ func (o Options) Args() []string {
 
 	args := []string{"--output-format", "stream-json"}
 	switch o.Mode {
-	case RunContinue:
-		args = append(args, "--continue")
 	case RunResume:
 		args = append(args, "--resume", o.ResumeID)
 	case RunFresh:
+		// Fork only the initial fresh invocation. Once cake reports the new
+		// session ID, subsequent prompts are pinned to it with --resume.
+		if o.Fork {
+			args = append(args, "--fork")
+			if o.ForkID != "" {
+				args = append(args, o.ForkID)
+			}
+		}
+	}
+	if o.NoSession {
+		args = append(args, "--no-session")
 	}
 	if o.Model != "" {
 		args = append(args, "--model", o.Model)
@@ -101,11 +113,29 @@ func (o Options) Args() []string {
 	for _, dir := range o.AddDirs {
 		args = append(args, "--add-dir", dir)
 	}
+	for _, dir := range o.ToolboxDirs {
+		args = append(args, "--toolbox", dir)
+	}
+	if o.Sandbox != "" {
+		args = append(args, "--sandbox", o.Sandbox)
+	}
 	// --tools restricts the session to a comma-separated list of registered
 	// tool names, replacing the config/profile tool selection for this run.
 	// The names are passed through opaquely; cake owns the registry.
 	if o.Tools != "" {
 		args = append(args, "--tools", o.Tools)
+	}
+	if o.NoTools {
+		args = append(args, "--no-tools")
+	}
+	if o.NoSkills {
+		args = append(args, "--no-skills")
+	}
+	if o.Skills != "" {
+		args = append(args, "--skills", o.Skills)
+	}
+	if o.SystemPrompt != "" {
+		args = append(args, "--system-prompt", o.SystemPrompt)
 	}
 	// "--" ends flag parsing so a prompt starting with "-" (or matching a
 	// cake subcommand name) is always treated as the prompt.

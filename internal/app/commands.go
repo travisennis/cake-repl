@@ -13,7 +13,6 @@ const (
 	CmdHelp CommandKind = iota
 	CmdExit
 	CmdNew
-	CmdContinue
 	CmdResume
 	CmdSession
 	CmdClear
@@ -35,7 +34,6 @@ var commandTable = []struct {
 	{"/help", CmdHelp},
 	{"/exit", CmdExit},
 	{"/new", CmdNew},
-	{"/continue", CmdContinue},
 	{"/resume", CmdResume},
 	{"/session", CmdSession},
 	{"/clear", CmdClear},
@@ -86,13 +84,12 @@ const HelpText = `commands
   /help            show this help
   /exit /quit /q   exit (cancels a running task first)
   /new             start a fresh cake session on the next prompt
-  /continue        continue cake's latest session on the next prompt
   /resume <uuid>   resume a specific cake session on the next prompt
                    (startup -resume also reloads visible history)
   /session         show session id, task id, cwd, run mode, last result
   /clear           clear the timeline (session state is kept)
 
-  /new, /continue, and /resume require an idle REPL
+  /new and /resume require an idle REPL
 
 keybindings
   enter            insert newline

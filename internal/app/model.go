@@ -26,7 +26,16 @@ type Config struct {
 	Model            string
 	Profile          string
 	Tools            string
+	NoTools          bool
 	AddDirs          []string
+	ToolboxDirs      []string
+	Sandbox          string
+	NoSkills         bool
+	Skills           string
+	SystemPrompt     string
+	Fork             bool
+	ForkID           string
+	NoSession        bool
 	InitialMode      cake.RunMode
 	ResumeID         string
 	DebugLog         io.Writer

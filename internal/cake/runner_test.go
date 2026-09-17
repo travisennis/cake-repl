@@ -407,13 +407,23 @@ func TestOptionsArgs(t *testing.T) {
 			want: []string{"--output-format", "stream-json", "--", "hi"},
 		},
 		{
-			name: "continue",
-			opts: Options{Prompt: "hi", Mode: RunContinue},
-			want: []string{"--output-format", "stream-json", "--continue", "--", "hi"},
-		},
-		{
 			name: "resume",
 			opts: Options{Prompt: "hi", Mode: RunResume, ResumeID: "abc"},
+			want: []string{"--output-format", "stream-json", "--resume", "abc", "--", "hi"},
+		},
+		{
+			name: "fork latest",
+			opts: Options{Prompt: "hi", Fork: true},
+			want: []string{"--output-format", "stream-json", "--fork", "--", "hi"},
+		},
+		{
+			name: "fork specific session",
+			opts: Options{Prompt: "hi", Fork: true, ForkID: "abc"},
+			want: []string{"--output-format", "stream-json", "--fork", "abc", "--", "hi"},
+		},
+		{
+			name: "resume does not fork again",
+			opts: Options{Prompt: "hi", Mode: RunResume, ResumeID: "abc", Fork: true, ForkID: "def"},
 			want: []string{"--output-format", "stream-json", "--resume", "abc", "--", "hi"},
 		},
 		{
@@ -440,6 +450,28 @@ func TestOptionsArgs(t *testing.T) {
 			name: "tools with passthrough and add dirs",
 			opts: Options{Prompt: "hi", Model: "gpt-x", Profile: "fast", Tools: "bash", AddDirs: []string{"vendor"}},
 			want: []string{"--output-format", "stream-json", "--model", "gpt-x", "--profile", "fast", "--add-dir", "vendor", "--tools", "bash", "--", "hi"},
+		},
+		{
+			name: "all requested controls",
+			opts: Options{
+				Prompt:       "hi",
+				NoSession:    true,
+				Model:        "gpt-x",
+				Profile:      "fast",
+				AddDirs:      []string{"vendor"},
+				ToolboxDirs:  []string{".cake/tools", "/tmp/tools"},
+				Sandbox:      "read-only",
+				Tools:        "bash,read",
+				NoTools:      true,
+				NoSkills:     true,
+				Skills:       "go,testing",
+				SystemPrompt: "/tmp/prompt.md",
+			},
+			want: []string{
+				"--output-format", "stream-json", "--no-session", "--model", "gpt-x", "--profile", "fast",
+				"--add-dir", "vendor", "--toolbox", ".cake/tools", "--toolbox", "/tmp/tools", "--sandbox", "read-only",
+				"--tools", "bash,read", "--no-tools", "--no-skills", "--skills", "go,testing", "--system-prompt", "/tmp/prompt.md", "--", "hi",
+			},
 		},
 		{
 			name: "flag-like prompt",

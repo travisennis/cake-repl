@@ -13,7 +13,8 @@ bodies have no decorative prefix, so multiline terminal selections can be copied
 cleanly; operational events remain compact and visually distinct.
 The status line leads with current idle/running state, followed by labeled
 session, next-run, model, and working-directory context. After a successful
-turn, the next prompt automatically continues the same cake session.
+turn, the next prompt automatically continues the same cake session when cake
+reports a session ID.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output, the
@@ -52,7 +53,8 @@ Make sure that directory is on your `PATH`.
 
 ```bash
 cake-repl                                     # fresh session on first prompt
-cake-repl -continue                          # continue latest session for this directory
+cake-repl -fork                               # fork the latest session on the first prompt
+cake-repl -fork <uuid>                        # fork a specific session on the first prompt
 cake-repl -resume <uuid>                     # replay history, then resume a specific session
 cake-repl -cake-bin ../cake/target/debug/cake
 ```
@@ -68,12 +70,19 @@ Flags:
 | Flag | Meaning |
 |---|---|
 | `-cake-bin <path>` | cake executable to run (default `cake`) |
-| `-continue` | continue cake's latest session on the first prompt |
+| `-fork [<uuid>]` | fork the latest session, or a specific session UUID, on the first prompt |
 | `-resume <uuid>` | replay visible history when supported, then resume a specific cake session on the first prompt |
+| `-no-session` | do not save the cake session to disk |
 | `-model <name>` | passed through to cake |
 | `-profile <name>` | passed through to cake |
-| `-tools <names>` | restrict cake to a comma-separated list of registered tool names; passed through to cake |
 | `-add-dir <dir>` | add a directory to cake's sandbox as read-only; repeatable |
+| `-toolbox <dir>` | add a directory of user-defined cake tools; repeatable |
+| `-sandbox <policy>` | sandbox policy passed through to cake |
+| `-tools <names>` | restrict cake to a comma-separated list of registered tool names; passed through to cake |
+| `-no-tools` | expose no tools to cake |
+| `-no-skills` | disable all cake skills |
+| `-skills <names>` | load only the specified comma-separated skill names |
+| `-system-prompt <path>` | use a custom cake system prompt file |
 | `-cwd <path>` | run cake from this directory (default: current directory) |
 | `-no-color` | disable styling |
 | `-debug-log <path>` | append cake-repl diagnostics (raw stream lines, skipped events, exits) to a file |
@@ -113,7 +122,6 @@ brief notice instead.
 | `/help` | show commands and keybindings |
 | `/exit` `/quit` `/q` | exit (cancels a running task first, then exits) |
 | `/new` | next prompt starts a fresh cake session |
-| `/continue` | next prompt uses `cake --continue` |
 | `/resume <uuid>` | next prompt uses `cake --resume <uuid>` |
 | `/session` | show session id, task id, cwd, run mode, last completion |
 | `/clear` | clear the timeline (session state is kept) |
@@ -131,20 +139,18 @@ brief notice instead.
   uses `cake --resume <uuid>`.
 - Once cake reports a session id, future prompts are pinned to that session via
   `--resume <id>`, so another cake process creating a newer session in the
-  same directory cannot hijack the conversation. If a task succeeded and cake
-  never reported a session id, the fallback is `--continue`.
-- A failed or canceled task is still pinned, so the next prompt continues the
-  session the run left behind instead of starting a new one. A task that fails
-  before reporting any session id leaves the run mode unchanged.
+  same directory cannot hijack the conversation. If a task succeeds or fails
+  without reporting a session id, the current run mode is left unchanged.
+- A failed or canceled task with a reported session ID is still pinned, so the
+  next prompt continues the session the run left behind instead of starting a
+  new one.
 - `/new` clears local session state; the next prompt starts fresh.
 - `Ctrl+N` clears the timeline and local session state immediately. If a task
   is running, it is canceled and its remaining events are discarded. Prompt
   history, the current input draft, and model/profile settings are preserved.
-- `/continue` explicitly targets cake's latest session for the directory on
-  the next prompt; once it succeeds, later prompts pin to that session.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts
   stay pinned to the same session.
-- `/new`, `/continue`, and `/resume` are rejected while a task is running.
+- `/new` and `/resume` are rejected while a task is running.
   Finish or cancel the task first (Ctrl+C), or use `Ctrl+N` to cancel and start
   a new session in one action.
 
@@ -190,7 +196,10 @@ max-timeline-items = 200
 
 Hardcoded defaults < config file < CLI flags. Every layer overrides the
 previous one, so a CLI flag always wins over the same value in the config
-file.
+file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
+`-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
+`-system-prompt` are startup-only CLI flags and are not persisted in the
+config file.
 
 ## Tests
 

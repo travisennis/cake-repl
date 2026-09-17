@@ -9,8 +9,8 @@ decision-makers: Travis Ennis
 
 `--model` and `--profile` are startup-only flags, so switching model or
 profile mid-session requires quitting and restarting the REPL. `/model` and
-`/profile` follow the existing session-command pattern (`/new`, `/continue`,
-`/resume` mutate what the next `cake.Start` uses), but their semantics —
+`/profile` follow the existing session-command pattern (`/new` and `/resume`
+mutate what the next `cake.Start` uses), but their semantics —
 especially behavior during an active run — were not decided.
 
 ## Decision Drivers
@@ -23,7 +23,7 @@ especially behavior during an active run — were not decided.
 ## Considered Options
 
 1. **Idle-only.** `/model` and `/profile` are rejected with a warning while a
-   task runs, like `/new`, `/continue`, `/resume`.
+   task runs, like `/new` and `/resume`.
 2. **Any time.** Allowed during a run, applying to the next prompt.
 
 Grammar variants considered: no-argument status, `<name>` set, literal
@@ -40,8 +40,8 @@ Chosen option: **1, idle-only**, with the grammar:
 - An empty quoted argument is not part of the grammar and is a parse error.
 
 During an active run both commands are rejected with a warning to finish or
-cancel first, matching the `/new` `/continue` `/resume` policy in the
-session-and-security guardrail. Values apply to the next prompt's `cake.Start`
+cancel first, matching the `/new` `/resume` policy in the session-and-security
+guardrail. Values apply to the next prompt's `cake.Start`
 and are read from mutable session state rather than the startup `Config`,
 which keeps the initial flag values as defaults.
 

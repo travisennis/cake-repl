@@ -21,9 +21,12 @@ It communicates only through:
 - `cake --output-format stream-json` (NDJSON records on stdout),
 - `cake --output-format stream-json replay <uuid>` for read-only transcript
   hydration,
-- `--continue` / `--resume <uuid>` session selection,
-- `--model` / `--profile` / `--tools <names>` pass-through flags,
+- `--resume <uuid>` session selection, with initial `--fork [<uuid>]` support,
+- `--no-session`, `--model` / `--profile` pass-through flags,
 - `--add-dir <dir>` read-only sandbox directories (repeatable),
+- `--toolbox <dir>` user-defined tool directories (repeatable),
+- `--sandbox <policy>`, `--tools <names>` / `--no-tools`,
+- `--no-skills` / `--skills <names>`, and `--system-prompt <path>`,
 - `--` to terminate flag parsing before the prompt argument.
 
 This boundary is the project's reason to exist. Changes that cross it are out of
@@ -81,7 +84,8 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   decides the next run mode with no I/O, which is what makes the
   hijack-prevention behavior testable. Once a session id is known it pins
   future prompts to `--resume <session-id>`, whether the task succeeded,
-  failed, or was canceled. See
+  failed, or was canceled. No-session-ID completion leaves the current mode
+  unchanged; the REPL has no latest-session fallback. See
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 - **Config is startup-only.** Config files set stable REPL defaults before the
   TUI starts, using hardcoded defaults < XDG config < project-local config <

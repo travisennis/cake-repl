@@ -47,13 +47,13 @@ func TestResumeThenSuccessStaysPinned(t *testing.T) {
 	}
 }
 
-func TestSuccessWithoutSessionIDFallsBackToContinue(t *testing.T) {
+func TestSuccessWithoutSessionIDLeavesModeUnchanged(t *testing.T) {
 	var s sessionState
 	s.OnTaskComplete(success(""))
 
 	mode, id := s.RunOptions()
-	if mode != cake.RunContinue || id != "" {
-		t.Errorf("after success with no session id mode=%v id=%q, want continue with empty id", mode, id)
+	if mode != cake.RunFresh || id != "" {
+		t.Errorf("after success with no session id mode=%v id=%q, want fresh with empty id", mode, id)
 	}
 }
 
@@ -86,8 +86,7 @@ func TestFailureWithSessionIDPinsToResume(t *testing.T) {
 }
 
 // A task can fail before ever announcing a session id. There is nothing to
-// resume, and falling back to --continue is the hijack vector, so the run mode
-// must stay where it was.
+// resume, so the run mode must stay where it was.
 func TestFailureWithoutSessionIDDoesNotAdvanceMode(t *testing.T) {
 	var s sessionState
 	s.OnTaskComplete(failure(""))
@@ -113,16 +112,6 @@ func TestFailureAfterExplicitResumePinsToReportedSession(t *testing.T) {
 	mode, id := s.RunOptions()
 	if mode != cake.RunResume || id != "s-1" {
 		t.Errorf("after failure mode=%v id=%q, want resume pinned to s-1", mode, id)
-	}
-}
-
-func TestUseContinueClearsResumeID(t *testing.T) {
-	var s sessionState
-	s.UseResume("11111111-2222-3333-4444-555555555555")
-	s.UseContinue()
-	mode, id := s.RunOptions()
-	if mode != cake.RunContinue || id != "" {
-		t.Errorf("mode=%v id=%q", mode, id)
 	}
 }
 
