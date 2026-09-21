@@ -33,26 +33,24 @@ files are staged.
 | ----------------------------------------------- | -------------------------- | -------------------- | --------------- |
 | **XS** (docs/skill/config only, ≤2 files)       | Root AGENTS.md if relevant | One combined pass    | One line        |
 | **S** (single module, ≤~50 LOC, no public API)  | Root AGENTS.md, nearest nested AGENTS.md | One combined pass    | One line        |
-| **M** (multi-file, ≤~200 LOC, no cross-module)  | + active task file, ExecPlan if one exists | Pass 1 + Pass 2      | Short block     |
-| **L/XL** (cross-module, public API, agent loop, persistence, concurrency, external integrations, security boundaries) | + design docs and ADRs in the changed area | All three passes     | Full block      |
+| **M** (multi-file, ≤~200 LOC, no cross-module)  | + active task file, design plan if one exists | Pass 1 + Pass 2      | Short block     |
+| **L/XL** (cross-module, public API, agent loop, persistence, concurrency, external integrations, security boundaries) | + guardrails, design plans, and ADRs in the changed area | All three passes     | Full block      |
 
 Only read context items that are relevant to the changed surface. Discover
 them with targeted commands, e.g. `rg --files -g AGENTS.md`,
-`rg --files docs/design-docs docs/adr`, `git diff -- <paths>`.
+`rg --files docs/adr docs/guardrails`, `git diff -- <paths>`.
 
 Required context items, in priority order:
 
 - repo root `AGENTS.md`
 - nested `AGENTS.md` files for the changed areas
-- `ahm context task`, `ahm task show <id>` output when the work came from a
-  task; open the active task file only when `ahm` is unavailable or when
-  reviewing manual edits to the task file itself; use
-  `.ahm/tasks/index.md` only as a fallback queue artifact when `ahm` is
-  unavailable
-- the relevant active exec plan when one exists for the current work
-  (see `.ahm/exec-plans/active/`)
-- `ahm context plan` and `docs/design-docs/index.md` for L/XL changes
-- any design doc or ADR directly relevant to the changed area
+- `ahm task show <id>` output when the work came from a task; open the task
+  file under `.ahm/tasks/` only when `ahm` is unavailable or when reviewing
+  manual edits to the task file itself; use `.ahm/tasks/index.md` only as a
+  fallback queue artifact when `ahm` is unavailable
+- the relevant design plan when one exists for the current work (see
+  `docs/exec-plans/active/`)
+- any guardrail or ADR directly relevant to the changed area
 - the changed files and enough nearby context to review them
 
 ## Review passes
@@ -62,14 +60,15 @@ across passes.
 
 ### Pass 1: Rules and documentation conformance
 
-- Are we following `AGENTS.md`, nested `AGENTS.md`, and design docs?
+- Are we following `AGENTS.md`, nested `AGENTS.md`, and the relevant
+  guardrails, design plans, and ADRs?
 - Did we drift from documented repo patterns or ownership boundaries?
 - If the changed surface is user-visible CLI/API/config/file-format/workflow
   behavior, did we update the affected docs in the same change or record why
   the behavior is intentionally undocumented?
 - If the work came from a task or ExecPlan, does the implementation match
   its acceptance notes and recorded decisions?
-- Did we update task, ExecPlan, design doc, or ADR notes when the change
+- Did we update the task, design plan, guardrail, or ADR notes when the change
   discovered something durable?
 
 ### Pass 2: Correctness and source of truth
@@ -150,7 +149,7 @@ In an unattended implementation flow, apply worthwhile feedback before
 commit. Prioritize:
 
 - type drift, unnecessary cloning/string conversion, duplicated type defs
-- violations of documented repo boundaries or design documents
+- violations of documented repo boundaries or guardrails
 - dead helpers, dead code, debug leftovers, placeholder text
 - new panic/abort paths, placeholder exceptions, debug prints, commented-out
   code, broad lint suppressions, or ignored errors in production paths
@@ -190,9 +189,9 @@ Make the chosen context auditable. Length scales with change size.
 - Validation: <commands run>
 ```
 
-Do not write blanket "no design docs to check" claims unless you actually
-looked for a relevant one and can explain why the changed area has no
-design-doc surface.
+Do not write blanket "no guardrail or design plan to check" claims unless you
+actually looked for a relevant one and can explain why the changed area has no
+such surface.
 
 ## Steps
 

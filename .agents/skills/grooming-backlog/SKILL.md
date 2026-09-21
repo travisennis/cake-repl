@@ -16,7 +16,8 @@ clarification.
   documented), or has a clear next action.
 - Every Pending task has all product and design decisions recorded.
 - Every Blocked task documents what it is blocked on and what would unblock it.
-- Dependencies (`depends_on` and `exec_plan` fields) are accurate and complete.
+- Dependencies (`depends_on`) are accurate, and every `L` or `XL` task links a
+  design plan under `docs/exec-plans/`.
 - Task files are self-contained — no open questions in the body or comments.
 - Generated indexes are regenerated via `ahm index`.
 
@@ -55,8 +56,8 @@ artifact and inspect the relevant files under `.ahm/tasks/active/`.
 - `labels` include at least one `type:*` and one `area:*` label.
 - `depends_on` references real task IDs. A task only depends on another if
   the dependency is genuinely blocking — not just "related to."
-- `exec_plan` references an existing ExecPlan file when the task is `L` or
-  `XL`, or documents that no plan is needed (`-`).
+- An `L` or `XL` task links a design plan under `docs/exec-plans/active/`, or
+  the body records why no plan is needed.
 
 **Decision completeness:**
 - If the Summary or Fix Direction presents alternatives (e.g., "use X or Y"),
@@ -64,7 +65,7 @@ artifact and inspect the relevant files under `.ahm/tasks/active/`.
   the task as Blocked and document what decision is needed.
 - If the task references external inputs (issues, design docs, conversations)
   that have since been resolved, capture the resolution in the task body.
-- If the task is an `L` or `XL` without an ExecPlan, flag it.
+- If the task is an `L` or `XL` without a design plan, flag it.
 
 **Body quality:**
 - Acceptance Notes checklist should not contain `TODO` placeholders or
@@ -87,8 +88,8 @@ artifact and inspect the relevant files under `.ahm/tasks/active/`.
 - Use `ahm task accept`, `ahm task dep add`, `ahm task dep remove`,
   `ahm task cancel`, and other `ahm task ...` commands when they express the
   needed change.
-- Update front matter status, priority, effort, labels, depends_on, or
-  exec_plan by hand only when no command fits the change.
+- Update front matter status, priority, effort, labels, or depends_on by hand
+  only when no command fits the change.
 - Record decisions in the task body (add a `## Decision` section when
   recording a resolved choice).
 - Remove stale `TODO` placeholders from Acceptance Notes when the question
