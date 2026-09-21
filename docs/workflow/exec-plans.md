@@ -203,6 +203,7 @@ performs as expected and implements the features we need in isolation.
 
 ## Skeleton of a Good ExecPlan
 
+```md
 ## <Short, action-oriented description>
 
 This ExecPlan is a living document. The sections `Progress`,
@@ -293,11 +294,10 @@ Specify the types, traits/interfaces, and function signatures that must exist at
 the end of the milestone. Prefer stable names and paths such as
 `crate::module::function` or `package.submodule.Interface`. For example:
 
-```rust
-// In crates/foo/planner.rs, define:
-pub trait Planner {
-    fn plan(&self, observed: &Observed) -> Vec<Action>;
-}
+    // In crates/foo/planner.rs, define:
+    pub trait Planner {
+        fn plan(&self, observed: &Observed) -> Vec<Action>;
+    }
 ```
 
 If you follow the guidance above, a single, stateless agent, or a human novice,
