@@ -28,8 +28,10 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 
 0. Run `ahm prime` before any work to prepare the worktree and get the briefing;
    re-run it after context compaction.
-1. Use `ahm` intake first for tasks, ExecPlans, ADRs, or research; classify
-   direct code, CLI, docs, or repository work immediately.
+1. Classify the request before editing. If it names a task or an ADR, inspect
+   it through `ahm` before choosing implementation work; design plans and other
+   project documents are read directly. Direct code, CLI, docs, and repository
+   work starts immediately.
 2. For a Pending task, run `ahm task start <id>` to begin its lifecycle.
 3. Select the route below, load only its docs, and state both before editing.
 4. Preserve compatibility unless explicitly changed; edit surgically and
@@ -43,6 +45,9 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
    durable-surface changes.
 6. For task-backed work, run `ahm task complete <id>` to close the task
    lifecycle.
+
+Large or cross-cutting work requires a design plan under `docs/exec-plans/`,
+written per the [ExecPlan workflow](docs/workflow/exec-plans.md).
 
 Specialized workflow docs override this file when they conflict.
 
@@ -148,6 +153,23 @@ Consult:
 Keep `README.md`, `HelpText`, guardrails, ADRs, and routing in sync; move
 detailed rules into the right guardrail rather than growing this file.
 
+### Tasks, ADRs, And Design Plans
+
+Use for `ahm` records, task and ADR lifecycle, durable decisions, or design
+plans.
+
+Consult:
+
+- [Task workflow](docs/workflow/tasks.md), for choosing, triaging, starting,
+  and completing tasks.
+- [ADR workflow](docs/workflow/adrs.md), for when a decision needs an ADR and
+  how to create, supersede, and index one.
+- [ExecPlan workflow](docs/workflow/exec-plans.md), for the design-plan format
+  kept under `docs/exec-plans/`.
+
+`ahm` manages only task records under `.ahm/tasks/` and ADR records under
+`docs/adr/`; a design plan is an ordinary project file, not an `ahm` record.
+
 ### Agent Instructions And Skills
 
 Use for changes to this file, `.agents/skills/`, or any other prose whose
@@ -169,6 +191,7 @@ Consult:
 
 ## Handoff
 
-End with what changed, the exact checks you ran, remaining risks or skipped
-checks, and actionable next steps. For commits, include the hash, worktree
-cleanliness, and any leftover changes.
+End with the route you took and the documents you loaded, what changed, the
+exact checks you ran, remaining risks or skipped checks, and actionable next
+steps. For commits, include the hash, worktree cleanliness, and any leftover
+changes.
