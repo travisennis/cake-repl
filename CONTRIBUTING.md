@@ -17,7 +17,7 @@ see [`AGENTS.md`](AGENTS.md).
 Install the pinned lint/vuln/release tools once:
 
 ```bash
-just install-tools   # golangci-lint, govulncheck, goreleaser (versions pinned in justfile)
+just install-tools   # golangci-lint, govulncheck, deadcode, goreleaser (versions pinned in justfile)
 ```
 
 ## Command catalog
@@ -41,10 +41,11 @@ just tidy-check     # fail if go mod tidy would change files
 just update-deps    # go get -u ./... && go mod tidy
 just vet            # go vet ./...
 just lint           # golangci-lint run
+just deadcode       # fail on unreachable functions (whole-program reachability)
 just vuln           # govulncheck ./...
 just release-check  # goreleaser check + snapshot build
 just fix            # tidy + fmt
-just ci             # full gate: fmt-check tidy-check vet test-race lint vuln build release-check
+just ci             # full gate: fmt-check tidy-check vet test-race lint deadcode vuln build release-check
 just verify         # alias for ci
 ```
 
@@ -127,6 +128,14 @@ Details on the test layout and the fake-cake harness live in
   skip it and explain the skip.
 - **Use `go test ./...` for broad coverage; narrow to packages when iterating.**
   For example, `go test ./internal/app/...` skips runner and parser tests.
+- **`just lint` cannot see exported dead code.** `unused` reports unexported
+  symbols only, and every package here lives under `internal/`, so an exported
+  helper nothing calls passes the gate. `just deadcode` closes that gap using
+  whole-program reachability from `main` (`-test` keeps helpers that only tests
+  call from being reported; the analysis still uses the default build, so a
+  helper reached only from an `integration`-tagged test is reported as well),
+  and it is part of `just ci`. An exported API that is ahead of its caller is a
+  finding, not an exception: land the caller or do not land the API.
 
 ## Commit & PR workflow
 
@@ -160,6 +169,6 @@ Details on the test layout and the fake-cake harness live in
 - Releases are cut by pushing a `v*` tag; the `Release` workflow runs `just ci`
   then `goreleaser release --clean`.
 - Validate release config locally with `just release-check` before tagging.
-- Tool versions (golangci-lint, govulncheck, goreleaser) are pinned in the
-  `justfile`; bump them deliberately and re-run `just ci`. See
+- Tool versions (golangci-lint, govulncheck, deadcode, goreleaser) are pinned in
+  the `justfile`; bump them deliberately and re-run `just ci`. See
   [`docs/guardrails/dependencies-build-ci-release.md`](docs/guardrails/dependencies-build-ci-release.md).

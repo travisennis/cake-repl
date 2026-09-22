@@ -7,8 +7,8 @@ this guardrail covers the project's test conventions and the verification ladder
 ## Compatibility surfaces
 
 - The `just ci` gate is the contract for "broadly verified": `fmt-check`,
-  `tidy-check`, `vet`, `test-race`, `lint`, `vuln`, `build`, `release-check`.
-  CI runs exactly this. Keep changes green against it.
+  `tidy-check`, `vet`, `test-race`, `lint`, `deadcode`, `vuln`, `build`,
+  `release-check`. CI runs exactly this. Keep changes green against it.
 
 ## Test conventions
 

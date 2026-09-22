@@ -9,9 +9,13 @@ workflows (`.github/workflows/`), `.goreleaser.yaml`, `.golangci.yml`, or
 - **Go version (MSRV).** Module targets `go 1.26.6`; docs state Go `1.26.6`+.
   Keep `go.mod`, `README.md`, and CI (`go-version-file: go.mod`) consistent if
   you change it. Raising it is a user-visible decision.
-- **Pinned tool versions.** `golangci-lint`, `govulncheck`, and `goreleaser`
-  versions are pinned in the `justfile` and referenced by the workflows. Bump
-  them together with the workflow `version:` fields, never one side only.
+- **Pinned tool versions.** `golangci-lint`, `govulncheck`, `deadcode`, and
+  `goreleaser` versions are pinned in the `justfile` and referenced by the
+  workflows. Bump them together with the workflow `version:` fields, never one
+  side only. `deadcode` pins `golang.org/x/tools/cmd/deadcode`: a dev analysis
+  tool installed through both `install-tools` recipes (`install-tools` and
+  `install-tools-ci`), with no workflow `version:` field of its own, and never a
+  `go.mod` dependency.
   `benchstat` is deliberately outside this set: it is an optional developer
   tool for reading `just bench` output, no CI job uses it, and `install-tools`
   does not install it.
@@ -33,6 +37,8 @@ workflows (`.github/workflows/`), `.goreleaser.yaml`, `.golangci.yml`, or
 
 - Bumping a tool in the `justfile` but not the workflow `version:` (or vice
   versa), so local and CI disagree.
+- Adding a step to `ci:` without adding its tool to `install-tools-ci`, so the
+  gate passes locally and fails in CI on a missing binary.
 - Leaving `go.mod`/`go.sum` untidy (`tidy-check` fails in CI).
 - Introducing a dependency flagged by `govulncheck`.
 - Changing the Go version in one place only.

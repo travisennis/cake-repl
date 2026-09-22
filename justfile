@@ -1,3 +1,4 @@
+deadcode_version := "v0.50.0"
 golangci_lint_version := "v2.13.1"
 goreleaser_version := "v2.17.1"
 govulncheck_version := "v1.7.0"
@@ -57,6 +58,18 @@ vet:
 lint:
     golangci-lint run
 
+# -test keeps helpers that only tests call from being reported as unreachable.
+# deadcode always exits 0, so the recipe turns findings into a failure itself.
+deadcode:
+    #!/bin/sh
+    set -eu
+    out=$(deadcode -test ./...)
+    if [ -n "$out" ]; then
+        printf '%s\n' "$out"
+        echo "deadcode: unreachable functions found; land the caller or delete the code" >&2
+        exit 1
+    fi
+
 vuln:
     govulncheck ./...
 
@@ -66,21 +79,23 @@ release-check:
 
 fix: tidy fmt
 
-ci: fmt-check tidy-check vet test-race lint vuln build release-check
+ci: fmt-check tidy-check vet test-race lint deadcode vuln build release-check
 
 verify: ci
 
 install-tools:
     go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{ golangci_lint_version }}
     go install golang.org/x/vuln/cmd/govulncheck@{{ govulncheck_version }}
+    go install golang.org/x/tools/cmd/deadcode@{{ deadcode_version }}
     go install github.com/goreleaser/goreleaser/v2@{{ goreleaser_version }}
 
 # CI variant: prebuilt binaries instead of compiling from source. goreleaser
-# comes from goreleaser-action in the workflows; govulncheck publishes no
-# prebuilt binaries but is a small, quick build.
+# comes from goreleaser-action in the workflows; govulncheck and deadcode
+# publish no prebuilt binaries but are small, quick builds.
 install-tools-ci:
     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/{{ golangci_lint_version }}/install.sh | sh -s -- -b "{{ tool_dir }}" {{ golangci_lint_version }}
     go install golang.org/x/vuln/cmd/govulncheck@{{ govulncheck_version }}
+    go install golang.org/x/tools/cmd/deadcode@{{ deadcode_version }}
 
 quick:
     go test ./...
