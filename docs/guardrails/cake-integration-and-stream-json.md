@@ -54,6 +54,12 @@ consumes cake events. This is the project's core external contract.
 - **Unbounded memory.** stderr is kept as a bounded tail (`tailBuffer`); tool
   output is truncated for display and retained with the existing per-result
   ceiling. Replay uses the same limits; don't accumulate full streams in memory.
+- **Mistaking a green suite for forward compatibility.** Every fixture under
+  `internal/cake/testdata/fixtures/` is ours, so `just test` only proves we
+  still decode the events we already know about. A record type cake added last
+  week decodes to `Unknown` by design and fails nothing. A passing suite is not
+  evidence about a newer cake: when a change touches decoding, say in the
+  handoff whether a real-cake round trip was run or the coverage is unknown.
 
 ## Related docs
 

@@ -110,6 +110,12 @@ commands or help text (`internal/app/commands.go`), key bindings
   changes and `/clear` force a full rebuild, while `Ctrl+O` re-renders only tool
   items. Don't bypass the cache.
 - **Truncation surprises.** Respect rune-safe truncation; never cut mid-rune.
+- **Mistaking a green suite for proof that output is right.** Tests call
+  `Update` and `View` directly and assert on strings; nothing drives the
+  program, a real terminal, or a real cake stream. `just test` therefore shows
+  that our own item kinds still format, not that a new event shape or a real
+  stream renders correctly. For a rendering change, the evidence is the capture
+  or the driven session named above, plus a note on what was not exercised.
 
 ## Related docs
 
