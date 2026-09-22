@@ -289,17 +289,36 @@ func run() (err error) {
 
 	p := tea.NewProgram(app.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	m, err := p.Run()
+	mod, ok := m.(app.Model)
+	if ok {
+		// CancelRunning is a no-op unless a run was still in flight, which is
+		// exactly the case for a quit that never reached the model.
+		mod.CancelRunning()
+	}
+	// The title reset does not go through the model: a panic in Update or View
+	// returns no model at all, and that exit must still drop a working marker.
+	resetTerminalTitle(cfg.Cwd)
 	if err != nil {
-		if mod, ok := m.(app.Model); ok {
-			mod.CancelRunning()
-		}
 		return err
 	}
-	if mod, ok := m.(app.Model); ok {
+	if ok {
 		if sessionID, _ := mod.SessionData(); sessionID != "" {
 			fmt.Fprintf(os.Stderr, "\nResume this session with:\n")
 			fmt.Fprintf(os.Stderr, "cake-repl -resume %s\n", sessionID)
 		}
 	}
 	return nil
+}
+
+// resetTerminalTitle writes the idle terminal title once the program has
+// returned. The model cannot do it for exits it never observes: Bubble Tea
+// returns on SIGINT or SIGTERM without running Update, and a panic in Update or
+// View returns no model at all, so the model's own title command never runs on
+// either path. Redirected stdout is left untouched, so the escape never lands
+// in a file or a pipe.
+func resetTerminalTitle(cwd string) {
+	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return
+	}
+	fmt.Fprint(os.Stdout, app.IdleTitleSequence(cwd))
 }

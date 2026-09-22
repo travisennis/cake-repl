@@ -60,10 +60,12 @@ cake-repl -cake-bin ../cake/target/debug/cake
 ```
 
 While running, cake-repl sets the terminal title to
-`cake-repl: <absolute working directory>`. The `-cwd` flag selects that working
-directory; otherwise cake-repl uses the directory where it was started.
-Relative `-add-dir` paths resolve against that working directory, and cake
-ignores paths that do not exist or are not directories.
+`cake-repl: <absolute working directory>`. While a task is in flight, a
+`[working]` marker prefixes that title and is removed when the run ends, so an
+unfocused window or a tab still shows whether the REPL is busy. The `-cwd` flag
+selects that working directory; otherwise cake-repl uses the directory where it
+was started. Relative `-add-dir` paths resolve against that working directory,
+and cake ignores paths that do not exist or are not directories.
 
 Flags:
 

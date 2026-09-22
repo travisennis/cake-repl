@@ -467,9 +467,7 @@ func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
 
 	tm, cmd = m.finishRun(cake.Result{Canceled: true})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Errorf("cmd = %v, want nil", cmd)
-	}
+	requireTitle(t, cmd, "cake-repl: ")
 	if m.running || m.newSessionPending {
 		t.Errorf("run state not settled: running=%v pending=%v", m.running, m.newSessionPending)
 	}
@@ -680,6 +678,8 @@ func TestSubmitStartFailureLandsOnTimeline(t *testing.T) {
 func TestSubmitStartsRun(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.CakeBin = writeFakeCake(t, "exit 0\n")
+	cwd := t.TempDir()
+	m.cfg.Cwd = cwd
 	m.sawComplete = true // stale value from a previous run must reset
 	m.input.SetValue("do the thing")
 	tm, cmd := m.submit()
@@ -701,6 +701,8 @@ func TestSubmitStartsRun(t *testing.T) {
 	if cmd == nil {
 		t.Error("expected spinner tick and run wait commands")
 	}
+	// The title must carry the working marker for as long as the run lasts.
+	requireBatchTitle(t, cmd, "[working] cake-repl: "+cwd)
 }
 
 func TestSubmitRecordsHistory(t *testing.T) {
@@ -837,9 +839,7 @@ func TestFinishRunCanceledPinsToStartedSession(t *testing.T) {
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
 	tm, cmd := m.finishRun(cake.Result{Canceled: true})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Errorf("cmd = %v, want nil", cmd)
-	}
+	requireTitle(t, cmd, "cake-repl: ")
 	mode, resumeID := m.session.RunOptions()
 	if mode != cake.RunResume || resumeID != "d8fceb36" {
 		t.Errorf("after cancel mode=%v id=%q, want resume pinned to d8fceb36", mode, resumeID)
@@ -855,9 +855,7 @@ func TestFinishRunCanceledBeforeTaskStartDoesNotInventSession(t *testing.T) {
 	m.running = true
 	tm, cmd := m.finishRun(cake.Result{Canceled: true})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Errorf("cmd = %v, want nil", cmd)
-	}
+	requireTitle(t, cmd, "cake-repl: ")
 	mode, resumeID := m.session.RunOptions()
 	if mode != cake.RunFresh || resumeID != "" {
 		t.Errorf("after cancel mode=%v id=%q, want fresh with no id", mode, resumeID)
@@ -911,9 +909,7 @@ func TestExecSessionCommandsRejectedWhenRunning(t *testing.T) {
 			m.applyEvent(success(activeID))
 			tm, cmd = m.finishRun(cake.Result{ExitCode: 0})
 			m = tm.(Model)
-			if cmd != nil {
-				t.Errorf("finish cmd = %v, want nil", cmd)
-			}
+			requireTitle(t, cmd, "cake-repl: ")
 			if mode, resumeID := m.session.RunOptions(); mode != cake.RunResume || resumeID != activeID {
 				t.Errorf("after success mode=%v id=%q, want resume pinned to %q", mode, resumeID, activeID)
 			}

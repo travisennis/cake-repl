@@ -550,7 +550,7 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	m.appendItem(ui.Item{Kind: ui.KindUser, Text: prompt})
 	m.input.Reset()
 	m.layout()
-	return m, tea.Batch(m.spin.Tick, waitForRun(run))
+	return m, tea.Batch(m.spin.Tick, waitForRun(run), m.titleCmd())
 }
 
 func (m *Model) applyEvent(ev cake.Event) {
@@ -748,12 +748,16 @@ func (m *Model) finishPendingTools() {
 func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	m.running = false
 	m.run = nil
+	// The run has ended, so the title drops the working marker. Quitting paths
+	// skip this: main writes the idle title once the program returns, which is
+	// the only way to cover exits the model never observes.
+	titleCmd := m.titleCmd()
 	if m.newSessionPending {
 		m.newSessionPending = false
 		if m.exitAfter {
 			return m, tea.Quit
 		}
-		return m, nil
+		return m, titleCmd
 	}
 
 	m.finishPendingTools()
@@ -778,7 +782,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	if m.exitAfter {
 		return m, tea.Quit
 	}
-	return m, nil
+	return m, titleCmd
 }
 
 func (m Model) sessionInfo() string {

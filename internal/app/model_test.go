@@ -22,6 +22,50 @@ func newLaidOutModel() Model {
 	return m
 }
 
+// titleSetBy returns the terminal title cmd would set. Bubble Tea's title
+// message type is unexported, so the value is read through reflection.
+func titleSetBy(cmd tea.Cmd) (string, bool) {
+	if cmd == nil {
+		return "", false
+	}
+	rv := reflect.ValueOf(cmd())
+	if rv.IsValid() && rv.Kind() == reflect.String {
+		return rv.String(), true
+	}
+	return "", false
+}
+
+// requireTitle fails unless cmd sets the terminal title to want.
+func requireTitle(t *testing.T, cmd tea.Cmd, want string) {
+	t.Helper()
+	got, ok := titleSetBy(cmd)
+	if !ok {
+		t.Fatalf("command %v does not set a terminal title", cmd)
+	}
+	if got != want {
+		t.Errorf("terminal title = %q, want %q", got, want)
+	}
+}
+
+// requireBatchTitle fails unless cmd is a batch whose last command sets the
+// terminal title to want. Only that command runs: the other members of a run
+// start's batch are the spinner tick and the run wait, and executing the wait
+// would consume the run's events out from under the test.
+func requireBatchTitle(t *testing.T, cmd tea.Cmd, want string) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("no command returned")
+	}
+	cmds, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want tea.BatchMsg", cmd())
+	}
+	if len(cmds) == 0 {
+		t.Fatal("batch is empty")
+	}
+	requireTitle(t, cmds[len(cmds)-1], want)
+}
+
 func TestInitSetsWindowTitleToWorkingDirectory(t *testing.T) {
 	m := New(Config{Cwd: "/tmp/project\x1b]2;injected\a"})
 	msg := m.Init()()
@@ -30,25 +74,49 @@ func TestInitSetsWindowTitleToWorkingDirectory(t *testing.T) {
 		t.Fatalf("Init message type = %T, want tea.BatchMsg", msg)
 	}
 
-	var title string
-	var blinkFound bool
 	blinkType := reflect.TypeOf(textarea.Blink())
+	blinkFound := false
 	for _, cmd := range cmds {
-		cmdMsg := cmd()
-		if reflect.TypeOf(cmdMsg) == blinkType {
+		if reflect.TypeOf(cmd()) == blinkType {
 			blinkFound = true
 		}
-		value := reflect.ValueOf(cmdMsg)
-		if value.IsValid() && value.Kind() == reflect.String {
-			title = value.String()
-		}
 	}
-	if want := "cake-repl: /tmp/project"; title != want {
-		t.Errorf("window title = %q, want %q", title, want)
-	}
+	requireBatchTitle(t, tea.Batch(cmds...), "cake-repl: /tmp/project")
 	if !blinkFound {
 		t.Error("Init did not preserve textarea blinking")
 	}
+}
+
+func TestTitleCmdTracksWorkingState(t *testing.T) {
+	// The title is the only status signal that survives an unfocused or
+	// minimized window, so the working marker must follow m.running exactly.
+	m := New(Config{Cwd: "/tmp/project\x1b]2;injected\a"})
+	requireTitle(t, m.titleCmd(), "cake-repl: /tmp/project")
+
+	m.running = true
+	requireTitle(t, m.titleCmd(), "[working] cake-repl: /tmp/project")
+}
+
+func TestIdleTitleSequenceRestoresIdleTitle(t *testing.T) {
+	// main writes this for the exits the model never sees: an interrupt, a
+	// termination signal, or a panic that returns no model.
+	want := "\x1b]2;cake-repl: /tmp/project\x07"
+	if got := IdleTitleSequence("/tmp/project\x1b]2;injected\a"); got != want {
+		t.Errorf("idle title sequence = %q, want %q", got, want)
+	}
+}
+
+func TestFinishRunResetsTitleToIdle(t *testing.T) {
+	m := newLaidOutModel()
+	m.cfg.Cwd = "/tmp/project"
+	m.running = true
+
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+	got := tm.(Model)
+	if got.running {
+		t.Fatal("finishRun left the model running")
+	}
+	requireTitle(t, cmd, "cake-repl: /tmp/project")
 }
 
 // renderItemsFull is the reference implementation for timeline join: each item

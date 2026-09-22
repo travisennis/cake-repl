@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/ui"
 )
@@ -242,12 +243,45 @@ func (m Model) SessionData() (sessionID, cwd string) {
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		textarea.Blink,
-		tea.SetWindowTitle("cake-repl: " + ui.Sanitize(m.cfg.Cwd)),
+		m.titleCmd(),
 	}
 	if m.hydrating {
 		cmds = append(cmds, startReplayCmd(m.cfg))
 	}
 	return tea.Batch(cmds...)
+}
+
+// windowTitle renders the terminal title for a working directory and run state.
+// It is the single place the title format is defined, so the idle form, the
+// working form, and the sequence main writes on an unobserved exit cannot
+// drift apart.
+func windowTitle(cwd string, running bool) string {
+	title := "cake-repl: " + ui.Sanitize(cwd)
+	if running {
+		title = "[working] " + title
+	}
+	return title
+}
+
+// titleCmd returns a command that re-sets the terminal title from the current
+// working state. The status line and composer already report running state,
+// but neither is visible when the terminal window is unfocused, behind another
+// window, or reduced to a tab, so the title carries the same signal: a working
+// marker prefixes the documented `cake-repl: <cwd>` title while a task runs and
+// is absent when the REPL is idle. Emit this on every running-state transition
+// so the title never describes a state the REPL has left.
+func (m Model) titleCmd() tea.Cmd {
+	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.running))
+}
+
+// IdleTitleSequence returns the escape sequence that restores the idle terminal
+// title for cwd. main writes it once Program.Run returns, before the process
+// exits, because the model cannot: Bubble Tea returns on SIGINT or SIGTERM
+// without running Update, and a panic in Update or View hands back no model at
+// all, so neither exit runs the model's own title command. The sequence is the
+// one tea.SetWindowTitle writes.
+func IdleTitleSequence(cwd string) string {
+	return ansi.SetWindowTitle(windowTitle(cwd, false))
 }
 
 // trimFront removes the first `over` items from the timeline, adjusts

@@ -55,6 +55,14 @@ commands or help text (`internal/app/commands.go`), key bindings
   help hints; its borders remain visible without color. While the TUI is
   running, the terminal title is `cake-repl: <absolute working directory>`,
   using the directory selected by `-cwd` or the startup directory by default.
+  The title carries a `[working]` prefix while a task is in flight and drops it
+  when the run ends, because the status line and composer are both invisible
+  when the window is unfocused, minimized, or reduced to a tab. The title never
+  names a state the REPL has left: the model re-sets it on every run-state
+  transition, and `main` writes the idle title sequence once the program
+  returns, which covers the exits the model never observes (SIGINT, SIGTERM, a
+  recovered panic). That sequence is written only to a terminal, never into
+  redirected output.
   `-no-color` /
   `DefaultTheme` must keep producing usable ASCII output. Markdown renders via
   glamour with compact REPL-themed headings, quotes, links, code, and emphasis;
