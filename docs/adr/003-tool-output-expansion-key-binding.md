@@ -56,7 +56,7 @@ output. The key binding is added to the REPL key map and mirrored in the
 
 ## More Information
 
-- Task: [010](../../.ahm/tasks/completed/010.md)
+- Task: 010, in the user-level `ahm` store.
 - Guardrail: [`docs/guardrails/cli-and-user-output.md`](../guardrails/cli-and-user-output.md)
 - The "full output is stored in the item data" claim above is bounded by
   [ADR 010](010-bound-per-tool-result-retention-and-record-the-unbounded-timeline-default.md):
@@ -65,7 +65,7 @@ output. The key binding is added to the REPL key map and mirrored in the
 
 ## Superseding Decision (2026-07-18)
 
-Task [048](../../.ahm/tasks/completed/048.md) supersedes the per-item portion
+Task 048, in the user-level `ahm` store, supersedes the per-item portion
 of this decision. `Ctrl+O` now cycles one session-wide mode in the order
 **truncated → full → hidden → truncated**. The mode applies to every existing
 tool block and to tool blocks added later, remains in memory across `/clear`,

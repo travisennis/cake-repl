@@ -166,8 +166,10 @@ Consult:
 - [ExecPlan workflow](docs/workflow/exec-plans.md), for the design-plan format
   kept under `docs/exec-plans/`.
 
-`ahm` manages only task records under `.ahm/tasks/` and ADR records under
-`docs/adr/`; a design plan is an ordinary project file, not an `ahm` record.
+`ahm` manages only task records and ADR records: ADR records stay under
+`docs/adr/`, and task records live in the user-level store described in
+[ADR 013](docs/adr/013-store-ahm-task-records-in-the-user-level-home-store.md).
+A design plan is an ordinary project file, not an `ahm` record.
 
 ### Agent Instructions And Skills
 

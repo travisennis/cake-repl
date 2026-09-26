@@ -46,9 +46,10 @@ Authorities, in priority order:
 - repo root `AGENTS.md`
 - the guardrail each selected lens names
 - `ahm task show <id>` output when the work came from a task; open the task
-  file under `.ahm/tasks/` only when `ahm` is unavailable or when reviewing
-  manual edits to the task file itself; use `.ahm/tasks/index.md` only as a
-  fallback queue artifact when `ahm` is unavailable
+  file in the store's records directory under `~/.ahm/projects/<project-key>/`
+  only when `ahm` is unavailable or when reviewing manual edits to the task
+  file itself; use the store's `tasks/index.md` only as a fallback queue
+  artifact when `ahm` is unavailable
 - the relevant design plan when one exists for the current work (see
   `docs/exec-plans/active/`)
 - the ADRs the lens row names

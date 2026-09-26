@@ -41,5 +41,5 @@ No confirmation or session-summary write is performed. cake remains the owner of
 
 ## More Information
 
-- Task: [035](../../.ahm/tasks/completed/035.md)
+- Task: 035, in the user-level `ahm` store.
 - Guardrails: [`session-and-security.md`](../guardrails/session-and-security.md), [`cli-and-user-output.md`](../guardrails/cli-and-user-output.md)

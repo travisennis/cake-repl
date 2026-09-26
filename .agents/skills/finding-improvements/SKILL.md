@@ -418,9 +418,10 @@ ahm task create "<title>" \
 ```
 
 Pipe the task body to stdin via `--body-file -`. If `ahm` is unavailable,
-write the task file directly to `.ahm/tasks/active/<id>.md` following
-the `ahm` task file format, then run `ahm index` when `ahm` is available again.
-Never write generated index files by hand.
+write the task file directly into the store's `active/` bucket under
+`~/.ahm/projects/<project-key>/tasks/`, following the `ahm` task file format,
+then run `ahm index` when `ahm` is available again. Never write generated index
+files by hand.
 
 **After all tasks are created**, report a summary:
 

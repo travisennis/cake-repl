@@ -138,16 +138,33 @@ and regenerates indexes.
 
 ## Storage And Manual Fallback
 
-Task source records live under `.ahm/tasks/`: active records under
-`.ahm/tasks/active/`, completed records under `.ahm/tasks/completed/`, and
-cancelled records under `.ahm/tasks/cancelled/`. Task ids and filenames remain
-stable across lifecycle moves.
+Task source records live in the user-level store, not in the repository. Run
+`ahm store path` for the resolved store root, project key, and records
+directory. The key is derived from the git remote, so a clone at any path
+resolves to the same records. Within that records directory, active records live
+under `active/`, completed records under `completed/`, and cancelled records
+under `cancelled/`. Task ids and filenames remain stable across lifecycle
+moves. See
+[ADR 013](../adr/013-store-ahm-task-records-in-the-user-level-home-store.md).
 
-`.ahm/tasks/index.md` and its linked indexes are generated, read-only views.
-Never edit them directly. Normal `ahm task ...` mutations regenerate indexes
-automatically. Run `ahm index` only after manually changing task metadata,
-location, or linkage; body-only edits do not require it. Preview an index
-regeneration with `ahm --dry-run index`.
+The repository keeps only `.ahm/config.json`, whose committed
+`"tasks_location": "home"` key selects the store, and the managed
+`.ahm/.gitignore`.
+
+A fresh checkout on a machine with no store entry has an empty backlog, and
+`ahm` exits 1 with `store_dir_unreadable` and `generated_index_missing` errors
+until `ahm init` creates the store directories and indexes. Run `ahm init` once
+in a new checkout before any other `ahm` command.
+
+The store's `tasks/index.md` and its linked bucket indexes are generated,
+read-only views. Never edit them directly. Normal `ahm task ...` mutations
+regenerate indexes automatically. Run `ahm index` only after manually changing
+task metadata, location, or linkage; body-only edits do not require it. Preview
+an index regeneration with `ahm --dry-run index`.
+
+Because the records live outside the repository, do not link to them by relative
+path; such a link cannot resolve in a checkout. Reference a task by id and read
+it with `ahm task show <id>`.
 
 If `ahm` is unavailable, inspect the task source files and generated index as a
 fallback. Avoid manual creation or lifecycle moves when possible. If a manual

@@ -18,10 +18,12 @@ configuration, compatibility, or workflow changes require documentation updates.
 - **ADR history.** Durable technical decisions live in `docs/adr/`. Do not
   rewrite accepted history to describe a new decision; create a new ADR unless
   the edit is only clarification.
-- **Managed work.** `ahm` owns task records under `.ahm/tasks/` and ADR
-  records under `docs/adr/`, plus the generated index for each. Do not edit a
-  generated index by hand. A design plan under `docs/exec-plans/` is an
-  ordinary project file, not an `ahm` record.
+- **Managed work.** `ahm` owns ADR records under `docs/adr/` and task records
+  in the user-level store described in
+  [ADR 013](../adr/013-store-ahm-task-records-in-the-user-level-home-store.md),
+  plus the generated index for each. Do not edit a generated index by hand, and
+  do not link to a task record by relative path; reference tasks by id. A design
+  plan under `docs/exec-plans/` is an ordinary project file, not an `ahm` record.
 
 ## Required checks / test focus
 
@@ -50,7 +52,7 @@ Use this matrix when a change touches a durable surface.
 | Build, dependency, CI, or release behavior | `CONTRIBUTING.md` (canonical command catalog), `docs/guardrails/dependencies-build-ci-release.md`, ADR for major runtime dependencies or compatibility changes |
 | Architecture/module boundaries | `ARCHITECTURE.md`, relevant guardrail, ADR for durable boundary changes |
 | User-visible terminal output | `README.md` when behavior changes, `docs/guardrails/cli-and-user-output.md`, screenshots or manual capture when required by that guardrail |
-| Managed-work format or workflow | `AGENTS.md`, [task workflow](../workflow/tasks.md), [ADR workflow](../workflow/adrs.md), or [ExecPlan workflow](../workflow/exec-plans.md); relevant `.ahm` records |
+| Managed-work format or workflow | `AGENTS.md`, [task workflow](../workflow/tasks.md), [ADR workflow](../workflow/adrs.md), or [ExecPlan workflow](../workflow/exec-plans.md); relevant `ahm` task records |
 | Any other durable contract not listed above | ADR when the contract is introduced or changed, plus the most relevant existing row's doc requirements |
 
 When a row says "ADR when the contract changes," make the decision before code

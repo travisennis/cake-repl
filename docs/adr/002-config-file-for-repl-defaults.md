@@ -88,7 +88,7 @@ The config file contract is:
 
 ## More Information
 
-- Task: `.ahm/tasks/completed/008.md`.
+- Task: 008, in the user-level `ahm` store.
 - Implementation: `internal/config/config.go`.
 - Startup merge: `cmd/cake-repl/main.go`.
 - User docs: `README.md#config-file`.
