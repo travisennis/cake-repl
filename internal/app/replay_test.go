@@ -235,3 +235,90 @@ printf '%s\n' '{"type":"function_call","id":"fc-1","call_id":"call-1","name":"ba
 		t.Fatalf("dangling tool = %+v, want done with task-ended marker", dangling)
 	}
 }
+
+// replayFixturePath resolves a fixture shared with the cake package tests.
+func replayFixturePath(name string) string {
+	return filepath.Join("..", "cake", "testdata", "fixtures", name)
+}
+
+func TestResumeHydratesModelFromReplayFixture(t *testing.T) {
+	fixture, err := filepath.Abs(replayFixturePath("replay-model.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REPLAY_FIXTURE", fixture)
+	bin := writeFakeCake(t, `
+if [ "$3" = "replay" ]; then
+cat "$REPLAY_FIXTURE"
+fi
+`)
+	m := New(Config{
+		CakeBin:     bin,
+		Cwd:         t.TempDir(),
+		Model:       "cli-model",
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 120, 24
+	m.layout()
+	m = hydrateTestModel(t, m)
+
+	// session_meta carries both identities; the [[models]] entry name wins.
+	if got := m.displayModel(); got != "zen" {
+		t.Fatalf("display model = %q, want zen from session_meta.model_config", got)
+	}
+	line := m.statusLine()
+	if !strings.Contains(line, "model:") || !strings.Contains(line, "zen") {
+		t.Errorf("status line missing replayed model: %q", line)
+	}
+	if strings.Contains(line, "cli-model") {
+		t.Errorf("status line still shows the CLI model: %q", line)
+	}
+}
+
+func TestResumeWithoutModelIdentityFallsBackToConfig(t *testing.T) {
+	bin := writeFakeCake(t, `
+printf '%s\n' '{"type":"session_meta","session_id":"11111111-2222-3333-4444-555555555555","working_directory":"/tmp/project"}'
+printf '%s\n' '{"type":"task_start","session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task"}'
+printf '%s\n' '{"type":"task_complete","subtype":"success","is_error":false,"session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task"}'
+`)
+	m := New(Config{
+		CakeBin:     bin,
+		Cwd:         t.TempDir(),
+		Model:       "cli-model",
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 120, 24
+	m.layout()
+	m = hydrateTestModel(t, m)
+
+	if got := m.displayModel(); got != "cli-model" {
+		t.Fatalf("display model = %q, want CLI fallback", got)
+	}
+	if line := m.statusLine(); !strings.Contains(line, "model:") || !strings.Contains(line, "cli-model") {
+		t.Errorf("status line missing CLI fallback model: %q", line)
+	}
+}
+
+func TestResumeWithoutAnyModelOmitsStatusModel(t *testing.T) {
+	bin := writeFakeCake(t, `
+printf '%s\n' '{"type":"session_meta","session_id":"11111111-2222-3333-4444-555555555555","working_directory":"/tmp/project"}'
+`)
+	m := New(Config{
+		CakeBin:     bin,
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 120, 24
+	m.layout()
+	m = hydrateTestModel(t, m)
+
+	if got := m.displayModel(); got != "" {
+		t.Fatalf("display model = %q, want empty", got)
+	}
+	if line := m.statusLine(); strings.Contains(line, "model:") {
+		t.Errorf("status line rendered a model field with no model anywhere: %q", line)
+	}
+}

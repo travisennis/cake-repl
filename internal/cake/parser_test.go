@@ -142,7 +142,7 @@ func TestParseLineReplayRecords(t *testing.T) {
 	}{
 		{
 			name: "session metadata",
-			line: `{"type":"session_meta","session_id":"s-1","cwd":"/tmp/project","new_field":true}`,
+			line: `{"type":"session_meta","session_id":"s-1","working_directory":"/tmp/project","new_field":true}`,
 			want: SessionMeta{SessionID: "s-1", Cwd: "/tmp/project"},
 		},
 		{
@@ -189,6 +189,84 @@ func TestParseLineReplayRecords(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseLineSessionMetaModelIdentity(t *testing.T) {
+	line := `{"type":"session_meta","format_version":4,"session_id":"s-1","timestamp":"2026-06-09T12:00:00Z","working_directory":"/tmp/project","model":"glm-5.1","model_config":"zen","tools":[],"future_metadata":true}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	meta, ok := ev.(SessionMeta)
+	if !ok {
+		t.Fatalf("got %T, want SessionMeta", ev)
+	}
+	if meta.SessionID != "s-1" || meta.Cwd != "/tmp/project" {
+		t.Errorf("session fields = %+v, want session id and working_directory", meta)
+	}
+	if meta.Model != "glm-5.1" || meta.ModelConfig != "zen" {
+		t.Errorf("model identity = %q/%q, want glm-5.1/zen", meta.Model, meta.ModelConfig)
+	}
+}
+
+func TestParseLineSessionMetaWithoutModelIdentity(t *testing.T) {
+	line := `{"type":"session_meta","session_id":"s-1","working_directory":"/tmp/project"}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	meta, ok := ev.(SessionMeta)
+	if !ok {
+		t.Fatalf("got %T, want SessionMeta", ev)
+	}
+	if meta.Model != "" || meta.ModelConfig != "" {
+		t.Errorf("missing model identity decoded as %q/%q, want empty", meta.Model, meta.ModelConfig)
+	}
+}
+
+func TestParseLineTaskStartModelIdentity(t *testing.T) {
+	line := `{"type":"task_start","session_id":"s-1","task_id":"t-1","timestamp":"2026-06-09T12:00:00Z","model":"glm-5.1","model_config":"zen"}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	ts, ok := ev.(TaskStart)
+	if !ok {
+		t.Fatalf("got %T, want TaskStart", ev)
+	}
+	if ts.Model != "glm-5.1" || ts.ModelConfig != "zen" {
+		t.Errorf("model identity = %q/%q, want glm-5.1/zen", ts.Model, ts.ModelConfig)
+	}
+}
+
+func TestParseLineTaskStartWithoutModelIdentity(t *testing.T) {
+	line := `{"type":"task_start","session_id":"s-1","task_id":"t-1","timestamp":"2026-06-09T12:00:00Z"}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	ts, ok := ev.(TaskStart)
+	if !ok {
+		t.Fatalf("got %T, want TaskStart", ev)
+	}
+	if ts.Model != "" || ts.ModelConfig != "" {
+		t.Errorf("older task_start decoded model identity %q/%q, want empty", ts.Model, ts.ModelConfig)
+	}
+}
+
+func TestParseLineTaskCompleteModelIdentity(t *testing.T) {
+	line := `{"type":"task_complete","subtype":"success","is_error":false,"session_id":"s-1","task_id":"t-1","model":"glm-5.1","model_config":"zen","usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	tc, ok := ev.(TaskComplete)
+	if !ok {
+		t.Fatalf("got %T, want TaskComplete", ev)
+	}
+	if tc.Model != "glm-5.1" || tc.ModelConfig != "zen" {
+		t.Errorf("model identity = %q/%q, want glm-5.1/zen", tc.Model, tc.ModelConfig)
 	}
 }
 

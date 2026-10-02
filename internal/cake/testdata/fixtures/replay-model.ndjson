@@ -1,0 +1,4 @@
+{"type":"session_meta","format_version":4,"session_id":"11111111-2222-3333-4444-555555555555","timestamp":"2026-06-09T12:00:00Z","working_directory":"/tmp/project","model":"glm-5.1","model_config":"zen","tools":[],"future_metadata":true}
+{"type":"task_start","session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task","timestamp":"2026-06-09T12:00:01Z"}
+{"type":"message","role":"assistant","content":"previous answer"}
+{"type":"task_complete","subtype":"success","is_error":false,"duration_ms":5,"turn_count":1,"tool_call_count":0,"session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task","usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}

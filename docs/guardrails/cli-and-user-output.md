@@ -49,7 +49,11 @@ commands or help text (`internal/app/commands.go`), key bindings
   completions, warnings, and errors use distinct compact markers. The one-line
   status display leads with a
   bracketed idle/running state, followed by labeled session, next-run, optional
-  model, and cwd context; it pads or truncates to the terminal width. The prompt
+  model, and cwd context; the model is the identity cake reported on the stream
+  once available (the `[[models]]` entry name, falling back to the provider
+  model ID), else the `-model`/config value, and a new session or resume switch
+  drops the reported identity (ADR 014). It pads or truncates to the terminal
+  width. The prompt
   textarea is framed as
   a focused composer with ready/running state and concise submit, newline, and
   help hints; its borders remain visible without color. While the TUI is

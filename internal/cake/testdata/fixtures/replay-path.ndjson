@@ -1,4 +1,4 @@
-{"type":"session_meta","session_id":"11111111-2222-3333-4444-555555555555","cwd":"/tmp/project","future_metadata":true}
+{"type":"session_meta","session_id":"11111111-2222-3333-4444-555555555555","working_directory":"/tmp/project","future_metadata":true}
 {"type":"task_start","session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task"}
 {"type":"prompt_context","session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task","prompt":"previous prompt","extra":"ignored"}
 {"type":"message","role":"user","content":"previous prompt"}

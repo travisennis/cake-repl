@@ -12,7 +12,10 @@ Labeled user and assistant sections anchor the conversation. Assistant response
 bodies have no decorative prefix, so multiline terminal selections can be copied
 cleanly; operational events remain compact and visually distinct.
 The status line leads with current idle/running state, followed by labeled
-session, next-run, model, and working-directory context. After a successful
+session, next-run, model, and working-directory context. The model shown is the
+identity cake reports on the stream once available — the `[[models]]` entry
+name, falling back to the provider model ID — and otherwise the `-model`/config
+value. After a successful
 turn, the next prompt automatically continues the same cake session when cake
 reports a session ID.
 
@@ -143,6 +146,12 @@ brief notice instead.
   `--resume <id>`, so another cake process creating a newer session in the
   same directory cannot hijack the conversation. If a task succeeds or fails
   without reporting a session id, the current run mode is left unchanged.
+- The status-line model comes from the stream when cake reports one: replay
+  hydration reads `session_meta.model_config` (falling back to
+  `session_meta.model`), and a newer cake reports the same optional identity on
+  `task_start` / `task_complete`. Until then the `-model`/config value is shown,
+  which is also what an older cake keeps showing. A new session or a switch to a
+  different `-resume` target drops the reported identity.
 - A failed or canceled task with a reported session ID is still pinned, so the
   next prompt continues the session the run left behind instead of starting a
   new one.

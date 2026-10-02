@@ -565,11 +565,17 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 	switch e := ev.(type) {
 	case cake.TaskStart:
 		m.session.OnTaskStart(e)
+		m.session.OnModel(e.ModelConfig, e.Model)
 		m.appendItem(ui.Item{Kind: ui.KindTaskStart, Text: "task started · session " + ui.ShortID(e.SessionID)})
 
 	case cake.SessionMeta:
-		if replay && e.SessionID != "" {
-			m.session.SessionID = e.SessionID
+		if replay {
+			if e.SessionID != "" {
+				m.session.SessionID = e.SessionID
+			}
+			// session_meta only appears in replay output; it carries the model
+			// cake resolved for the resumed session.
+			m.session.OnModel(e.ModelConfig, e.Model)
 		}
 
 	case cake.PromptContext:
@@ -654,6 +660,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 
 	case cake.TaskComplete:
 		m.session.OnTaskComplete(e)
+		m.session.OnModel(e.ModelConfig, e.Model)
 		m.sawComplete = true
 		if e.IsError {
 			text := "task failed"

@@ -138,6 +138,9 @@ func TestParseStreamReplayPath(t *testing.T) {
 	if !ok || meta.SessionID != "11111111-2222-3333-4444-555555555555" {
 		t.Errorf("event 0 = %#v, want session metadata", events[0])
 	}
+	if meta.Cwd != "/tmp/project" {
+		t.Errorf("session cwd = %q, want /tmp/project decoded from working_directory", meta.Cwd)
+	}
 	context, ok := events[2].(PromptContext)
 	if !ok || context.TaskID != "old-task" || context.Prompt != "previous prompt" {
 		t.Errorf("event 2 = %#v, want prompt context", events[2])

@@ -29,12 +29,16 @@ func (e *StreamEnvelope) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// TaskStart marks the beginning of one cake task.
+// TaskStart marks the beginning of one cake task. Model and ModelConfig are
+// optional; cake#664 adds them to the live stream with the same meaning as on
+// SessionMeta, and older cake binaries simply omit them.
 type TaskStart struct {
-	Type      string `json:"type"`
-	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	Timestamp string `json:"timestamp"`
+	Type        string `json:"type"`
+	SessionID   string `json:"session_id"`
+	TaskID      string `json:"task_id"`
+	Timestamp   string `json:"timestamp"`
+	Model       string `json:"model,omitempty"`
+	ModelConfig string `json:"model_config,omitempty"`
 }
 
 func (e TaskStart) EventType() string { return "task_start" }
@@ -90,16 +94,19 @@ func (s *ReasoningSummary) UnmarshalJSON(data []byte) error {
 
 func (e Reasoning) EventType() string { return "reasoning" }
 
-// SessionMeta describes session-level metadata in a replay stream. Fields not
-// needed by the REPL are deliberately ignored so cake can add metadata.
+// SessionMeta describes session-level metadata in a replay stream. Cwd decodes
+// cake's working_directory; Model is the provider model ID and ModelConfig is
+// the [[models]] entry name the session was created with. Fields not needed by
+// the REPL are deliberately ignored so cake can add metadata.
 type SessionMeta struct {
-	Type      string `json:"type"`
-	SessionID string `json:"session_id"`
-	Cwd       string `json:"cwd,omitempty"`
-	Model     string `json:"model,omitempty"`
-	Profile   string `json:"profile,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	Type        string `json:"type"`
+	SessionID   string `json:"session_id"`
+	Cwd         string `json:"working_directory,omitempty"`
+	Model       string `json:"model,omitempty"`
+	ModelConfig string `json:"model_config,omitempty"`
+	Profile     string `json:"profile,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
 }
 
 func (e SessionMeta) EventType() string { return "session_meta" }
@@ -175,7 +182,9 @@ type HookEvent struct {
 
 func (e HookEvent) EventType() string { return "hook_event" }
 
-// TaskComplete reports the final outcome of one cake task.
+// TaskComplete reports the final outcome of one cake task. Model and
+// ModelConfig are optional and decode additively so a newer cake can report the
+// resolved model identity on completion without breaking older consumers.
 type TaskComplete struct {
 	Type          string `json:"type"`
 	Subtype       string `json:"subtype"`
@@ -187,6 +196,8 @@ type TaskComplete struct {
 	TaskID        string `json:"task_id"`
 	Result        string `json:"result,omitempty"`
 	Error         string `json:"error,omitempty"`
+	Model         string `json:"model,omitempty"`
+	ModelConfig   string `json:"model_config,omitempty"`
 	Usage         Usage  `json:"usage"`
 }
 

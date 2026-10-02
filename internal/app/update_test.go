@@ -1460,3 +1460,42 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 	m.layout()
 	assertCacheMatchesFullRender(t, &m, "after pre-ready trim with pending calls then layout")
 }
+
+func TestLiveTaskStartReportsDisplayedModel(t *testing.T) {
+	m := newLaidOutModel()
+	m.cfg.Model = "cli-model"
+	m.applyEvent(cake.TaskStart{SessionID: "s-1", TaskID: "t-1", Model: "glm-5.1", ModelConfig: "zen"})
+
+	if got := m.displayModel(); got != "zen" {
+		t.Fatalf("display model = %q, want zen from the live stream", got)
+	}
+
+	// A later record without a model identity must not clear the reported one.
+	m.applyEvent(cake.TaskComplete{Subtype: "success", SessionID: "s-1", TaskID: "t-1"})
+	if got := m.displayModel(); got != "zen" {
+		t.Fatalf("display model after identity-less completion = %q, want zen", got)
+	}
+}
+
+func TestLiveTaskStartModelFallsBackToProviderID(t *testing.T) {
+	m := newLaidOutModel()
+	m.cfg.Model = "cli-model"
+	m.applyEvent(cake.TaskStart{SessionID: "s-1", TaskID: "t-1", Model: "glm-5.1"})
+
+	if got := m.displayModel(); got != "glm-5.1" {
+		t.Fatalf("display model = %q, want provider model ID", got)
+	}
+}
+
+func TestNewSessionClearsReportedModel(t *testing.T) {
+	m := newLaidOutModel()
+	m.cfg.Model = "cli-model"
+	m.applyEvent(cake.TaskStart{SessionID: "s-1", TaskID: "t-1", ModelConfig: "zen"})
+
+	tm, _ := m.startNewSession()
+	m = tm.(Model)
+
+	if got := m.displayModel(); got != "cli-model" {
+		t.Fatalf("display model after new session = %q, want CLI fallback", got)
+	}
+}

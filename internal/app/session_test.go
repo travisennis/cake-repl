@@ -147,3 +147,36 @@ func TestCancelDuringExplicitResumePreservesResumeID(t *testing.T) {
 		t.Errorf("after cancel mode=%v id=%q, want resume pinned to explicit session", mode, id)
 	}
 }
+
+func TestOnModelPrefersModelsConfigEntryName(t *testing.T) {
+	var s sessionState
+	s.OnModel("zen", "glm-5.1")
+	if s.Model != "zen" {
+		t.Fatalf("model = %q, want the [[models]] entry name", s.Model)
+	}
+
+	s.OnModel("", "glm-5.1")
+	if s.Model != "glm-5.1" {
+		t.Errorf("model without an entry name = %q, want the provider model ID", s.Model)
+	}
+
+	s.OnModel("", "")
+	if s.Model != "glm-5.1" {
+		t.Errorf("identity-less event cleared model to %q", s.Model)
+	}
+}
+
+func TestOnModelClearsOnNewSessionAndResumeSwitch(t *testing.T) {
+	var s sessionState
+	s.OnModel("zen", "")
+	s.Reset()
+	if s.Model != "" {
+		t.Fatalf("reset left model = %q", s.Model)
+	}
+
+	s.OnModel("zen", "")
+	s.UseResume("11111111-2222-3333-4444-555555555555")
+	if s.Model != "" {
+		t.Errorf("resume switch left stale model = %q", s.Model)
+	}
+}

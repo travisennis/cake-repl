@@ -10,11 +10,29 @@ type sessionState struct {
 	NextMode     cake.RunMode
 	ResumeID     string
 	LastComplete *cake.TaskComplete
+	// Model is the model identity cake reported for the current session: the
+	// [[models]] entry name when known, else the provider model ID. Empty means
+	// cake has not reported one, so the status line falls back to the
+	// CLI/config value. It is cleared whenever the session target changes.
+	Model string
 }
 
 // RunOptions returns the mode and resume id for the next cake invocation.
 func (s *sessionState) RunOptions() (cake.RunMode, string) {
 	return s.NextMode, s.ResumeID
+}
+
+// OnModel records the model identity cake reported for the session. The
+// [[models]] entry name (model_config) is preferred because it stays resolvable
+// when several entries share one provider ID; the provider model ID (model) is
+// the fallback. An event carrying neither leaves the recorded value unchanged.
+func (s *sessionState) OnModel(modelConfig, model string) {
+	switch {
+	case modelConfig != "":
+		s.Model = modelConfig
+	case model != "":
+		s.Model = model
+	}
 }
 
 // OnTaskStart records ids announced at the start of a task.
@@ -69,4 +87,7 @@ func (s *sessionState) Reset() {
 func (s *sessionState) UseResume(id string) {
 	s.NextMode = cake.RunResume
 	s.ResumeID = id
+	// The displayed model belongs to the previous session; drop it so the
+	// status line does not show a stale identity for the newly targeted one.
+	s.Model = ""
 }

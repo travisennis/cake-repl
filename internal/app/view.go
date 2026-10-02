@@ -49,7 +49,17 @@ func (m Model) statusLine() string {
 		State:   state,
 		Session: session,
 		Next:    next,
-		Model:   m.cfg.Model,
+		Model:   m.displayModel(),
 		Cwd:     filepath.Base(m.cfg.Cwd),
 	})
+}
+
+// displayModel returns the model shown in the status line: the identity cake
+// reported for the current session once received, otherwise the CLI/config
+// value. See ADR 014.
+func (m Model) displayModel() string {
+	if m.session.Model != "" {
+		return m.session.Model
+	}
+	return m.cfg.Model
 }
