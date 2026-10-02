@@ -145,9 +145,10 @@ Details on the test layout and the fake-cake harness live in
 
 Work happens on a feature branch cut from an up-to-date `master`. One branch
 holds one task; read-only work (audits, research, backlog grooming, `ahm
-prime`) stays on the current branch. There is no pull-request flow: the
-maintainer merges the branch into `master` and pushes `master`. Release prep is
-the exception and commits to `master` (see [Release](#release)).
+prime`) stays on the current branch. Maintainer work does not use pull
+requests: the maintainer integrates the branch into `master` locally and pushes
+`master`. Pull requests still exist for Dependabot and outside contributors.
+Release prep is the exception and commits to `master` (see [Release](#release)).
 
 The standard sequence:
 
@@ -191,9 +192,9 @@ EOF
 
 ## Integrating A Branch
 
-Integration is local; there is no pull request. From a clean `master`,
-`just integrate <type>/<slug>` rebases the branch onto `master` and
-fast-forwards, so `master` stays linear with no merge commits:
+Integration is local; maintainer work does not go through a pull request. From
+a clean `master`, `just integrate <type>/<slug>` rebases the branch onto
+`master` and fast-forwards, so `master` stays linear with no merge commits:
 
 ```bash
 git switch master
