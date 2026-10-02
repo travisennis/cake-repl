@@ -13,6 +13,55 @@ export PATH := tool_dir + ":" + env_var("PATH")
 default:
     just --list
 
+# Reject branch names outside the <type>/<slug> convention.
+# just interpolates a recipe argument into shell source, so an otherwise legal
+# Git ref such as `feat/x$(...)` would execute before Git ever saw it. This
+# check keeps the accepted character set narrow enough that quoting it has
+# nothing to defend.
+_check-branch-name name:
+    @name={{ quote(name) }}; \
+    case "$name" in \
+        -*|/*|*/|*..*|*.lock|*/.*|*.|*[!A-Za-z0-9._/-]*) \
+            echo "ERROR: branch name may use only letters, digits, dot, underscore, hyphen, and /, and may not start with '-' or '/', end with '/', or contain '..'" >&2; \
+            exit 1 ;; \
+    esac; \
+    case "${name%%/*}" in \
+        feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert) ;; \
+        *) echo "ERROR: branch name must start with a commit type, for example feat/timeline-compaction" >&2; exit 1 ;; \
+    esac; \
+    case "$name" in \
+        */*) ;; \
+        *) echo "ERROR: branch name must be <type>/<slug>, for example feat/timeline-compaction" >&2; exit 1 ;; \
+    esac
+
+# Local master is the base because it may carry unpushed commits that cutting
+# from origin/master would drop.
+# Start a task branch cut from an up-to-date master.
+branch name: (_check-branch-name name)
+    @git switch master
+    @git pull --ff-only
+    @git switch --create {{ quote(name) }} --no-track
+
+# Rebase <name> onto master and fast-forward, keeping history linear.
+integrate name: (_check-branch-name name)
+    #!/bin/sh
+    set -eu
+    name={{ quote(name) }}
+    test "$(git branch --show-current)" = master || { echo "ERROR: run integrate from master" >&2; exit 1; }
+    test -z "$(git status --porcelain)" || { echo "ERROR: worktree must be clean before integrating" >&2; exit 1; }
+    git rev-parse --verify --quiet "refs/heads/$name" >/dev/null || { echo "ERROR: no such branch: $name" >&2; exit 1; }
+    if git merge-base --is-ancestor "$name" master; then echo "ERROR: $name has no commits to integrate (already contained in master)" >&2; exit 1; fi
+    git pull --ff-only
+    git switch "$name"
+    git rebase master
+    if test -z "$(git rev-list "master..$name")"; then
+        echo "NOTE: $name had no commits left after rebase (already applied); master is unchanged" >&2
+        git switch master
+        exit 0
+    fi
+    git switch master
+    git merge --ff-only "$name"
+
 build:
     mkdir -p bin
     go build -trimpath -o bin/cake-repl ./cmd/cake-repl

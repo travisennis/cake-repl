@@ -103,7 +103,7 @@ commands or help text (`internal/app/commands.go`), key bindings
 
 - `just test` (covers `commands_test.go`, `update_test.go`, `status_test.go`,
   `toolblock_test.go`). Add cases for new flags, commands, or render kinds.
-- For UI/output changes, capture a terminal screenshot for the PR.
+- For UI/output changes, capture a terminal screenshot for the handoff.
 - Manually sanity-check with `just run -no-color` when touching theming.
 
 ## Common failure modes

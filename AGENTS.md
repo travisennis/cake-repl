@@ -34,15 +34,21 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
    work starts immediately.
 2. For a Pending task, run `ahm task start <id>` to begin its lifecycle.
 3. Select the route below, load only its docs, and state both before editing.
-4. Preserve compatibility unless explicitly changed; edit surgically and
+4. Decide whether the work edits repository files. Read-only work — audits,
+   research, recommendations, backlog grooming — stays on the current branch
+   with no branch or commit. If edits are needed, create the branch immediately
+   before the first edit: `just branch <type>/<slug>`, or a linked worktree
+   beside another agent for parallel work. (Release prep is the exception; see
+   [Repository Rules](#repository-rules).)
+5. Preserve compatibility unless explicitly changed; edit surgically and
    verify according to risk.
-5. Before handoff or commit after code changes, run the
+6. Before handoff or commit after code changes, run the
    [`preflight`](.agents/skills/preflight/SKILL.md) skill in a subagent. It owns
    the review scale, the lens selection, the finding threshold, the escalation
    trigger, and the fix-and-rerun loop. Consult the
    [documentation impact matrix](docs/guardrails/documentation.md) for
    durable-surface changes.
-6. For task-backed work, run `ahm task complete <id>` to close the task
+7. For task-backed work, run `ahm task complete <id>` to close the task
    lifecycle.
 
 Large or cross-cutting work requires a design plan under `docs/exec-plans/`,
@@ -183,7 +189,12 @@ Consult:
 
 ## Repository Rules
 
-- Do not commit or push unless explicitly asked.
+- Work happens on a feature branch: one branch per task, cut from an up-to-date
+  `master`, with commits made freely on the branch; hand off the fully
+  committed branch for review. Read-only work stays on the current branch.
+  Release prep is the exception and commits to `master`. See
+  [Commit Workflow](CONTRIBUTING.md#commit-workflow).
+- Do not push, merge, or delete a branch unless explicitly asked.
 - Assume uncommitted changes may belong to the user (e.g. untracked `review.md`,
   `plan.md`).
 - Do not revert, overwrite, or clean files you did not intentionally change.
@@ -194,5 +205,6 @@ Consult:
 
 End with the route you took and the documents you loaded, what changed, the
 exact checks you ran, remaining risks or skipped checks, and actionable next
-steps. For commits, include the hash, worktree cleanliness, and any leftover
-changes.
+steps. For commits, include the branch name and whether it is fully committed,
+the commit hashes, the worktree status, and any leftover modified, deleted, or
+untracked files.

@@ -1,9 +1,9 @@
 # Contributing
 
 This is the contributor reference for `cake-repl`: setup, the command catalog,
-code style, verification expectations, and the commit/PR/release workflow. For
-the high-level map see [`ARCHITECTURE.md`](ARCHITECTURE.md); for agent routing
-see [`AGENTS.md`](AGENTS.md).
+code style, verification expectations, and the branch/commit/release workflow.
+For the high-level map see [`ARCHITECTURE.md`](ARCHITECTURE.md); for agent
+routing see [`AGENTS.md`](AGENTS.md).
 
 ## Requirements
 
@@ -29,6 +29,10 @@ verified" before handoff; a `just verify` alias is also available.
 just build          # go build -trimpath -o bin/cake-repl ./cmd/cake-repl
 just run *args      # go run ./cmd/cake-repl
 just install        # go install -trimpath ./cmd/cake-repl
+just branch <type>/<slug>
+                    # create a task branch from up-to-date master
+just integrate <type>/<slug>
+                    # rebase a branch onto master and fast-forward
 just test           # go test ./...
 just test-race      # go test -race -cover ./...
 just test-real-cake # opt-in real-cake smoke test (spawns cake; can cost money)
@@ -137,35 +141,90 @@ Details on the test layout and the fake-cake harness live in
   and it is part of `just ci`. An exported API that is ahead of its caller is a
   finding, not an exception: land the caller or do not land the API.
 
-## Commit & PR workflow
+## Commit Workflow
 
-- Use Conventional Commit prefixes: `feat`, `fix`, `docs`, `style`, `refactor`,
-  `perf`, `test`, `build`, `ci`, `chore`, `revert`. PR titles are checked by the
-  `semantic-pr` workflow, and `conventional-pre-commit` checks commit messages.
+Work happens on a feature branch cut from an up-to-date `master`. One branch
+holds one task; read-only work (audits, research, backlog grooming, `ahm
+prime`) stays on the current branch. There is no pull-request flow: the
+maintainer merges the branch into `master` and pushes `master`. Release prep is
+the exception and commits to `master` (see [Release](#release)).
 
-  ```text
-  feat: add session status command
-  fix: handle malformed stream-json lines
-  docs: update install instructions
-  ```
+The standard sequence:
 
-- PRs should include a short problem/solution summary, the verification
-  commands you ran, and a terminal capture when UI output changes. Keep PRs
-  scoped; do not mix refactors with behavior changes unless required.
-- For multiline commit messages, use a heredoc — not command substitution
-  inside `git commit -m`:
-  ```bash
-  git commit -F - <<'EOF'
-  feat: short summary
+1. Create the branch: `just branch <type>/<slug>`, which syncs `master` first.
+   Use a linked worktree instead when two streams of work run in parallel.
+2. Implement, committing freely on the branch.
+3. Do not push, merge, or delete the branch unless explicitly asked. Hand off
+   the fully committed branch; merging into `master`, pushing `master`, and
+   branch cleanup happen only with explicit permission (see
+   [Integrating A Branch](#integrating-a-branch)).
+4. Hand off with the branch name and whether it is fully committed, the commit
+   hashes, the worktree status, and any remaining modified, deleted, or
+   untracked files.
 
-  Body paragraph with detail.
-  EOF
-  ```
-- A local `pre-commit` config is provided (`.pre-commit-config.yaml`): it runs
-  `fmt-check`, `tidy-check`, `test`, and `lint`.
+Commit messages must use Conventional Commits:
+
+```text
+<type>[(scope)]: <description>
+```
+
+Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`,
+`ci`, `chore`, `revert`. A local `pre-commit` config
+(`.pre-commit-config.yaml`) runs `fmt-check`, `tidy-check`, `test`, and `lint`,
+and `conventional-pre-commit` checks the commit message.
+
+```text
+feat: add session status command
+fix: handle malformed stream-json lines
+docs: update install instructions
+```
+
+For multiline commit messages, use a heredoc — not command substitution inside
+`git commit -m`:
+```bash
+git commit -F - <<'EOF'
+feat: short summary
+
+Body paragraph with detail.
+EOF
+```
+
+## Integrating A Branch
+
+Integration is local; there is no pull request. From a clean `master`,
+`just integrate <type>/<slug>` rebases the branch onto `master` and
+fast-forwards, so `master` stays linear with no merge commits:
+
+```bash
+git switch master
+just integrate feat/timeline-compaction
+just ci
+git push origin master                    # push only with explicit permission
+git branch -d feat/timeline-compaction    # delete only with explicit permission
+```
+
+Integrate one branch at a time. Each run rebases its branch onto the current
+`master`, so overlapping work surfaces as a conflict to resolve in that branch
+rather than a merge to untangle.
+
+The recipe preserves the branch's commits. To land a task as a single commit,
+tidy the branch first with `git switch <branch> && git rebase -i master`,
+squashing the work-in-progress commits, then run `just integrate`. Prefer this
+for agent branches, which commit freely while working.
+
+The recipe refuses to run unless you are on `master`, the worktree is clean,
+the branch exists, and the branch still has commits to integrate. It syncs
+`master` with `git pull --ff-only` before rebasing. A rebase conflict stops it
+mid-rebase on a detached HEAD: resolve each conflict, `git add` the files, run
+`git rebase --continue` (which returns you to the branch), then switch back to
+`master` and rerun `just integrate`. `git rebase --abort` backs the rebase out.
+
+Pushing `master` and deleting the branch are explicit-permission actions.
 
 ## Release
 
+- Release prep is the one exception to branch-first: release commits land on
+  `master` directly, and the `v*` tag is created on `master`.
 - Releases are cut by pushing a `v*` tag; the `Release` workflow runs `just ci`
   then `goreleaser release --clean`.
 - Validate release config locally with `just release-check` before tagging.

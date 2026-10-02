@@ -93,8 +93,10 @@ design plan:
    boundaries, migrations, breaking behavior, or major dependencies. See
    [ExecPlan workflow](exec-plans.md) for `L` and `XL` tasks, and for smaller
    work that is cross-cutting or substantially uncertain.
-4. Implement only the task's problem and acceptance scope. Preserve unrelated
-   worktree changes, and do not commit unless the user explicitly asks.
+4. Create the task branch before the first edit (`just branch <type>/<slug>`)
+   and implement only the task's problem and acceptance scope. Commit freely on
+   the branch. Preserve unrelated worktree changes. Do not push, merge, or
+   delete the branch unless the user explicitly asks.
 5. Run the repository's routed verification commands. Record material results
    and complete the task's Acceptance Notes so the record explains how the
    outcome was verified.
@@ -104,10 +106,10 @@ design plan:
    knowledge may have changed. Record the documents checked and updated, or
    the reason no update was needed, in the Acceptance Notes.
    Do not require documentation changes for every task.
-7. Run `ahm task complete <id>` and provide the repository's required handoff.
-   The `ahm task complete` command must run before any git commit that includes
-   the task's implementation — committing an uncompleted task breaks the
-   lifecycle contract.
+7. Run `ahm task complete <id>` before the handoff commit that finalizes the
+   task, and provide the repository's required handoff. Work-in-progress
+   commits on the branch are expected; the lifecycle rule applies to the
+   handoff commit, not every WIP commit.
 
 ## Change Or Close A Task
 
