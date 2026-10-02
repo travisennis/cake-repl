@@ -20,8 +20,9 @@ updates:
           - "github.com/charmbracelet/*"
         update-types:
           - "patch"
-      # Group all other indirect dependencies into one PR each week.
+      # Group all remaining dependencies into one PR each week.
       indirect:
-        dependency-type: "indirect"
+        patterns:
+          - "*"
         update-types:
           - "patch"
