@@ -24,8 +24,9 @@ consumes cake events. This is the project's core external contract.
   do not rename or repurpose them to match cake's output. `session_meta`
   carries `working_directory` and the optional model identity (`model` is the
   provider model ID, `model_config` the `[[models]]` entry name); `task_start`
-  and `task_complete` gain the same optional pair with cake#664. These fields
-  feed the status-line model under
+  gains the same optional pair with cake#664, and `task_complete` decodes it
+  ahead of any cake that reports it there. These fields feed the status-line
+  model under
   [ADR 014](../adr/014-source-the-status-line-model-from-the-cake-stream.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI + NDJSON stream is

@@ -149,9 +149,9 @@ brief notice instead.
 - The status-line model comes from the stream when cake reports one: replay
   hydration reads `session_meta.model_config` (falling back to
   `session_meta.model`), and a newer cake reports the same optional identity on
-  `task_start` / `task_complete`. Until then the `-model`/config value is shown,
-  which is also what an older cake keeps showing. A new session or a switch to a
-  different `-resume` target drops the reported identity.
+  `task_start`. Until then the `-model`/config value is shown, which is also
+  what an older cake keeps showing. A new session or a switch to a different
+  `-resume` target drops the reported identity.
 - A failed or canceled task with a reported session ID is still pinned, so the
   next prompt continues the session the run left behind instead of starting a
   new one.
