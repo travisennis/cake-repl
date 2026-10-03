@@ -63,7 +63,8 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 
 	for _, entry := range commandTable {
 		if entry.name == name {
-			if entry.kind == CmdResume {
+			switch entry.kind {
+			case CmdResume:
 				if len(args) != 1 {
 					return Command{}, true, fmt.Errorf("usage: /resume <uuid>")
 				}
@@ -71,8 +72,17 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 					return Command{}, true, fmt.Errorf("invalid session uuid: %s", args[0])
 				}
 				return Command{Kind: CmdResume, Arg: strings.ToLower(args[0])}, true, nil
+			case CmdSession:
+				if len(args) == 0 {
+					return Command{Kind: CmdSession}, true, nil
+				}
+				if len(args) == 1 && strings.EqualFold(args[0], "copy") {
+					return Command{Kind: CmdSession, Arg: "copy"}, true, nil
+				}
+				return Command{}, true, fmt.Errorf("usage: /session [copy]")
+			default:
+				return Command{Kind: entry.kind}, true, nil
 			}
-			return Command{Kind: entry.kind}, true, nil
 		}
 	}
 
@@ -87,6 +97,7 @@ const HelpText = `commands
   /resume <uuid>   resume a specific cake session on the next prompt
                    (startup -resume also reloads visible history)
   /session         show session id, task id, cwd, run mode, last result
+  /session copy    copy the full session id to the clipboard
   /clear           clear the timeline (session state is kept)
 
   /new and /resume require an idle REPL

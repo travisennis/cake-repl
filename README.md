@@ -129,6 +129,10 @@ macOS, `xclip`/`xsel` on Linux, and `clip` on Windows. If no assistant message
 has arrived yet, or the clipboard helper is unavailable, the timeline shows a
 brief notice instead.
 
+`/session copy` copies the current cake session's full UUID to the same
+clipboard, so the id can be reused with `-resume` or `-fork` without noting it
+down. The status line and timeline only show it shortened.
+
 ## Slash commands
 
 | Command | Action |
@@ -138,6 +142,7 @@ brief notice instead.
 | `/new` | next prompt starts a fresh cake session |
 | `/resume <uuid>` | next prompt uses `cake --resume <uuid>` |
 | `/session` | show session id, task id, cwd, run mode, last completion |
+| `/session copy` | copy the full session id to the clipboard |
 | `/clear` | clear the timeline (session state is kept) |
 
 ## Session behavior

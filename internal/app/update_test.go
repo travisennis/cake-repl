@@ -399,6 +399,77 @@ func TestCopyLastAssistantReportsClipboardFailure(t *testing.T) {
 	}
 }
 
+func TestSessionCopyCopiesFullSessionID(t *testing.T) {
+	m := newLaidOutModel()
+	const id = "11111111-2222-3333-4444-555555555555"
+	m.session.OnTaskStart(cake.TaskStart{SessionID: id, TaskID: "t-1"})
+
+	var copied string
+	m.clipboard = func(s string) error { copied = s; return nil }
+	tm, cmd := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	got := tm.(Model)
+
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+	if copied != id {
+		t.Errorf("copied = %q, want the full session id", copied)
+	}
+	last := lastItem(t, got)
+	if last.Kind != ui.KindInfo || last.Text != "copied session id to clipboard" {
+		t.Errorf("last item = %+v, want copy confirmation", last)
+	}
+}
+
+func TestSessionCopyFallsBackToResumePin(t *testing.T) {
+	m := newLaidOutModel()
+	const id = "11111111-2222-3333-4444-555555555555"
+	m.session.UseResume(id)
+
+	var copied string
+	m.clipboard = func(s string) error { copied = s; return nil }
+	tm, _ := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	got := tm.(Model)
+
+	if copied != id {
+		t.Errorf("copied = %q, want the resume pin %q", copied, id)
+	}
+	if last := lastItem(t, got); last.Kind != ui.KindInfo {
+		t.Errorf("last item = %+v, want copy confirmation", last)
+	}
+}
+
+func TestSessionCopyWithoutSessionIDWarns(t *testing.T) {
+	m := newLaidOutModel()
+
+	var called bool
+	m.clipboard = func(string) error { called = true; return nil }
+	tm, _ := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	got := tm.(Model)
+
+	if called {
+		t.Error("clipboard was written with no session id to copy")
+	}
+	last := lastItem(t, got)
+	if last.Kind != ui.KindWarning || last.Text != "no session id to copy" {
+		t.Errorf("last item = %+v, want no-session warning", last)
+	}
+}
+
+func TestSessionCopyReportsClipboardFailure(t *testing.T) {
+	m := newLaidOutModel()
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "s-1", TaskID: "t-1"})
+
+	m.clipboard = func(string) error { return fmt.Errorf("pbcopy not found") }
+	tm, _ := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	got := tm.(Model)
+
+	last := lastItem(t, got)
+	if last.Kind != ui.KindError || !strings.Contains(last.Text, "copy failed: pbcopy not found") {
+		t.Errorf("last item = %+v, want copy-failure error item", last)
+	}
+}
+
 func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Model = "gpt-x"

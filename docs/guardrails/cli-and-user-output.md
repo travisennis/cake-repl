@@ -25,8 +25,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   project-local config < CLI flags. Session-specific values must stay out of
   config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
-  `/session`, `/clear`. Keep parsing, behavior, and names stable. `/new` and
-  `/resume` require an idle REPL; `Ctrl+N`
+  `/session [copy]`, `/clear`. Keep parsing, behavior, and names stable. `/new`
+  and `/resume` require an idle REPL; `Ctrl+N`
   remains the cancel-and-reset operation during an active run.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
@@ -102,6 +102,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   automatically. The outcome is reported as a timeline item: an info notice
   with the copied character count on success, a warning when no assistant
   response exists yet, or an error when the clipboard helper fails.
+  `/session copy` uses the same helper and reporting to copy the full session
+  UUID instead, so the id can be reused for `-resume`/`-fork` while the status
+  line and timeline keep the shortened form (a warning when the REPL knows
+  neither a reported session id nor a resume pin yet).
 - **Inline rendering.** `-inline` (ADR 015) omits the alternate screen and
   renders the live region below the terminal height, so recent terminal
   history stays visible above the REPL. The timeline viewport is capped

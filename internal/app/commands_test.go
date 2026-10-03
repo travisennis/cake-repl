@@ -58,6 +58,32 @@ func TestParseCommandResumeInvalidUUID(t *testing.T) {
 	}
 }
 
+func TestParseCommandSessionCopy(t *testing.T) {
+	cmd, ok, err := ParseCommand("/session copy")
+	if !ok || err != nil {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if cmd.Kind != CmdSession || cmd.Arg != "copy" {
+		t.Errorf("unexpected: %+v", cmd)
+	}
+
+	if _, ok, err := ParseCommand("/SESSION COPY"); !ok || err != nil {
+		t.Errorf("case-insensitive copy should parse, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestParseCommandSessionRejectsOtherArgs(t *testing.T) {
+	for _, in := range []string{"/session show", "/session copy extra"} {
+		_, ok, err := ParseCommand(in)
+		if !ok {
+			t.Errorf("%q should be recognized as a command attempt", in)
+		}
+		if err == nil {
+			t.Errorf("%q should return an error", in)
+		}
+	}
+}
+
 func TestParseCommandUnknown(t *testing.T) {
 	_, ok, err := ParseCommand("/frobnicate")
 	if !ok || err == nil {

@@ -343,6 +343,26 @@ func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// copySessionID copies the full cake session UUID to the system clipboard so
+// the id can be reused for -resume or -fork without leaving the REPL. The
+// status line and timeline only show it shortened; this is the on-demand way
+// to get the whole value. The id comes from SessionData, so it honors the
+// resume pin before the first task reports one. Like copyLastAssistant it is a
+// one-shot best-effort write with visible feedback.
+func (m Model) copySessionID() (tea.Model, tea.Cmd) {
+	id, _ := m.SessionData()
+	if id == "" {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "no session id to copy"})
+		return m, nil
+	}
+	if err := m.clipboard(id); err != nil {
+		m.appendItem(ui.Item{Kind: ui.KindError, Text: "copy failed: " + err.Error()})
+		return m, nil
+	}
+	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "copied session id to clipboard"})
+	return m, nil
+}
+
 // handleTabComplete implements Tab key completion with cycling.
 func (m Model) handleTabComplete() (tea.Model, tea.Cmd) {
 	input := m.input.Value()
@@ -479,6 +499,9 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt resumes session " + cmd.Arg})
 
 	case CmdSession:
+		if cmd.Arg == "copy" {
+			return m.copySessionID()
+		}
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.sessionInfo()})
 
 	case CmdClear:
