@@ -70,6 +70,14 @@ selects that working directory; otherwise cake-repl uses the directory where it
 was started. Relative `-add-dir` paths resolve against that working directory,
 and cake ignores paths that do not exist or are not directories.
 
+By default cake-repl renders in the alternate screen, which restores the
+terminal's previous contents on exit but hides them while the REPL runs.
+`-inline` renders below the terminal height instead: recent terminal history
+stays visible above the REPL, the timeline is capped to a bounded region (at
+most about half the window), and exiting erases the composer and status rows so
+the timeline region, the resume message, and the shell prompt sit next to each
+other. The alternate screen stays the default.
+
 Flags:
 
 | Flag | Meaning |
@@ -89,6 +97,7 @@ Flags:
 | `-skills <names>` | load only the specified comma-separated skill names |
 | `-system-prompt <path>` | use a custom cake system prompt file |
 | `-cwd <path>` | run cake from this directory (default: current directory) |
+| `-inline` | render below the terminal height instead of the alternate screen, keeping recent terminal history visible above the REPL |
 | `-no-color` | disable styling |
 | `-debug-log <path>` | append cake-repl diagnostics (raw stream lines, skipped events, exits) to a file |
 | `-history-file <path>` | persist prompt history across restarts into this file |
@@ -270,3 +279,10 @@ validation is available with `just release-check`.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
+- `-inline` keeps the transcript in the REPL's own viewport rather than the
+  terminal scrollback, so terminal search and copy do not reach it, and the
+  live region is capped (at most about half the window), so a long
+  conversation is scrolled with `PgUp`/`PgDn`. Mouse reporting stays on, so
+  the wheel scrolls the timeline and terminal history is reachable through the
+  terminal's own scrollback keys (Shift+PgUp / Shift+wheel, terminal-
+  dependent).

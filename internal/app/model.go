@@ -43,6 +43,10 @@ type Config struct {
 	HistoryFile      string
 	OutputLimit      int
 	MaxTimelineItems int
+	// Inline renders the live region below the terminal height instead of in
+	// the alternate screen, so recent terminal history stays visible above the
+	// REPL. See ADR 015.
+	Inline bool
 }
 
 const (
@@ -53,6 +57,11 @@ const (
 	statusHeight             = 1
 	maxHistoryEntries        = 1000
 	jsonlPrefix              = "\x02" // per-record marker for JSONL entries
+
+	// inlineViewportMax caps the timeline viewport in inline mode so the live
+	// region never grows tall enough to push the terminal's own history out of
+	// the visible window (ADR 015).
+	inlineViewportMax = 12
 )
 
 // Model is the Bubble Tea model for the whole REPL.
@@ -488,7 +497,7 @@ func (m *Model) layout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
-	inputHeight := clamp(m.input.LineCount(), minInputHeight, maxInputHeight)
+	inputHeight := inputHeightFor(m.input.LineCount())
 	inputWidth := m.width - composerHorizontalChrome
 	if inputWidth < 1 {
 		inputWidth = 1
@@ -497,6 +506,9 @@ func (m *Model) layout() {
 	m.input.SetHeight(inputHeight)
 
 	vpHeight := m.height - inputHeight - composerVerticalChrome - statusHeight
+	if m.cfg.Inline {
+		vpHeight = inlineViewportHeight(m.height, inputHeight)
+	}
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
@@ -519,12 +531,46 @@ func (m *Model) layout() {
 	}
 }
 
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
+// inputHeightFor returns the composer textarea height for a prompt of n lines:
+// at least minInputHeight rows so the composer keeps its shape, at most
+// maxInputHeight so a long paste cannot swallow the timeline.
+func inputHeightFor(n int) int {
+	if n < minInputHeight {
+		return minInputHeight
 	}
-	if v > hi {
-		return hi
+	if n > maxInputHeight {
+		return maxInputHeight
 	}
-	return v
+	return n
+}
+
+// inlineViewportHeight returns the timeline viewport height in inline mode: the
+// full-height viewport capped at inlineViewportMax and at half the terminal, so
+// the live region below never takes more than half the window and recent
+// terminal history stays visible above the REPL. It returns at least 1 so the
+// timeline is never zero-height, even on a terminal too short for the cap.
+func inlineViewportHeight(height, inputHeight int) int {
+	vp := height - inputHeight - composerVerticalChrome - statusHeight
+	if vp > inlineViewportMax {
+		vp = inlineViewportMax
+	}
+	if half := height/2 - inputHeight - composerVerticalChrome - statusHeight; vp > half {
+		vp = half
+	}
+	if vp < 1 {
+		vp = 1
+	}
+	return vp
+}
+
+// ComposerRows returns the number of rows the composer occupies in the last
+// rendered frame: the textarea height plus its borders. In inline mode main
+// erases those rows once the program returns, so the terminal is left with the
+// timeline region and the shell prompt rather than a stale input box. It is 0
+// before the first layout, when no composer has been rendered.
+func (m Model) ComposerRows() int {
+	if !m.ready {
+		return 0
+	}
+	return inputHeightFor(m.input.LineCount()) + composerVerticalChrome
 }

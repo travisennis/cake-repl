@@ -211,6 +211,96 @@ func TestLayoutAccountsForPromptComposerChrome(t *testing.T) {
 	}
 }
 
+func TestInlineLayoutKeepsHistoryVisible(t *testing.T) {
+	tests := []struct {
+		name   string
+		width  int
+		height int
+		lines  int
+	}{
+		{name: "80x24", width: 80, height: 24},
+		{name: "100x40", width: 100, height: 40},
+		{name: "80x24 tall prompt", width: 80, height: 24, lines: maxInputHeight + 2},
+		{name: "60x12 short terminal", width: 60, height: 12},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := New(Config{Inline: true})
+			m.width, m.height = tt.width, tt.height
+			if tt.lines > 0 {
+				m.input.SetValue(strings.Repeat("line\n", tt.lines))
+			}
+			m.layout()
+
+			inputHeight := inputHeightFor(m.input.LineCount())
+			region := m.timeline.Height + inputHeight + composerVerticalChrome + statusHeight
+			if half := tt.height / 2; region > half && m.timeline.Height > 1 {
+				t.Errorf("live region = %d rows, want at most half of %d", region, tt.height)
+			}
+			if history := tt.height - region; history < 1 {
+				t.Errorf("history rows above the region = %d, want at least 1", history)
+			}
+			if got := len(strings.Split(m.View(), "\n")); got != region {
+				t.Errorf("view height = %d lines, want live region %d", got, region)
+			}
+		})
+	}
+}
+
+func TestInlineLayoutCapsViewportHeight(t *testing.T) {
+	m := New(Config{Inline: true})
+	m.width, m.height = 80, 60
+	m.layout()
+	if want := inlineViewportMax; m.timeline.Height != want {
+		t.Fatalf("tall-terminal inline timeline height = %d, want cap %d", m.timeline.Height, want)
+	}
+}
+
+func TestInlineLayoutRecomputesOnResize(t *testing.T) {
+	m := New(Config{Inline: true})
+	m.width, m.height = 80, 24
+	m.layout()
+	initial := m.timeline.Height
+
+	// Growing the terminal must grow the capped region, not leave the old one.
+	m.width, m.height = 100, 40
+	m.layout()
+	if m.timeline.Height <= initial {
+		t.Fatalf("timeline height after growing = %d, want more than %d", m.timeline.Height, initial)
+	}
+
+	// Shrinking must leave the capped region within the terminal and at least
+	// one row of history above it.
+	m.width, m.height = 60, 12
+	m.layout()
+	inputHeight := inputHeightFor(m.input.LineCount())
+	region := m.timeline.Height + inputHeight + composerVerticalChrome + statusHeight
+	if history := m.height - region; history < 1 {
+		t.Errorf("history rows above the region after shrinking = %d, want at least 1", history)
+	}
+	if got := len(strings.Split(m.View(), "\n")); got != region {
+		t.Errorf("view height after resize = %d lines, want live region %d", got, region)
+	}
+}
+
+func TestComposerRowsTracksInputHeight(t *testing.T) {
+	var fresh Model
+	if got := fresh.ComposerRows(); got != 0 {
+		t.Errorf("ComposerRows before first layout = %d, want 0", got)
+	}
+
+	m := newLaidOutModel()
+	if got, want := m.ComposerRows(), minInputHeight+composerVerticalChrome; got != want {
+		t.Errorf("ComposerRows = %d, want %d", got, want)
+	}
+
+	m.input.SetValue(strings.Repeat("line\n", maxInputHeight+2))
+	m.layout()
+	if got, want := m.ComposerRows(), maxInputHeight+composerVerticalChrome; got != want {
+		t.Errorf("ComposerRows with tall prompt = %d, want %d", got, want)
+	}
+}
+
 func TestAppendItemExtendsRenderCacheWithoutRebuild(t *testing.T) {
 	m := newLaidOutModel()
 	before := len(m.rendered)

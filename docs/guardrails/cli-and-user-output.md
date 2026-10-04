@@ -11,7 +11,7 @@ commands or help text (`internal/app/commands.go`), key bindings
   `-no-session`, `-model`, `-profile`, `-tools <names>`, `-no-tools`,
   `-add-dir <dir>` (repeatable), `-toolbox <dir>` (repeatable),
   `-sandbox <policy>`, `-no-skills`, `-skills <names>`,
-  `-system-prompt <path>`, `-cwd`, `-no-color`, `-debug-log`,
+  `-system-prompt <path>`, `-cwd`, `-inline`, `-no-color`, `-debug-log`,
   `-history-file`, `-config <path>`, `-no-config`, `-output-limit <n>`,
   `-max-timeline-items <n>`, `-version`. Names, defaults, and validation
   (mutually exclusive `-fork`/`-resume`, mutually exclusive
@@ -102,12 +102,25 @@ commands or help text (`internal/app/commands.go`), key bindings
   automatically. The outcome is reported as a timeline item: an info notice
   with the copied character count on success, a warning when no assistant
   response exists yet, or an error when the clipboard helper fails.
+- **Inline rendering.** `-inline` (ADR 015) omits the alternate screen and
+  renders the live region below the terminal height, so recent terminal
+  history stays visible above the REPL. The timeline viewport is capped
+  (at most `inlineViewportMax` rows and at most half the terminal), and once
+  the program returns `main` erases the composer rows — TTY-guarded, like the
+  title reset — so the timeline region, the resume message, and the shell
+  prompt are adjacent. The alternate screen remains the default. Mouse
+  reporting stays on, so the wheel scrolls the timeline and terminal history is
+  reachable through the terminal's own scrollback keys.
 
 ## Required checks / test focus
 
 - `just test` (covers `commands_test.go`, `update_test.go`, `status_test.go`,
   `toolblock_test.go`). Add cases for new flags, commands, or render kinds.
 - For UI/output changes, capture a terminal screenshot for the handoff.
+- For inline-mode changes, drive the real binary in a terminal at 80x24 and
+  after a resize: check that history stays visible above the region, that the
+  region respects the cap, and that exit leaves the timeline region and no
+  composer rows. No test drives a terminal, so this capture is the evidence.
 - Manually sanity-check with `just run -no-color` when touching theming.
 
 ## Common failure modes

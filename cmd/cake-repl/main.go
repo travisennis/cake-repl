@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 	"github.com/travisennis/cake-repl/internal/app"
 	"github.com/travisennis/cake-repl/internal/cake"
@@ -166,6 +167,7 @@ func run() (err error) {
 	skills := flag.String("skills", "", "comma-separated skill names passed through to cake")
 	systemPrompt := flag.String("system-prompt", "", "path to a custom cake system prompt file")
 	cwd := flag.String("cwd", "", "working directory to run cake from (default: current directory)")
+	inline := flag.Bool("inline", false, "render inline: keep recent terminal history visible above the REPL instead of using the alternate screen")
 	noColor := flag.Bool("no-color", false, "disable styling")
 	debugLog := flag.String("debug-log", "", "write cake-repl debug output to this file")
 	historyFile := flag.String("history-file", "", "path to persist prompt history across restarts (default: no persistence)")
@@ -247,6 +249,7 @@ func run() (err error) {
 		HistoryFile:      *historyFile,
 		OutputLimit:      *outputLimit,
 		MaxTimelineItems: *maxTimelineItems,
+		Inline:           *inline,
 	}
 
 	// Apply config file values for fields not explicitly set via CLI.
@@ -287,13 +290,25 @@ func run() (err error) {
 		cfg.DebugLog = &syncWriter{w: f}
 	}
 
-	p := tea.NewProgram(app.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	// Inline mode renders in the normal buffer so recent terminal history stays
+	// visible above the REPL; the alternate screen restores the terminal on exit
+	// but hides that history for the whole session (ADR 015).
+	opts := []tea.ProgramOption{tea.WithMouseCellMotion()}
+	if !*inline {
+		opts = append(opts, tea.WithAltScreen())
+	}
+	p := tea.NewProgram(app.New(cfg), opts...)
 	m, err := p.Run()
 	mod, ok := m.(app.Model)
 	if ok {
 		// CancelRunning is a no-op unless a run was still in flight, which is
 		// exactly the case for a quit that never reached the model.
 		mod.CancelRunning()
+		if *inline {
+			// Inline mode leaves the timeline on the terminal; drop the composer
+			// rows so the shell prompt is not preceded by a stale input box.
+			eraseInlineComposer(mod.ComposerRows())
+		}
 	}
 	// The title reset does not go through the model: a panic in Update or View
 	// returns no model at all, and that exit must still drop a working marker.
@@ -310,6 +325,29 @@ func run() (err error) {
 	return nil
 }
 
+// eraseInlineComposer clears the composer rows that inline mode leaves on the
+// terminal once Bubble Tea returns. The renderer erases the status line (the
+// last frame row) on its own, so removing the composer above it leaves the
+// timeline region, the resume message, and the shell prompt adjacent. Writes
+// only to a terminal, never into redirected output, matching
+// resetTerminalTitle.
+func eraseInlineComposer(rows int) {
+	if rows <= 0 || !stdoutIsTerminal() {
+		return
+	}
+	fmt.Fprint(os.Stdout, inlineComposerCleanup(rows))
+}
+
+// inlineComposerCleanup returns the sequence that erases the composer rows of
+// an inline-mode exit: the cursor moves up to the composer's first row and
+// everything from there down is erased.
+func inlineComposerCleanup(rows int) string {
+	if rows <= 0 {
+		return ""
+	}
+	return ansi.CursorUp(rows) + ansi.EraseScreenBelow
+}
+
 // resetTerminalTitle writes the idle terminal title once the program has
 // returned. The model cannot do it for exits it never observes: Bubble Tea
 // returns on SIGINT or SIGTERM without running Update, and a panic in Update or
@@ -317,8 +355,15 @@ func run() (err error) {
 // either path. Redirected stdout is left untouched, so the escape never lands
 // in a file or a pipe.
 func resetTerminalTitle(cwd string) {
-	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+	if !stdoutIsTerminal() {
 		return
 	}
 	fmt.Fprint(os.Stdout, app.IdleTitleSequence(cwd))
+}
+
+// stdoutIsTerminal reports whether stdout is a character device, so terminal
+// control sequences are never written into redirected output.
+func stdoutIsTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

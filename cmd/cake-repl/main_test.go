@@ -162,6 +162,15 @@ func TestResumeUUIDIsSessionID(t *testing.T) {
 	}
 }
 
+func TestInlineComposerCleanup(t *testing.T) {
+	if got := inlineComposerCleanup(0); got != "" {
+		t.Errorf("inlineComposerCleanup(0) = %q, want empty", got)
+	}
+	if got, want := inlineComposerCleanup(5), "\x1b[5A\x1b[J"; got != want {
+		t.Errorf("inlineComposerCleanup(5) = %q, want %q", got, want)
+	}
+}
+
 func TestNormalizeForkArgs(t *testing.T) {
 	tests := []struct {
 		name string
