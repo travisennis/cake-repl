@@ -1,6 +1,6 @@
 {
   "version": "0.6.3",
-  "strict_acceptance": false,
+  "strict_acceptance": true,
   "tasks_location": "home",
   "files": {}
 }

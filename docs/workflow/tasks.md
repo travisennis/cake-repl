@@ -131,9 +131,10 @@ indexes remain consistent.
 
 Before completion, replace placeholder or unchecked Acceptance Notes with the
 actual outcome and verification. `ahm task complete` warns about incomplete
-acceptance notes. Set `"strict_acceptance": true` in `.ahm/config.json` to block
-completion unless the issue is fixed or `--force` is explicitly used. The
-command moves the task, updates eligible dependents, and regenerates indexes.
+acceptance notes, and this repository sets `"strict_acceptance": true` in
+`.ahm/config.json`, so it blocks completion unless the issue is fixed or
+`--force` is explicitly used. The command moves the task, updates eligible
+dependents, and regenerates indexes.
 
 Cancellation requires a reason. `ahm task cancel` records it, moves the task,
 and regenerates indexes.
