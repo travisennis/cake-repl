@@ -43,6 +43,9 @@ type Config struct {
 	HistoryFile      string
 	OutputLimit      int
 	MaxTimelineItems int
+	// ToolColor lets tool output keep its own ANSI color instead of rendering
+	// plain. Off by default; see ADR 009.
+	ToolColor bool
 	// Inline renders the live region below the terminal height instead of in
 	// the alternate screen, so recent terminal history stays visible above the
 	// REPL. See ADR 015.
@@ -123,6 +126,7 @@ type Model struct {
 // New builds the initial model.
 func New(cfg Config) Model {
 	th := ui.DefaultTheme()
+	th.ToolColor = cfg.ToolColor
 
 	input := textarea.New()
 	input.Placeholder = "Type a prompt…"

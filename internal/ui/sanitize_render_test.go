@@ -263,6 +263,88 @@ func TestStatusLine_StripsControlSequences(t *testing.T) {
 	}
 }
 
+// TestRenderItem_ToolColor covers the opt-in SGR passthrough (ADR 009) at the
+// render boundary: color survives only when ToolColor is set under a color
+// profile, only in tool output, and an embedded reset reopens the enclosing
+// style instead of letting the theme bleed.
+func TestRenderItem_ToolColor(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+
+	th := DefaultTheme()
+	th.ToolColor = true
+	block := &ToolBlock{
+		Name:      "bash",
+		Arguments: `{"command":"ls"}`,
+		Output:    "\x1b[31mred\x1b[0m \x1b[2Jplain",
+		Done:      true,
+	}
+
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	got := RenderItem(th, Item{Kind: KindTool, Tool: block}, 60, DefaultOutputLimit, ToolOutputTruncated)
+	if !strings.Contains(got, "\x1b[31mred") {
+		t.Errorf("tool color not passed through: %q", got)
+	}
+	if strings.Contains(got, "\x1b[2J") {
+		t.Errorf("erase-display survived tool color passthrough: %q", got)
+	}
+	// th.ToolOutput is Faint(true); after the embedded reset its opening
+	// sequence must be re-emitted so the theme resumes for the rest of the line.
+	if !strings.Contains(got, "\x1b[0m\x1b[2m") {
+		t.Errorf("enclosing style not re-emitted after reset: %q", got)
+	}
+
+	// A reset carried inside a longer sequence (as GNU tools emit, e.g.
+	// "\x1b[0;31m") clears the enclosing style too, so the theme must resume
+	// after it just the same.
+	multi := &ToolBlock{Name: "bash", Arguments: `{"command":"ls"}`, Output: "a\x1b[0;31mb", Done: true}
+	got = RenderItem(th, Item{Kind: KindTool, Tool: multi}, 60, DefaultOutputLimit, ToolOutputTruncated)
+	if !strings.Contains(got, "\x1b[0;31m\x1b[2m") {
+		t.Errorf("enclosing style not re-emitted after multi-param reset: %q", got)
+	}
+
+	// The flag is ignored when the profile cannot show color, so -no-color and
+	// a redirected terminal always get plain text.
+	lipgloss.SetColorProfile(termenv.Ascii)
+	got = RenderItem(th, Item{Kind: KindTool, Tool: block}, 60, DefaultOutputLimit, ToolOutputTruncated)
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("escapes survived under the Ascii profile: %q", got)
+	}
+}
+
+// TestRenderItem_ToolColorIsToolOutputOnly checks that enabling tool color
+// leaves every other item kind stripped: only the tool output block is allowed
+// to keep SGR.
+func TestRenderItem_ToolColorIsToolOutputOnly(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	th := DefaultTheme()
+	th.ToolColor = true
+	const mark = "\x1b[38;5;196mmarker" // a bright red the theme never uses
+	for _, kind := range []Kind{KindError, KindWarning, KindHook, KindInfo, KindReasoning, KindUser} {
+		got := RenderItem(th, Item{Kind: kind, Text: mark}, 60, DefaultOutputLimit, ToolOutputTruncated)
+		if strings.Contains(got, "\x1b[38;5;196m") {
+			t.Errorf("kind %d kept stream escapes with tool color on: %q", kind, got)
+		}
+	}
+}
+
+// TestTruncateOutputDropsPartialEscape guards the interaction between the byte
+// cut and kept SGR: a cut that lands inside a sequence must not leave a
+// dangling prefix for the truncation marker to fall into.
+func TestTruncateOutputDropsPartialEscape(t *testing.T) {
+	in := "aaaa\x1b[31mbbbb"
+	got := TruncateOutput(in, 6)
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("partial escape survived truncation: %q", got)
+	}
+	if !strings.HasPrefix(got, "aaaa\n… truncated") {
+		t.Errorf("unexpected truncated output: %q", got)
+	}
+}
+
 // TestRenderItem_AssistantSanitizedBeforeMarkdown documents that the
 // assistant path no longer relies on glamour to discard escapes: the text
 // handed to glamour is already sanitized, and normal markdown still renders.

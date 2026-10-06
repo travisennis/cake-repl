@@ -20,6 +20,7 @@ type Config struct {
 	OutputLimit      int    `toml:"output-limit"`
 	MaxTimelineItems int    `toml:"max-timeline-items"`
 	CakeBin          string `toml:"cake-bin"`
+	ToolColor        bool   `toml:"tool-color"`
 }
 
 // DefaultPaths returns the XDG config path and the project-local config path.
@@ -75,6 +76,9 @@ func Merge(dst, src *Config) *Config {
 	}
 	if src.CakeBin != "" {
 		dst.CakeBin = src.CakeBin
+	}
+	if src.ToolColor {
+		dst.ToolColor = true
 	}
 	return dst
 }

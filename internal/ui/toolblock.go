@@ -130,7 +130,9 @@ func summarizeWrite(argsJSON string) string {
 //
 // It does not sanitize: callers pass already-[Sanitize]d text, so the reported
 // size is that of the sanitized output and the byte budget is spent on
-// characters the user can actually see.
+// characters the user can actually see. A cut that lands inside a kept SGR
+// sequence (possible only when tool color is enabled) has its dangling prefix
+// dropped, so the marker that follows is never swallowed by an open sequence.
 func TruncateOutput(s string, limit int) string {
 	s = strings.TrimRight(s, "\n")
 	if limit <= 0 {
@@ -145,6 +147,7 @@ func TruncateOutput(s string, limit int) string {
 	if i := strings.LastIndexByte(cut, '\n'); i > limit/2 {
 		cut = cut[:i]
 	}
+	cut = trimPartialEscape(cut)
 	return cut + fmt.Sprintf("\n… truncated (%d bytes total)", original)
 }
 

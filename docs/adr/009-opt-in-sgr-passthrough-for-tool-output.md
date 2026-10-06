@@ -9,13 +9,18 @@ decision-makers: Travis Ennis
 
 ADR 005 strips every ANSI sequence unconditionally at the render boundary, so
 tool output renders flat: `git diff --color`, compiler and test-runner
-diagnostics, `rg`, and `eza` lose the information their color carries. SGR
+diagnostics invoked with color forced, `rg --color=always`, and `eza` with
+color forced lose the information their color carries. SGR
 (`CSI ... m`) only sets graphics rendition — it cannot move the cursor, clear
 the screen, write the clipboard (`OSC 52`), or forge hyperlinks (`OSC 8`) —
 and both `lipgloss.Width` and `ansi.StringWidth` ignore it, so it cannot
 reintroduce the width desynchronization ADR 005 closed. The real blocker is
 styling composition: a stream-embedded reset terminates the enclosing lipgloss
 style mid-block.
+
+cake runs tool commands with piped stdout, so a tool that auto-detects a
+terminal emits no SGR at all and there is nothing to pass through; the gain is
+concentrated in commands that force color.
 
 ## Decision Drivers
 
@@ -40,13 +45,14 @@ Chosen option: **2, opt-in, tool output only.**
 
 A new `-tool-color` flag (config key `tool-color`, default `false`) enables
 SGR passthrough for tool output blocks only. When disabled, behavior is
-exactly ADR 005. When enabled, `ui.Sanitize` parses the stream with the
-`x/ansi` parser and keeps only `CSI ... m` with validated numeric parameters;
-OSC, DCS, APC, and all cursor/erase CSI finals remain stripped; parameters
-outside a known-safe SGR set are rejected. Embedded resets (`CSI 0 m`,
-`CSI 39/49 m`) re-emit the enclosing lipgloss style so the theme does not bleed
-out of the block. `-no-color` / `termenv.Ascii` force stripping regardless of
-the flag.
+exactly ADR 005. When enabled, `ui.SanitizeToolOutput` parses the stream with
+the `x/ansi` parser and keeps only `CSI ... m` with validated numeric
+parameters; OSC, DCS, APC, and all cursor/erase CSI finals remain stripped;
+parameters outside a known-safe SGR set are rejected. Embedded resets
+(`CSI 0 m`, `CSI 39/49 m`, including a reset parameter inside a longer sequence
+such as `CSI 0 ; 31 m`) re-emit the enclosing lipgloss style so the theme does
+not bleed out of the block. `-no-color` / `termenv.Ascii` force stripping
+regardless of the flag.
 
 This supersedes in part ADR 005's unconditional-strip decision; the
 session-and-security guardrail's "no opt-out" failure mode is amended to "no
@@ -68,4 +74,9 @@ implicit opt-out".
 - Task 073.
 - [ADR 005](005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
 - `internal/ui/sanitize.go`, `internal/ui/timeline.go` (`renderTool`).
+
+Implemented by task 073. The passthrough lives in `ui.SanitizeToolOutput`, and
+the reviewed parameter set is narrower than SGR as a whole: blink and conceal
+are rejected (they add no information, and concealment can hide text), as are
+font selection and other terminal-specific codes.
 

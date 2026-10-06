@@ -45,6 +45,115 @@ func TestSanitize(t *testing.T) {
 	}
 }
 
+// TestSanitizeToolOutput pins the tool-color passthrough (ADR 009): with
+// keepSGR true only reviewed SGR sequences survive, every other escape family
+// is still dropped, and an embedded reset is followed by the enclosing style's
+// opening sequence so the theme resumes instead of bleeding out.
+func TestSanitizeToolOutput(t *testing.T) {
+	const open = "\x1b[2m" // the enclosing faint style's opening sequence
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"keeps basic color", "\x1b[31mred\x1b[0m", "\x1b[31mred\x1b[0m" + open},
+		{"keeps 256-color", "\x1b[38;5;196mX", "\x1b[38;5;196mX"},
+		{"keeps truecolor", "\x1b[48;2;1;2;3mY", "\x1b[48;2;1;2;3mY"},
+		{"keeps underline color", "\x1b[58;5;10mU", "\x1b[58;5;10mU"},
+		{"keeps multi-parameter", "\x1b[1;31mZ", "\x1b[1;31mZ"},
+		{"keeps plain text", "plain output\nline two", "plain output\nline two"},
+		{"re-emits after 0 reset", "a\x1b[0mb", "a\x1b[0m" + open + "b"},
+		{"re-emits after bare csi m", "a\x1b[mb", "a\x1b[m" + open + "b"},
+		{"re-emits after default fg", "a\x1b[39mb", "a\x1b[39m" + open + "b"},
+		{"re-emits after default bg", "a\x1b[49mb", "a\x1b[49m" + open + "b"},
+		{"re-emits after reset in a multi-param sequence", "a\x1b[0;31mb", "a\x1b[0;31m" + open + "b"},
+		{"re-emits after default colors in one sequence", "a\x1b[39;49mb", "a\x1b[39;49m" + open + "b"},
+		{"no re-emit after a color", "a\x1b[31mb", "a\x1b[31mb"},
+		{"no re-emit after a multi-param color", "a\x1b[1;31mb", "a\x1b[1;31mb"},
+		{"no re-emit for color index zero", "a\x1b[38;5;0mb", "a\x1b[38;5;0mb"},
+		{"no re-emit for black truecolor", "a\x1b[38;2;0;0;0mb", "a\x1b[38;2;0;0;0mb"},
+		{"drops erase display", "a\x1b[2Jb", "ab"},
+		{"drops cursor move", "a\x1b[1;1Hb", "ab"},
+		{"drops clipboard write", "a\x1b]52;c;aGF4\x07b", "ab"},
+		{"drops hyperlink", "a\x1b]8;;https://e\x07x\x1b]8;;\x07b", "axb"},
+		{"drops dcs", "a\x1bP1;2q\x1b\\b", "ab"},
+		{"drops apc", "a\x1b_Gm\x1b\\b", "ab"},
+		{"drops private-prefix csi", "a\x1b[?25lb", "ab"},
+		{"drops 8-bit csi", "a\x9b31mb", "ab"},
+		{"drops incomplete trailing sgr", "a\x1b[38;5;19", "a"},
+		{"rejects blink", "a\x1b[5mb", "ab"},
+		{"rejects conceal", "a\x1b[8mb", "ab"},
+		{"rejects font selection", "a\x1b[10mb", "ab"},
+		{"rejects overline", "a\x1b[53mb", "ab"},
+		{"rejects superscript", "a\x1b[73mb", "ab"},
+		{"rejects out-of-range 256-color", "a\x1b[38;5;300mb", "ab"},
+		{"rejects malformed extended color", "a\x1b[38;5mb", "ab"},
+		{"expands tabs", "\ta", "        a"},
+		{"drops carriage return", "a\rb", "ab"},
+		{"mixture keeps sgr and drops the rest", "\x1b[1;32mok\x1b[0m\x1b[2J\x1b]52;c;x\x07", "\x1b[1;32mok\x1b[0m" + open},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SanitizeToolOutput(tt.in, true, open); got != tt.want {
+				t.Errorf("SanitizeToolOutput(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+	// An empty enclosing sequence re-emits nothing, so the reset stands alone.
+	if got := SanitizeToolOutput("a\x1b[0mb", true, ""); got != "a\x1b[0mb" {
+		t.Errorf("SanitizeToolOutput with empty open = %q, want %q", got, "a\x1b[0mb")
+	}
+}
+
+// TestSanitizeToolOutputDisabledMatchesSanitize guards the default path: with
+// keepSGR false, tool output is sanitized exactly as every other surface.
+func TestSanitizeToolOutputDisabledMatchesSanitize(t *testing.T) {
+	for _, in := range []string{
+		"",
+		"\x1b[31mred\x1b[0m",
+		"\x1b]52;c;aGF4\x07\r\n",
+		"tab\there\nnext",
+		"wide 日本語\temoji 👍",
+	} {
+		if got, want := SanitizeToolOutput(in, false, "\x1b[2m"), Sanitize(in); got != want {
+			t.Errorf("SanitizeToolOutput(%q, false) = %q, want Sanitize = %q", in, got, want)
+		}
+	}
+}
+
+// TestSanitizeToolOutputKeepsWidthHonest checks the invariant the padding math
+// depends on: a kept sequence is zero-width to the terminal and to width
+// measurement, so SGR passthrough cannot desync a line.
+func TestSanitizeToolOutputKeepsWidthHonest(t *testing.T) {
+	got := SanitizeToolOutput("\x1b[31mred\x1b[0m\x1b[2J plain", true, "\x1b[2m")
+	if strings.Contains(got, "\x1b[2J") {
+		t.Fatalf("erase-display survived: %q", got)
+	}
+	if w, want := lipgloss.Width(got), lipgloss.Width("red plain"); w != want {
+		t.Errorf("width = %d, want %d for %q", w, want, got)
+	}
+}
+
+// TestSanitizeToolOutputEscapeFreeMatchesSanitize pins the property that makes
+// passthrough safe to reason about: for input with no escape sequences, the
+// enabled path is byte-for-byte Sanitize, so enabling color cannot change how
+// ordinary text or stray bytes render.
+func TestSanitizeToolOutputEscapeFreeMatchesSanitize(t *testing.T) {
+	for _, in := range []string{
+		"plain output\nwith a tab\tstop",
+		"stray high byte a\xffb",
+		"two stray bytes a\xff\xfeb",
+		"truncated lead byte a\xc2",
+		"lone c1 byte bad\x80byte",
+		"wide 日本語 and emoji 👍",
+	} {
+		if got, want := SanitizeToolOutput(in, true, "\x1b[2m"), Sanitize(in); got != want {
+			t.Errorf("SanitizeToolOutput(%q, true) = %q, want Sanitize = %q", in, got, want)
+		}
+	}
+}
+
 // TestSanitizeCleanTextIsIdentical guards the no-allocation fast path: clean
 // input must come back as the same string, not a rebuilt copy.
 func TestSanitizeCleanTextIsIdentical(t *testing.T) {

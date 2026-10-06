@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // Kind discriminates timeline items.
@@ -150,8 +151,15 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 	}
 	if outputMode != ToolOutputHidden {
 		// Sanitizing inside this branch keeps hidden mode from scanning output
-		// it is not going to show.
-		output := Sanitize(tool.Output)
+		// it is not going to show. With tool color enabled the output keeps its
+		// SGR sequences, so capture the enclosing style's opening sequence and
+		// re-emit it after every embedded reset (ADR 009).
+		output := tool.Output
+		if keepOutputSGR(th) {
+			output = SanitizeToolOutput(output, true, styleOpen(th.ToolOutput.Width(width-2)))
+		} else {
+			output = Sanitize(output)
+		}
 		switch {
 		case !tool.Done:
 			lines = append(lines, th.ToolOutput.Render("  … running"))
@@ -160,7 +168,7 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 		default:
 			var out string
 			if outputMode == ToolOutputFull {
-				out = strings.TrimRight(output, "\n")
+				out = trimPartialEscape(strings.TrimRight(output, "\n"))
 			} else {
 				out = TruncateOutput(output, outputLimit)
 			}
@@ -168,6 +176,24 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// keepOutputSGR reports whether tool output may keep its own SGR color. The
+// user opts in with -tool-color (ADR 009), and passthrough is forced off under
+// the Ascii profile so -no-color and a non-terminal stdout always get plain
+// text regardless of the flag.
+func keepOutputSGR(th Theme) bool {
+	return th.ToolColor && lipgloss.ColorProfile() != termenv.Ascii
+}
+
+// styleOpen returns the sequence that opens style, so it can be re-emitted
+// after a stream-embedded reset. It renders a sentinel and keeps whatever the
+// style wrote before it; under the Ascii profile the style writes no escapes
+// and the result is empty.
+func styleOpen(style lipgloss.Style) string {
+	const sentinel = "\ue000"
+	open, _, _ := strings.Cut(style.Render(sentinel), sentinel)
+	return open
 }
 
 func indent(s, prefix string) string {

@@ -22,6 +22,17 @@ func newLaidOutModel() Model {
 	return m
 }
 
+// TestNewWiresToolColor checks that the -tool-color opt-in reaches the theme
+// (ADR 009) and that the default keeps tool output stripped.
+func TestNewWiresToolColor(t *testing.T) {
+	if got := New(Config{}).theme.ToolColor; got {
+		t.Error("tool color on by default")
+	}
+	if got := New(Config{ToolColor: true}).theme.ToolColor; !got {
+		t.Error("Config.ToolColor did not reach the theme")
+	}
+}
+
 // titleSetBy returns the terminal title cmd would set. Bubble Tea's title
 // message type is unexported, so the value is read through reflection.
 func titleSetBy(cmd tea.Cmd) (string, bool) {

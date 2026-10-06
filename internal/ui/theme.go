@@ -5,6 +5,12 @@ import "github.com/charmbracelet/lipgloss"
 
 // Theme bundles every style the REPL renders with.
 type Theme struct {
+	// ToolColor lets tool output keep its own SGR color instead of being
+	// stripped (ADR 009). It is off by default and is ignored under the Ascii
+	// color profile, so the safe, plain-text behavior is what an unconfigured
+	// REPL and -no-color both get.
+	ToolColor bool
+
 	// Timeline content roles.
 	UserLabel  lipgloss.Style
 	UserText   lipgloss.Style

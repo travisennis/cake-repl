@@ -105,6 +105,7 @@ Flags:
 | `-no-config` | skip loading config file |
 | `-output-limit <n>` | truncate tool output after `<n>` characters (default: 2000) |
 | `-max-timeline-items <n>` | limit timeline to `<n>` entries (default: no limit) |
+| `-tool-color` | keep ANSI color in tool output instead of stripping it (default: strip) |
 | `-version` | print version and exit |
 
 ## Keybindings
@@ -215,6 +216,10 @@ output-limit = 5000
 
 # Maximum number of timeline entries to keep (default: no limit)
 max-timeline-items = 200
+
+# Keep ANSI color in tool output instead of stripping it (default: false).
+# Only tools that force color (`git diff --color`, `rg --color=always`) emit it.
+tool-color = true
 ```
 
 ### Merge order
@@ -277,9 +282,15 @@ validation is available with `just release-check`.
   `-max-timeline-items` to bound how many entries are kept.
 - Terminal control sequences are stripped from everything cake sends before it
   is drawn, so a command's own ANSI colors are not shown and tabs expand to
-  eight-column stops. This is deliberate and cannot be turned off: tool output
-  is the stdout of arbitrary commands, and escape sequences there could clear
-  the screen, write your clipboard, or forge hyperlinks. The raw bytes are
+  eight-column stops. This is deliberate and is the default: tool output is the
+  stdout of arbitrary commands, and escape sequences there could clear the
+  screen, write your clipboard, or forge hyperlinks. Pass `-tool-color` (or set
+  `tool-color = true` in the config file) to keep SGR color in tool output
+  blocks; SGR only sets rendition, so it cannot do any of those things, and
+  every other escape family, and every item kind other than tool output, stays
+  stripped. `-no-color` still forces plain output. Only tools that force color
+  emit SGR here, because cake runs them with piped stdout: `git diff --color`
+  and `rg --color=always` do, a bare `rg` or `eza` does not. The raw bytes are
   still recorded when `-debug-log` is set.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).

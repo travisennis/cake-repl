@@ -46,8 +46,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   invalid UTF-8. It is applied unconditionally at the render boundary
   (`ui.RenderItem`, `ui.StatusLine`) so `CSI 2J`, `OSC 52`, and `OSC 8` cannot
   reach the terminal from any item kind. Newline is the only preserved control
-  character. See
-  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
+  character. There is no implicit opt-out: the only exception is the explicit
+  `-tool-color` flag, which lets `ui.SanitizeToolOutput` keep reviewed SGR
+  (graphics-only) sequences in tool output blocks and nothing else, and is
+  forced off under the Ascii profile. See
+  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
+  and [ADR 009](../adr/009-opt-in-sgr-passthrough-for-tool-output.md).
 - **Process lifecycle.** One cake process at a time, including while replay
   hydration is active. Cancel = SIGTERM then SIGKILL after `WaitDelay` (kill
   outright on Windows). stderr retained as a bounded tail for error display.
@@ -74,8 +78,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Reopening terminal injection.** Adding a render path that bypasses
-  `ui.RenderItem`/`ui.StatusLine`, or an opt-out that lets stream escapes
-  through. Relying on glamour to discard escapes is not a defense.
+  `ui.RenderItem`/`ui.StatusLine`, or an implicit opt-out that lets stream
+  escapes through. `-tool-color` is the one reviewed exception, and only for
+  SGR in tool output; widen it to other item kinds or other escape families and
+  it becomes this failure mode. Relying on glamour to discard escapes is not a
+  defense.
 - **Cancellation races.** Treating a finished run as canceled because Ctrl+C
   arrived late — classify from the `cmd.Cancel` flag plus signal-terminated
   process status on POSIX, not the context. See `runner.go` for how the atomic

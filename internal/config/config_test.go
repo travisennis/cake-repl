@@ -26,6 +26,7 @@ profile = "fast"
 output-limit = 5000
 max-timeline-items = 200
 cake-bin = "/usr/local/bin/cake"
+tool-color = true
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +49,9 @@ cake-bin = "/usr/local/bin/cake"
 	}
 	if cfg.CakeBin != "/usr/local/bin/cake" {
 		t.Errorf("CakeBin = %q, want %q", cfg.CakeBin, "/usr/local/bin/cake")
+	}
+	if !cfg.ToolColor {
+		t.Error("ToolColor = false, want true")
 	}
 }
 
@@ -101,9 +105,9 @@ func TestMergeEmptySrc(t *testing.T) {
 
 func TestMergeOverrides(t *testing.T) {
 	dst := &Config{Model: "old", Profile: "old", OutputLimit: 1000, MaxTimelineItems: 50, CakeBin: "old"}
-	src := &Config{Model: "new", Profile: "new", OutputLimit: 5000, MaxTimelineItems: 200, CakeBin: "new"}
+	src := &Config{Model: "new", Profile: "new", OutputLimit: 5000, MaxTimelineItems: 200, CakeBin: "new", ToolColor: true}
 	got := Merge(dst, src)
-	if got.Model != "new" || got.Profile != "new" || got.OutputLimit != 5000 || got.MaxTimelineItems != 200 || got.CakeBin != "new" {
+	if got.Model != "new" || got.Profile != "new" || got.OutputLimit != 5000 || got.MaxTimelineItems != 200 || got.CakeBin != "new" || !got.ToolColor {
 		t.Errorf("Merge did not override all fields: %+v", got)
 	}
 }

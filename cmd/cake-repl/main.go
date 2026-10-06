@@ -176,6 +176,7 @@ func run() (err error) {
 	noConfig := flag.Bool("no-config", false, "skip loading config file")
 	outputLimit := flag.Int("output-limit", 0, "truncate tool output after this many characters (0 = use internal default 2000)")
 	maxTimelineItems := flag.Int("max-timeline-items", 0, "limit timeline to this many entries (0 = no limit)")
+	toolColor := flag.Bool("tool-color", false, "keep ANSI color in tool output (default: strip it)")
 	if err = flag.CommandLine.Parse(normalizeForkArgs(os.Args[1:])); err != nil {
 		return err
 	}
@@ -249,6 +250,7 @@ func run() (err error) {
 		HistoryFile:      *historyFile,
 		OutputLimit:      *outputLimit,
 		MaxTimelineItems: *maxTimelineItems,
+		ToolColor:        *toolColor,
 		Inline:           *inline,
 	}
 
@@ -268,6 +270,9 @@ func run() (err error) {
 		}
 		if !explicit["max-timeline-items"] && cfgFile.MaxTimelineItems != 0 {
 			cfg.MaxTimelineItems = cfgFile.MaxTimelineItems
+		}
+		if !explicit["tool-color"] && cfgFile.ToolColor {
+			cfg.ToolColor = true
 		}
 	}
 

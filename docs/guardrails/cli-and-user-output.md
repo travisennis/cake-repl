@@ -13,16 +13,16 @@ commands or help text (`internal/app/commands.go`), key bindings
   `-sandbox <policy>`, `-no-skills`, `-skills <names>`,
   `-system-prompt <path>`, `-cwd`, `-inline`, `-no-color`, `-debug-log`,
   `-history-file`, `-config <path>`, `-no-config`, `-output-limit <n>`,
-  `-max-timeline-items <n>`, `-version`. Names, defaults, and validation
-  (mutually exclusive `-fork`/`-resume`, mutually exclusive
+  `-max-timeline-items <n>`, `-tool-color`, `-version`. Names, defaults, and
+  validation (mutually exclusive `-fork`/`-resume`, mutually exclusive
   `-config`/`-no-config`, uuid shape, positional args rejected) are
   user-facing. The cake pass-through flags must stay aligned with the cake
   contract. `-fork` applies to the initial fresh prompt; later prompts use
   the pinned session when one is reported.
 - **Config file shape.** TOML config supports only stable REPL defaults:
-  `cake-bin`, `model`, `profile`, `output-limit`, and
-  `max-timeline-items`. Merge order is hardcoded defaults < XDG config <
-  project-local config < CLI flags. Session-specific values must stay out of
+  `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`, and
+  `tool-color`. Merge order is hardcoded defaults < XDG config < project-local
+  config < CLI flags. Session-specific values must stay out of
   config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
   `/session [copy]`, `/clear`. Keep parsing, behavior, and names stable. `/new`
@@ -80,9 +80,18 @@ commands or help text (`internal/app/commands.go`), key bindings
   All timeline and status-line text is sanitized before styling: ANSI escape
   sequences are stripped, tabs expand to the next eight-column stop, and
   remaining C0/C1 controls are dropped, so tool output renders as plain text
-  without its own colors. This is unconditional; see
-  [`session-and-security.md`](session-and-security.md) and
-  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
+  without its own colors. This is the default and cannot be turned off
+  implicitly. The one exception is the opt-in `-tool-color` (config
+  `tool-color`, default false): tool *output* blocks then keep SGR (`CSI ... m`)
+  sequences whose parameters are in a reviewed set, with embedded resets
+  followed by the enclosing style so the theme does not bleed; every other
+  escape family and every other item kind stay stripped, and `-no-color` /
+  `termenv.Ascii` forces stripping regardless. Note that cake runs tools with
+  piped stdout, so only commands that force color (`git diff --color`,
+  `rg --color=always`) emit SGR at all. See
+  [`session-and-security.md`](session-and-security.md),
+  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md),
+  and [ADR 009](../adr/009-opt-in-sgr-passthrough-for-tool-output.md).
   Tool *output* truncates at the configured output limit (default 2000 bytes) on
   rune boundaries. Independently, at most the first 1 MiB of any single tool
   result is *retained* for the session, cut at ingest with the same
