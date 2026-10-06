@@ -56,6 +56,9 @@ type Options struct {
 
 	afterWait func()
 	replay    bool
+	// waitDelay overrides cmd.WaitDelay so a test can widen the SIGTERM grace
+	// window; zero keeps the production default (see Start).
+	waitDelay time.Duration
 }
 
 // ReplayOptions configures a read-only replay of an existing cake session.
@@ -257,7 +260,14 @@ func Start(opts Options) (*Run, error) {
 		}
 		return err
 	}
-	cmd.WaitDelay = 3 * time.Second
+	// WaitDelay bounds the grace window after SIGTERM before cake is killed.
+	// Production keeps the 3s default; a test that exercises a TERM-handling
+	// child widens it via Options.waitDelay so load cannot starve the handler
+	// past the window and turn a graceful exit into a signal kill.
+	cmd.WaitDelay = opts.waitDelay
+	if cmd.WaitDelay <= 0 {
+		cmd.WaitDelay = 3 * time.Second
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

@@ -183,7 +183,15 @@ echo '{"type":"task_start","session_id":"s","task_id":"t","timestamp":"2026-06-0
 sleep 30 > /dev/null 2>&1 &
 wait $!
 `)
-	run, err := Start(Options{Bin: bin, Prompt: "hi"})
+	run, err := Start(Options{
+		Bin:    bin,
+		Prompt: "hi",
+		// Widened well past the 3s production default so a loaded machine
+		// starving the shell cannot push the trap past the SIGKILL
+		// escalation. That keeps the exit-code assertion below meaningful
+		// instead of tolerating a signal-killed run.
+		waitDelay: 20 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -198,7 +206,9 @@ wait $!
 	}
 
 	run.Cancel()
-	_, res := collect(t, run)
+	// The deadline must exceed the widened grace window above, so a genuine
+	// miss surfaces as the exit-code failure below rather than a timeout.
+	_, res := collectWithin(t, run, 25*time.Second)
 
 	if !res.Canceled {
 		t.Errorf("result not marked canceled: %+v", res)
