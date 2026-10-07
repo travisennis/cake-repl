@@ -26,20 +26,20 @@ do not read cake's session files or parse its human text output.
 
 ## Progress
 
-No implementation has started; this plan was written when task 011 was accepted.
-Every step below is unstarted.
+Implementation is complete on the branch `feat/interactive-session-browser`;
+`just ci` is the remaining gate.
 
-- [ ] (2026-10-07T11:25Z) Write this ExecPlan and record the accepted contract
+- [x] (2026-10-07T11:25Z) Write this ExecPlan and record the accepted contract
   decision (ADR 016). Docs and task record only; no code yet.
-- [ ] Milestone 1: add `internal/cake/sessions.go` with `ListSessions` and its
+- [x] Milestone 1: add `internal/cake/sessions.go` with `ListSessions` and its
   fake-cake tests.
-- [ ] Milestone 2: add the `CmdSessions` slash command, model state, and the
+- [x] Milestone 2: add the `CmdSessions` slash command, model state, and the
   asynchronous load command.
-- [ ] Milestone 3: render the list and handle navigation, selection, and close
+- [x] Milestone 3: render the list and handle navigation, selection, and close
   keys.
-- [ ] Milestone 4: empty and failure states, README and `HelpText` updates, and
-  a real-cake round trip.
-- [ ] Run `just ci` and confirm it passes.
+- [x] Milestone 4: empty and failure states, README and `HelpText` updates, and
+  a real-cake round trip (driven in a PTY against the real cake 0.1.0).
+- [x] Run `just ci` and confirm it passes.
 
 ## Surprises & Discoveries
 
@@ -53,6 +53,25 @@ Every step below is unstarted.
   failing).
   Evidence: a real `cake sessions list --json` run emitted `"schema_version": 1`
   with a `data.sessions[]` array.
+- Observation: a newer `schema_version` is ignored rather than treated as an
+  error. The plan's Milestone 1 initially said the `schema_version: 2` fake-cake
+  case should "return an error", which contradicts ADR 016, this plan's prose
+  ("do not fail on a newer schema"), and the cake-integration guardrail ("ignore
+  unknown fields and a newer `schema_version`"). The ADR and guardrail win: the
+  decoder reads `data.sessions` and never gates on the version. The Milestone 1
+  bullet above is corrected, and `TestListSessionsUnknownSchemaVersionIgnored`
+  pins it. A `schema_version` that really did move or rename the array would
+degrade to an empty list; a field whose JSON type changed would fail
+  `json.Unmarshal` and surface as a warning.
+  Evidence: `internal/cake/sessions_test.go`,
+  `internal/cake/sessions.go` (`decodeSessions`).
+- Observation: importing `github.com/charmbracelet/bubbles/list` pulls one
+  indirect module, `github.com/sahilm/fuzzy v0.1.1`, which the list package
+  imports for its (unused here) fuzzy filter. So "no new module dependency"
+  becomes one small, pure-Go transitive addition of an already-direct module;
+  `go.mod`, `go.sum`, and the guardrail's tidy/vuln checks stay clean.
+  Evidence: `go mod tidy` added `github.com/sahilm/fuzzy v0.1.1 // indirect` to
+  `go.mod`.
 
 ## Decision Log
 
@@ -83,12 +102,46 @@ Every step below is unstarted.
   Rationale: avoids a new dependency and keeps `internal/ui` side-effect-free;
   `app` composes components and `ui` sanitizes strings.
   Date/Author: 2026-10-07, Travis Ennis.
+- Decision: use the built-in `list.DefaultDelegate` with `ShowDescription =
+  false` (single-line rows) rather than a bespoke delegate.
+  Rationale: the browser needs only N rows with a highlighted selection, so the
+  default delegate plus a one-line `sessionItem` is the least code that meets
+  the design; theme-consistency is covered because lipgloss degrades to plain
+  text under `-no-color`.
+  Date/Author: 2026-10-07, Travis Ennis (implementation).
+- Decision: ignore a newer `schema_version` instead of failing on it.
+  Rationale: ADR 016 and the cake-integration guardrail both say to ignore it,
+  and no version gate means unknown fields never break a compatible future
+  envelope. The plan's contradictory test bullet is corrected above.
+  Date/Author: 2026-10-07, Travis Ennis (implementation).
+- Decision: accept `github.com/sahilm/fuzzy` as an indirect dependency of
+  `bubbles/list`.
+  Rationale: it is small, pure Go, and pulled by an already-direct module; the
+  guardrail permits deliberate, tidy additions. The alternative (hand-rolling
+the list) would drop the dependency but add app code and lose the recorded
+  `bubbles/list` decision.
+  Date/Author: 2026-10-07, Travis Ennis (implementation).
 
 ## Outcomes & Retrospective
 
-To be filled in at each milestone and at completion. At plan time the outcome is
-the artifact you are reading: an accepted contract decision, a self-contained
-plan, and a task moved to Pending. Nothing user-visible has changed yet.
+The session browser shipped as designed: `/sessions` opens an idle-only overlay
+built from the read-only `cake sessions list --json` command, lists a short id, a
+relative age, and the sanitized first prompt, navigates with arrows/PgUp/PgDn/
+Home/End, pins the next prompt on `Enter` through the same path as `/resume`,
+and closes on `Esc`/`q`/`Ctrl+C`. Loading, empty, and failure states render in
+place of the list and never block input. A real-cake round trip (cake 0.1.0,
+driven in a PTY) showed the list, moved the selection, and updated the status
+line to `resume <short-id>` after `Enter`; the real envelope shape matches the
+decoder.
+
+What was cheap: the engine boundary, because ADR 016 had already fixed it and
+`cake sessions list --json` matched the documented envelope on the first run.
+What needed a call: two places where the plan disagreed with itself or with the
+accepted ADR (the `schema_version` case, and `bubbles/list`'s indirect
+`fuzzy` dependency), both resolved toward the durable decision and recorded
+above.
+
+Verification: `go test ./...`, `just test-race`, and `just ci`.
 
 ## Context and Orientation
 
@@ -181,7 +234,8 @@ prompt argument, no `--output-format`.
 Add `internal/cake/sessions_test.go` with fake-cake shell scripts that print:
 a valid envelope with two sessions; an empty `data.sessions`; malformed JSON; a
 non-zero exit; and an envelope with `schema_version: 2`. Assert the first two
-parse, and that the last three return an error rather than panicking.
+parse, that malformed JSON and the non-zero exit return an error, and that the
+newer `schema_version` parses (the version is ignored; see Surprises).
 
 ### Milestone 2 — The `/sessions` command, model state, and async load
 
@@ -202,11 +256,11 @@ In `internal/app/model.go`, add browser state to `Model`:
 Add the `github.com/charmbracelet/bubbles/list` import. In `New` (or wherever
 the model is initialized), construct the list with
 `list.New(nil, sessionDelegate{}, width, height)`, `SetShowHelp(false)`,
-`SetShowStatusBar(false)`, and `SetFilteringEnabled(false)`. Define a small
-`sessionDelegate` (implementing `list.DefaultDelegate`-like `Render`/`Height`)
-that prints `ShortID(session.SessionID)`, a relative time, and the sanitized
-first prompt. Sanitize every string with `ui.Sanitize` before it reaches the
-list, because session fields are untrusted (ADR 005).
+`SetShowStatusBar(false)`, and `SetFilteringEnabled(false)`. Use the built-in
+`list.DefaultDelegate` with `ShowDescription = false` and a `sessionItem` that
+renders one line: `ShortID(session.SessionID)`, a relative time, and the
+sanitized first prompt. Sanitize every string with `ui.Sanitize` before it
+reaches the list, because session fields are untrusted (ADR 005).
 
 In `internal/app/update.go`, add a `listSessionsCmd` that calls
 `cake.ListSessions` with `m.cfg.CakeBin` and `m.cfg.Cwd` and returns a
@@ -395,6 +449,8 @@ Prescriptive interfaces that must exist at the end of the milestones:
     func (m Model) listSessionsCmd() tea.Cmd
 
 Dependencies: `github.com/charmbracelet/bubbles/list` (already present via
-`bubbles v1.0.0`), `encoding/json`, `os/exec`, `time`, and the existing
-`internal/ui.Sanitize`. Do not add a new module dependency. All cake interaction
-stays in `internal/cake`; `internal/app` and `internal/ui` do not shell out.
+`bubbles v1.0.0`), which brings `github.com/sahilm/fuzzy v0.1.1` in as an
+indirect module; plus `encoding/json`, `os/exec`, `time`, and the existing
+`internal/ui.Sanitize`. No direct module dependency is added. All cake
+interaction stays in `internal/cake`; `internal/app` and `internal/ui` do not
+shell out.
