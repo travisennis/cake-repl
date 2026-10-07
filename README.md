@@ -192,6 +192,13 @@ down. The status line and timeline only show it shortened.
 - `/new` and `/resume` are rejected while a task is running.
   Finish or cancel the task first (Ctrl+C), or use `Ctrl+N` to cancel and start
   a new session in one action.
+- On exit, cake-repl prints the command that resumes the session. The hint
+  reproduces the effective startup run controls — `-cwd`, `-config <path>` or
+  `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
+  `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`,
+  `-system-prompt`, and a non-default `-cake-bin` — after `-resume <id>`, so a
+  pasted resume keeps the sandbox and model the original run used instead of
+  silently falling back to cake's defaults.
 
 ## Config file
 

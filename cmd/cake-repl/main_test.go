@@ -214,3 +214,93 @@ func TestStringListFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestResumeCommand(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	tests := []struct {
+		name       string
+		cfg        app.Config
+		configPath string
+		noConfig   bool
+		want       string
+	}{
+		{
+			name: "minimal keeps resume and cwd",
+			cfg:  app.Config{Cwd: "/project"},
+			want: "cake-repl -resume " + id + " -cwd /project",
+		},
+		{
+			name: "sandbox is not dropped",
+			cfg:  app.Config{Cwd: "/project", Sandbox: "read-only"},
+			want: "cake-repl -resume " + id + " -cwd /project -sandbox read-only",
+		},
+		{
+			name:       "explicit config is reproduced",
+			cfg:        app.Config{Cwd: "/project"},
+			configPath: "/tmp/repl.toml",
+			want:       "cake-repl -resume " + id + " -config /tmp/repl.toml -cwd /project",
+		},
+		{
+			name:     "no-config is reproduced",
+			cfg:      app.Config{Cwd: "/project"},
+			noConfig: true,
+			want:     "cake-repl -resume " + id + " -no-config -cwd /project",
+		},
+		{
+			name: "every session control is reproduced",
+			cfg: app.Config{
+				CakeBin:      "/opt/cake",
+				Cwd:          "/project",
+				Model:        "gpt-x",
+				Profile:      "fast",
+				Sandbox:      "workspace-write-interactive",
+				AddDirs:      []string{"vendor", "/abs/path"},
+				ToolboxDirs:  []string{".cake/tools"},
+				Tools:        "bash,read",
+				NoTools:      true,
+				Skills:       "go,testing",
+				NoSkills:     true,
+				SystemPrompt: "/tmp/prompt.md",
+			},
+			want: "cake-repl -resume " + id + " -cake-bin /opt/cake -cwd /project -model gpt-x -profile fast" +
+				" -sandbox workspace-write-interactive -add-dir vendor -add-dir /abs/path -toolbox .cake/tools" +
+				" -tools bash,read -no-tools -no-skills -skills go,testing -system-prompt /tmp/prompt.md",
+		},
+		{
+			name: "default cake bin is omitted",
+			cfg:  app.Config{CakeBin: "cake", Cwd: "/project"},
+			want: "cake-repl -resume " + id + " -cwd /project",
+		},
+		{
+			name: "values with spaces are quoted",
+			cfg:  app.Config{Cwd: "/my project", Sandbox: "read-only"},
+			want: "cake-repl -resume " + id + " -cwd '/my project' -sandbox read-only",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resumeCommand(tt.cfg, tt.configPath, tt.noConfig, id)
+			if got != tt.want {
+				t.Errorf("resumeCommand() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "/plain/path-1.2:3", want: "/plain/path-1.2:3"},
+		{in: "", want: "''"},
+		{in: "two words", want: "'two words'"},
+		{in: "it's", want: `'it'\''s'`},
+		{in: "$(rm -rf)", want: "'$(rm -rf)'"},
+	}
+	for _, tt := range tests {
+		if got := shellQuote(tt.in); got != tt.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

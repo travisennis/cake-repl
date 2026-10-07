@@ -49,7 +49,12 @@ in plain text like every other surface.
 - **Startup resume.** `-resume <uuid>` first invokes the read-only
   `cake --output-format stream-json replay <uuid>` command. It hydrates the
   visible timeline before the first prompt; failures show a warning and keep
-  the explicit resume pin usable.
+  the explicit resume pin usable. The command `main` prints on exit reuses the
+  effective startup run controls (`-cwd`, `-config <path>` or `-no-config`,
+  plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`, `-toolbox`,
+  `-tools`, `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`, and a
+  non-default `-cake-bin`) after `-resume <id>`, so a pasted resume does not
+  silently drop the sandbox policy or model the original run was started with.
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
   labeled conversation sections; user content retains a slim gutter at normal

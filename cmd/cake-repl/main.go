@@ -324,10 +324,82 @@ func run() (err error) {
 	if ok {
 		if sessionID, _ := mod.SessionData(); sessionID != "" {
 			fmt.Fprintf(os.Stderr, "\nResume this session with:\n")
-			fmt.Fprintf(os.Stderr, "cake-repl -resume %s\n", sessionID)
+			fmt.Fprintln(os.Stderr, resumeCommand(cfg, *configPath, *noConfig, sessionID))
 		}
 	}
 	return nil
+}
+
+// resumeCommand renders a shell-ready command that resumes sessionID with the
+// same startup controls this process ran with. Cake session controls such as
+// -sandbox, -model, and -cwd shape every cake invocation and are not recorded
+// anywhere cake exposes for replay, so a resume command that omitted them would
+// silently change the resumed run's behavior (for example, reverting a
+// read-only sandbox to cake's workspace-write default, or letting a config file
+// re-supply a model the run was started without).
+func resumeCommand(cfg app.Config, configPath string, noConfig bool, sessionID string) string {
+	parts := []string{"cake-repl", "-resume", shellQuote(sessionID)}
+	addFlag := func(name, value string) {
+		if value != "" {
+			parts = append(parts, name, shellQuote(value))
+		}
+	}
+	// The default cake binary name is omitted so a plain resume stays short.
+	if cfg.CakeBin != "" && cfg.CakeBin != "cake" {
+		addFlag("-cake-bin", cfg.CakeBin)
+	}
+	// Config selection is part of the run: pasting a hint without -no-config
+	// would reload a config file the original run skipped.
+	if noConfig {
+		parts = append(parts, "-no-config")
+	} else {
+		addFlag("-config", configPath)
+	}
+	addFlag("-cwd", cfg.Cwd)
+	addFlag("-model", cfg.Model)
+	addFlag("-profile", cfg.Profile)
+	addFlag("-sandbox", cfg.Sandbox)
+	for _, dir := range cfg.AddDirs {
+		parts = append(parts, "-add-dir", shellQuote(dir))
+	}
+	for _, dir := range cfg.ToolboxDirs {
+		parts = append(parts, "-toolbox", shellQuote(dir))
+	}
+	addFlag("-tools", cfg.Tools)
+	if cfg.NoTools {
+		parts = append(parts, "-no-tools")
+	}
+	if cfg.NoSkills {
+		parts = append(parts, "-no-skills")
+	}
+	addFlag("-skills", cfg.Skills)
+	addFlag("-system-prompt", cfg.SystemPrompt)
+	return strings.Join(parts, " ")
+}
+
+// shellQuote wraps s in single quotes when it contains characters the shell
+// would otherwise interpret, so a pasted resume command reproduces a path or
+// value with spaces, globs, or metacharacters verbatim.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	safe := true
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_', r == '-', r == '.', r == '/', r == ':', r == '@', r == '+', r == '=', r == ',', r == '%':
+		default:
+			safe = false
+		}
+		if !safe {
+			break
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // eraseInlineComposer clears the composer rows that inline mode leaves on the
