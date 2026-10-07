@@ -53,6 +53,7 @@ internal/app/            Bubble Tea state machine (the REPL itself).
   completion.go          Tab completion for slash commands.
   keys.go                Key bindings.
   history.go             In-memory prompt history.
+  sessions.go            /sessions browser state, rows, and layout.
   view.go                Top-level View composition.
 internal/ui/             Pure rendering: timeline, status line, tool blocks, theme.
 internal/version/        Binary version string (overridden by release ldflags).

@@ -21,8 +21,8 @@ reports a session ID.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output, the
-supported `replay <uuid>` command, and its documented session, model, profile,
-tools, and add-dir flags.
+supported `replay <uuid>` and `sessions list --json` commands, and its
+documented session, model, profile, tools, and add-dir flags.
 
 ## Requirements
 
@@ -124,6 +124,10 @@ Flags:
 | `PgUp` / `PgDn` | scroll timeline |
 | `Mouse wheel` | scroll timeline |
 
+While the `/sessions` browser is open, `Up`/`Down`, `PgUp`/`PgDn`, and
+`Home`/`End` move the selection, `Enter` resumes the highlighted session, and
+`Esc` or `q` closes the list.
+
 `Ctrl+Y` copies the raw markdown source of the most recent assistant message to
 the system clipboard. The REPL uses the platform clipboard helpers: `pbcopy` on
 macOS, `xclip`/`xsel` on Linux, and `clip` on Windows. If no assistant message
@@ -142,6 +146,7 @@ down. The status line and timeline only show it shortened.
 | `/exit` `/quit` `/q` | exit (cancels a running task first, then exits) |
 | `/new` | next prompt starts a fresh cake session |
 | `/resume <uuid>` | next prompt uses `cake --resume <uuid>` |
+| `/sessions` | browse this directory's past sessions and resume one |
 | `/session` | show session id, task id, cwd, run mode, last completion |
 | `/session copy` | copy the full session id to the clipboard |
 | `/clear` | clear the timeline (session state is kept) |
@@ -176,6 +181,14 @@ down. The status line and timeline only show it shortened.
   history, the current input draft, and model/profile settings are preserved.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts
   stay pinned to the same session.
+- `/sessions` opens a navigable list of this directory's past sessions (a short
+  id, a relative age, and the first prompt), read from the supported, read-only
+  `cake sessions list --json` command. Arrow keys and `PgUp`/`PgDn` move the
+  selection; `Enter` resumes the highlighted session exactly like
+  `/resume <uuid>` (it pins the next prompt and does not replay history); `Esc`
+  or `q` closes the list without action. A missing or older cake binary, or
+  malformed output, shows a non-fatal warning. Like `/new` and `/resume`, it
+  requires an idle REPL.
 - `/new` and `/resume` are rejected while a task is running.
   Finish or cancel the task first (Ctrl+C), or use `Ctrl+N` to cancel and start
   a new session in one action.
@@ -265,9 +278,10 @@ validation is available with `just release-check`.
 
 ## Known limitations
 
-- No session browser; `/resume` needs a UUID you already know. Startup `-resume`
-  history hydration requires a cake binary that supports `replay`; if replay is
-  unavailable, cake-repl shows a warning and still lets you continue the session.
+- Startup `-resume` history hydration requires a cake binary that supports
+  `replay`; if replay is unavailable, cake-repl shows a warning and still lets
+  you continue the session. `/sessions` likewise needs a cake binary that
+  supports `sessions list --json`.
 - Tool output is truncated at 2,000 characters by default (configurable via
   `-output-limit` or config file). Independently of that limit, the REPL
   retains at most the first 1 MiB of any single tool result for the life of

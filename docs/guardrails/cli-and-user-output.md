@@ -25,13 +25,27 @@ commands or help text (`internal/app/commands.go`), key bindings
   config < CLI flags. Session-specific values must stay out of
   config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
-  `/session [copy]`, `/clear`. Keep parsing, behavior, and names stable. `/new`
-  and `/resume` require an idle REPL; `Ctrl+N`
+  `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
+  stable. `/new`, `/resume`, and `/sessions` require an idle REPL; `Ctrl+N`
   remains the cancel-and-reset operation during an active run.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
-  (scroll).
+  (scroll). While the `/sessions` browser is open its keys are modal:
+  `Up`/`Down`, `PgUp`/`PgDn`, and `Home`/`End` move the selection, `Enter`
+  resumes the highlighted session, and `Esc`, `q`, or `Ctrl+C` close it.
+- **Session browser.** `/sessions` opens an idle-only overlay that replaces the
+timeline: a navigable list of this directory's past sessions from the read-only
+`cake sessions list --json` command (see
+[`cake-integration-and-stream-json.md`](cake-integration-and-stream-json.md)).
+Each row shows a shortened session id, a relative age, and the sanitized first
+prompt; `Enter` pins the next prompt to the selected session through the same
+path as `/resume <uuid>`, and `Esc` or `q` closes the list without action. The
+overlay is modal: while open it consumes keys before the composer, and it keeps
+the timeline's height so the composer and status line do not move. Loading,
+empty ("no sessions in <dir>"), and failure states render in place of the list;
+a listing failure is never fatal and never blocks input. `-no-color` renders it
+in plain text like every other surface.
 - **Startup resume.** `-resume <uuid>` first invokes the read-only
   `cake --output-format stream-json replay <uuid>` command. It hydrates the
   visible timeline before the first prompt; failures show a warning and keep

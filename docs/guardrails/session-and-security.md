@@ -26,9 +26,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   drains an active run without letting its late events or cancellation restore
   the old session pin; `/resume` sets the next mode explicitly. An initial
   `--fork` is consumed by its first fresh prompt, then the resulting session
-  is pinned with `--resume`. **Active-run restriction:** `/new` and `/resume`
-  are rejected while a task is running with a warning to finish or cancel
-  first. Only `/session`, `/help`, `/clear`, and `/exit` remain available
+  is pinned with `--resume`. **Active-run restriction:** `/new`, `/resume`, and
+  `/sessions` are rejected while a task is running with a warning to finish or
+  cancel first. Only `/session`, `/help`, `/clear`, and `/exit` remain available
   during a run.
   Keep session transitions pure and I/O-free so they stay testable.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
