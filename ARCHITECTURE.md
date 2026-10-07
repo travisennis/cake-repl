@@ -21,6 +21,9 @@ It communicates only through:
 - `cake --output-format stream-json` (NDJSON records on stdout),
 - `cake --output-format stream-json replay <uuid>` for read-only transcript
   hydration,
+- `cake sessions list --json` for read-only session listing (versioned JSON
+  envelope; see
+  [`docs/adr/016`](docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)),
 - `--resume <uuid>` session selection, with initial `--fork [<uuid>]` support,
 - `--no-session`, `--model` / `--profile` pass-through flags,
 - `--add-dir <dir>` read-only sandbox directories (repeatable),
@@ -70,6 +73,12 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   separate hydration state, so it does not appear as a live task; failures warn
   and preserve the explicit `--resume <uuid>` next-run pin. See
   [`docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md`](docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md).
+- **Session listing is read-only.** `cake sessions list --json` is invoked only
+  from `internal/cake`, with the same working directory as a live prompt, to list
+  that directory's sessions. It is informational (list and select, never
+  mutate), decodes forward-compatibly, and degrades to an empty or warning state
+  on any failure rather than a fatal error. See
+  [`docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md`](docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md).
 - **Pure rendering.** `internal/ui` is side-effect-free and takes data in,
   strings out. The timeline is rendered through a per-item cache; width changes
   and `/clear` trigger a full re-render, while global tool-output mode changes

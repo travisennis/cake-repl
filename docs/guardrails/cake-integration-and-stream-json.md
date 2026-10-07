@@ -14,8 +14,10 @@ consumes cake events. This is the project's core external contract.
   may additionally use `--fork [<uuid>]`; once cake reports the forked session
   ID, later prompts use only its pinned `--resume <uuid>`. Read-only startup
   resume hydration runs the separate `cake --output-format stream-json replay
-  <uuid>` command with no prompt. `--` must stay so a prompt beginning with
-  `-` is never parsed as a flag.
+  <uuid>` command with no prompt. The other permitted invocation is the
+  read-only, informational `cake sessions list --json`, run with the same
+  working directory as a live prompt to list that directory's sessions. `--`
+  must stay so a prompt beginning with `-` is never parsed as a flag.
 - **stream-json schema.** The typed events in `events.go` (`task_start`,
   `session_meta`, `prompt_context`, `message`, `reasoning`, `function_call`,
   `function_call_output`, `hook_event`, `skill_activated`, `task_complete` +
@@ -29,11 +31,20 @@ consumes cake events. This is the project's core external contract.
   model under
   [ADR 014](../adr/014-source-the-status-line-model-from-the-cake-stream.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
-  human-readable output, no importing cake internals. The CLI + NDJSON stream is
-  the only contract for both live prompts and replay hydration. Replay failures
-  are structured `replay_error` records and non-zero exits: input errors use
-  exit 3; corrupt, unsupported-format, and permission errors use exit 1. Older
-  cake binaries that do not support replay must degrade to a non-fatal warning.
+  human-readable output, no importing cake internals. The CLI (NDJSON streams
+  and the versioned `sessions list --json` envelope) is the only contract; it is
+  invoked only from `internal/cake`. Replay failures are structured
+  `replay_error` records and non-zero exits: input errors use exit 3; corrupt,
+  unsupported-format, and permission errors use exit 1. Older cake binaries that
+  do not support replay must degrade to a non-fatal warning.
+- **Read-only session listing.** `cake sessions list --json` returns the
+  envelope `{schema_version, command, status, summary, data.sessions[]}` where
+  each session carries `session_id`, `first_prompt`, and `timestamp` (cake 0.1.0,
+  `schema_version` 1). Decode it forward-compatibly: ignore unknown fields and a
+  newer `schema_version`. It is informational only — list and select, never
+  mutate — and any non-zero exit, malformed JSON, or unsupported envelope
+  degrades to an empty or warning state, never a fatal error. See
+  [ADR 016](../adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md).
 
 ## Required checks / test focus
 
@@ -43,6 +54,9 @@ consumes cake events. This is the project's core external contract.
   `runner_test.go` (fake-cake shell scripts) for new subprocess behavior,
   including replay success and structured failure. `replay_test.go` covers
   timeline hydration and continued prompt execution.
+- For session listing, add fake-cake cases for a valid envelope, an empty
+  `data.sessions`, malformed JSON, a non-zero exit, and an unknown
+  `schema_version`; none may be fatal.
 - Verify a real round trip if you have a `cake` binary, but never make a real
   cake binary a test requirement.
 
