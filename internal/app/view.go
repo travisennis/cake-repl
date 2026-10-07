@@ -13,6 +13,10 @@ func (m Model) View() string {
 	if !m.ready {
 		return "starting cake-repl…"
 	}
+	body := m.timeline.View()
+	if m.browserOpen {
+		body = m.browserView()
+	}
 	composer := ui.PromptComposer(
 		m.theme,
 		m.input.View(),
@@ -22,10 +26,33 @@ func (m Model) View() string {
 		"Ctrl+S submit · Enter newline · /help",
 	)
 	return strings.Join([]string{
-		m.timeline.View(),
+		body,
 		composer,
 		m.statusLine(),
 	}, "\n")
+}
+
+// browserView renders the /sessions overlay in place of the timeline: the
+// navigable list, or a loading/empty/error body, followed by a one-line key
+// hint. It occupies the timeline's height so the composer and status line do
+// not move while the browser is open.
+func (m Model) browserView() string {
+	bodyHeight := browserBodyHeight(m.timeline.Height)
+	var body string
+	switch {
+	case m.browserLoading:
+		body = m.theme.Debug.Width(m.width).Height(bodyHeight).Render("loading sessions…")
+	case m.browserErr != "":
+		body = m.theme.Warning.Width(m.width).Height(bodyHeight).Render("sessions unavailable: " + ui.Sanitize(m.browserErr))
+	case len(m.sessionList.Items()) == 0:
+		body = m.theme.Info.Width(m.width).Height(bodyHeight).Render("no sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd)))
+	default:
+		body = m.sessionList.View()
+	}
+	if m.timeline.Height <= 1 {
+		return body
+	}
+	return body + "\n" + m.theme.PromptHint.Render("↑/↓ move · enter resume · esc close")
 }
 
 func (m Model) statusLine() string {

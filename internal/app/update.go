@@ -1,13 +1,16 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/travisennis/cake-repl/internal/cake"
@@ -74,6 +77,26 @@ func waitForRun(run *cake.Run) tea.Cmd {
 			}
 		}
 		return eventsMsg{evs: evs}
+	}
+}
+
+// sessionsLoadedMsg delivers the result of one read-only session listing.
+type sessionsLoadedMsg struct {
+	sessions []cake.SessionSummary
+	err      error
+}
+
+// listSessionsCmd runs `cake sessions list --json` off the Update loop, so a
+// slow or missing cake binary cannot block key handling.
+func (m Model) listSessionsCmd() tea.Cmd {
+	cfg := m.cfg
+	return func() tea.Msg {
+		sessions, err := cake.ListSessions(context.Background(), cake.SessionsOptions{
+			Bin:      cfg.CakeBin,
+			Cwd:      cfg.Cwd,
+			DebugLog: cfg.DebugLog,
+		})
+		return sessionsLoadedMsg{sessions: sessions, err: err}
 	}
 }
 
@@ -194,6 +217,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case runDoneMsg:
 		return m.finishRun(msg.res)
 
+	case sessionsLoadedMsg:
+		m.browserLoading = false
+		if msg.err != nil {
+			m.browserErr = ui.TruncateOutput(msg.err.Error(), m.cfg.OutputLimit)
+			return m, nil
+		}
+		m.browserErr = ""
+		now := time.Now()
+		items := make([]list.Item, 0, len(msg.sessions))
+		for _, s := range msg.sessions {
+			items = append(items, newSessionItem(s, now))
+		}
+		m.sessionList.SetItems(items)
+		m.sessionList.ResetSelected()
+		return m, nil
+
 	case tea.MouseMsg:
 		// Only forward wheel events to the timeline viewport; let other mouse
 		// events (clicks in the input area) fall through to the default handler.
@@ -217,6 +256,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.browserOpen {
+		return m.handleBrowserKey(msg)
+	}
 	switch {
 	case key.Matches(msg, m.keys.CancelQuit):
 		if m.running {
@@ -287,6 +329,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	m.layout() // input height tracks line count
 	return m, cmd
+}
+
+// handleBrowserKey routes keys while the /sessions browser is open. It returns
+// before the composer sees the message, so the hidden input cannot swallow
+// navigation. Esc, q, and Ctrl+C close the browser without action; Enter pins
+// the next prompt to the selected session.
+func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "ctrl+c":
+		m.browserOpen = false
+		return m, nil
+	case "enter":
+		if it, ok := m.sessionList.SelectedItem().(sessionItem); ok {
+			m.browserOpen = false
+			return m.resumeSession(it.summary.SessionID)
+		}
+		return m, nil
+	case "up", "down", "pgup", "pgdown", "home", "end":
+		var cmd tea.Cmd
+		m.sessionList, cmd = m.sessionList.Update(msg)
+		return m, cmd
+	}
+	return m, nil
 }
 
 // startNewSession creates an immediate visual and session-state boundary.
@@ -458,13 +523,19 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	return m.startRun(text)
 }
 
+// needsIdle reports whether a command may only run against an idle REPL: it
+// either targets a session (or, for the browser, drives session selection) or
+// would race a running subprocess.
+func needsIdle(kind CommandKind) bool {
+	return kind == CmdNew || kind == CmdResume || kind == CmdSessions
+}
+
 func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
-	if (m.hydrating || m.replayPending || m.replayRun != nil) &&
-		(cmd.Kind == CmdNew || cmd.Kind == CmdResume) {
+	if (m.hydrating || m.replayPending || m.replayRun != nil) && needsIdle(cmd.Kind) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "wait for session history to load first"})
 		return m, nil
 	}
-	if m.running && (cmd.Kind == CmdNew || cmd.Kind == CmdResume) {
+	if m.running && needsIdle(cmd.Kind) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "finish or cancel the running task first"})
 		return m, nil
 	}
@@ -495,8 +566,14 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt starts a fresh cake session"})
 
 	case CmdResume:
-		m.session.UseResume(cmd.Arg)
-		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt resumes session " + cmd.Arg})
+		return m.resumeSession(cmd.Arg)
+
+	case CmdSessions:
+		m.browserOpen = true
+		m.browserLoading = true
+		m.browserErr = ""
+		m.sessionList.Title = "sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))
+		return m, m.listSessionsCmd()
 
 	case CmdSession:
 		if cmd.Arg == "copy" {
@@ -511,6 +588,15 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.pendingCalls = map[string]int{}
 		m.rebuildTimeline()
 	}
+	return m, nil
+}
+
+// resumeSession points the next prompt at id and reports it, mirroring the
+// /resume command. The /sessions browser's Enter delegates here so both paths
+// share one notice and one state transition.
+func (m Model) resumeSession(id string) (tea.Model, tea.Cmd) {
+	m.session.UseResume(id)
+	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt resumes session " + id})
 	return m, nil
 }
 

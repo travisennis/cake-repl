@@ -16,6 +16,7 @@ const (
 	CmdResume
 	CmdSession
 	CmdClear
+	CmdSessions
 )
 
 // Command is one parsed slash command.
@@ -35,6 +36,7 @@ var commandTable = []struct {
 	{"/exit", CmdExit},
 	{"/new", CmdNew},
 	{"/resume", CmdResume},
+	{"/sessions", CmdSessions},
 	{"/session", CmdSession},
 	{"/clear", CmdClear},
 	{"/quit", CmdExit},
@@ -98,9 +100,10 @@ const HelpText = `commands
                    (startup -resume also reloads visible history)
   /session         show session id, task id, cwd, run mode, last result
   /session copy    copy the full session id to the clipboard
+  /sessions        browse past sessions in this directory and pick one to resume
   /clear           clear the timeline (session state is kept)
 
-  /new and /resume require an idle REPL
+  /new, /resume, and /sessions require an idle REPL
 
 keybindings
   enter            insert newline

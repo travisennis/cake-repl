@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -118,6 +119,13 @@ type Model struct {
 	completionMatches []string
 	completionIdx     int
 
+	// Session browser overlay state, driven by the /sessions command. The
+	// browser is idle-only and replaces the timeline while open.
+	browserOpen    bool
+	browserLoading bool
+	browserErr     string
+	sessionList    list.Model
+
 	// clipboard writes text to the system clipboard. It is a field so tests
 	// can stub out the platform helper; New defaults to the OS clipboard.
 	clipboard func(string) error
@@ -151,6 +159,7 @@ func New(cfg Config) Model {
 		keys:          defaultKeyMap(),
 		input:         input,
 		spin:          spin,
+		sessionList:   newSessionList(),
 		pendingCalls:  map[string]int{},
 		clipboard:     clipboard.WriteAll,
 		hydrating:     cfg.ResumeID != "",
@@ -516,6 +525,7 @@ func (m *Model) layout() {
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
+	m.resizeSessionList(vpHeight)
 	if !m.ready {
 		m.timeline = viewport.New(m.width, vpHeight)
 		m.ready = true
