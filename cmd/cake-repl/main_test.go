@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/travisennis/cake-repl/internal/app"
@@ -302,5 +304,111 @@ func TestShellQuote(t *testing.T) {
 		if got := shellQuote(tt.in); got != tt.want {
 			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestStartupConfigExecutablePrecedence(t *testing.T) {
+	tests := []struct {
+		name, xdg, local, cli, want    string
+		explicitConfig, noConfig, warn bool
+	}{
+		{name: "local cannot override XDG", xdg: `cake-bin = "../trusted-cake"`, local: `cake-bin = "./repo-cake"`, want: "../trusted-cake", warn: true},
+		{name: "local cannot override default", local: `cake-bin = "./repo-cake"`, want: "cake", warn: true},
+		{name: "empty local key warns", local: `cake-bin = ""`, want: "cake", warn: true},
+		{name: "local value controls never reach warning", local: `cake-bin = "\u001b[2J\u001b]52;c;payload\u0007"`, want: "cake", warn: true},
+		{name: "explicit local file is trusted", xdg: `cake-bin = "../trusted-cake"`, local: `cake-bin = "./repo-cake"`, explicitConfig: true, want: "./repo-cake"},
+		{name: "CLI overrides default layers", xdg: `cake-bin = "../trusted-cake"`, local: `cake-bin = "./repo-cake"`, cli: "./cli-cake", want: "./cli-cake", warn: true},
+		{name: "CLI overrides explicit file", local: `cake-bin = "./repo-cake"`, explicitConfig: true, cli: "./cli-cake", want: "./cli-cake"},
+		{name: "no-config skips values and warnings", xdg: `cake-bin = "../trusted-cake"`, local: `cake-bin = "./repo-cake"`, noConfig: true, want: "cake"},
+		{name: "no-config skips malformed files", xdg: `cake-bin = `, local: `cake-bin = `, noConfig: true, want: "cake"},
+		{name: "no-config keeps CLI", local: `cake-bin = "./repo-cake"`, noConfig: true, cli: "./cli-cake", want: "./cli-cake"},
+		{name: "absent key is quiet", xdg: `cake-bin = "../trusted-cake"`, want: "../trusted-cake"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+			xdgPath := filepath.Join(dir, "xdg", "cake-repl", "config.toml")
+			if err := os.MkdirAll(filepath.Dir(xdgPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for path, content := range map[string]string{xdgPath: tt.xdg, ".cake-repl.toml": tt.local} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var warnings bytes.Buffer
+			fileCfg, err := loadStartupConfig(".cake-repl.toml", tt.explicitConfig, tt.noConfig, &warnings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := app.Config{CakeBin: "cake"}
+			explicit := map[string]bool{}
+			if tt.cli != "" {
+				cfg.CakeBin = tt.cli
+				explicit["cake-bin"] = true
+			}
+			applyConfigFile(&cfg, fileCfg, explicit)
+			if cfg.CakeBin != tt.want {
+				t.Fatalf("CakeBin = %q, want %q", cfg.CakeBin, tt.want)
+			}
+			wantWarning := ""
+			if tt.warn {
+				wantWarning = "cake-repl: warning: ignoring cake-bin in project-local config \".cake-repl.toml\"; use XDG config, -config, or -cake-bin to select the executable\n"
+			}
+			if warnings.String() != wantWarning {
+				t.Fatalf("warning = %q, want %q", warnings.String(), wantWarning)
+			}
+		})
+	}
+}
+
+func TestStartupConfigPreservesOtherLocalDefaults(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := os.WriteFile(".cake-repl.toml", []byte(`
+cake-bin = "./repo-cake"
+model = "local-model"
+profile = "local-profile"
+output-limit = 5000
+max-timeline-items = 200
+tool-color = true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var warnings bytes.Buffer
+	fileCfg, err := loadStartupConfig("", false, false, &warnings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := app.Config{CakeBin: "cake", Model: "cli-model"}
+	applyConfigFile(&cfg, fileCfg, map[string]bool{"model": true})
+	if cfg.CakeBin != "cake" || cfg.Model != "cli-model" || cfg.Profile != "local-profile" || cfg.OutputLimit != 5000 || cfg.MaxTimelineItems != 200 || !cfg.ToolColor {
+		t.Fatalf("effective defaults = %+v", cfg)
+	}
+}
+
+func TestStartupConfigMalformedFiles(t *testing.T) {
+	for _, layer := range []string{"XDG", "project-local", "explicit"} {
+		t.Run(layer, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			path := ".cake-repl.toml"
+			if layer == "XDG" {
+				path = filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "cake-repl", "config.toml")
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(path, []byte(`cake-bin = `), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var warnings bytes.Buffer
+			_, err := loadStartupConfig(path, layer == "explicit", false, &warnings)
+			if err == nil || !strings.Contains(err.Error(), "loading") {
+				t.Fatalf("malformed %s config error = %v", layer, err)
+			}
+		})
 	}
 }

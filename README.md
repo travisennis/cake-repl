@@ -208,7 +208,7 @@ file are overridden by CLI flags.
 ### Paths
 
 Config files are loaded from two locations, with project-local values taking
-precedence over XDG-level values:
+precedence over XDG-level values for keys other than `cake-bin`:
 
 | Path | Priority |
 |---|---|
@@ -219,10 +219,16 @@ Pass `--config <path>` to use a single custom config file instead of the
 default paths. Pass `--no-config` to skip config file loading entirely.
 `--config` and `--no-config` are mutually exclusive.
 
+The automatically loaded `.cake-repl.toml` cannot select the executable: its
+`cake-bin` key is ignored with a plain startup warning naming the file and key.
+Set the executable in XDG config, an explicitly selected `-config` file, or
+`-cake-bin`. Explicitly selecting `.cake-repl.toml` with `-config` allows its
+`cake-bin` value. `-no-config` skips file values and these warnings.
+
 ### Format
 
 ```toml
-# Path to the cake binary (default: "cake")
+# Path to the cake binary (default: "cake"); XDG or explicit -config only
 cake-bin = "/usr/local/bin/cake"
 
 # Model name passed through to cake
@@ -244,9 +250,11 @@ tool-color = true
 
 ### Merge order
 
-Hardcoded defaults < config file < CLI flags. Every layer overrides the
-previous one, so a CLI flag always wins over the same value in the config
-file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
+Hardcoded defaults < XDG config < project-local config < CLI flags.
+For `cake-bin`, precedence is hardcoded `cake` < XDG/explicit `-config` file <
+`-cake-bin`; the automatic project-local layer is excluded. Trusted relative
+executable paths keep their usual resolution. A CLI flag always wins over the
+same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
 `-system-prompt` are startup-only CLI flags and are not persisted in the
 config file.

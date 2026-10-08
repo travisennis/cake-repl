@@ -207,27 +207,9 @@ func run() (err error) {
 		return err
 	}
 
-	// Load config file(s).
-	var cfgFile *config.Config
-	switch {
-	case explicit["config"]:
-		cfgFile, err = config.Load(*configPath)
-		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-	case *noConfig:
-		// Skip config loading entirely.
-	default:
-		xdgPath, localPath := config.DefaultPaths()
-		xdgCfg, xdgErr := config.Load(xdgPath)
-		if xdgErr != nil {
-			return fmt.Errorf("loading XDG config %s: %w", xdgPath, xdgErr)
-		}
-		localCfg, localErr := config.Load(localPath)
-		if localErr != nil {
-			return fmt.Errorf("loading project-local config %s: %w", localPath, localErr)
-		}
-		cfgFile = config.Merge(xdgCfg, localCfg)
+	cfgFile, err := loadStartupConfig(*configPath, explicit["config"], *noConfig, os.Stderr)
+	if err != nil {
+		return err
 	}
 
 	// Build the final app.Config: hardcoded defaults < config file < CLI flags.
@@ -254,27 +236,7 @@ func run() (err error) {
 		Inline:           *inline,
 	}
 
-	// Apply config file values for fields not explicitly set via CLI.
-	if cfgFile != nil {
-		if !explicit["model"] && cfgFile.Model != "" {
-			cfg.Model = cfgFile.Model
-		}
-		if !explicit["profile"] && cfgFile.Profile != "" {
-			cfg.Profile = cfgFile.Profile
-		}
-		if !explicit["cake-bin"] && cfgFile.CakeBin != "" {
-			cfg.CakeBin = cfgFile.CakeBin
-		}
-		if !explicit["output-limit"] && cfgFile.OutputLimit != 0 {
-			cfg.OutputLimit = cfgFile.OutputLimit
-		}
-		if !explicit["max-timeline-items"] && cfgFile.MaxTimelineItems != 0 {
-			cfg.MaxTimelineItems = cfgFile.MaxTimelineItems
-		}
-		if !explicit["tool-color"] && cfgFile.ToolColor {
-			cfg.ToolColor = true
-		}
-	}
+	applyConfigFile(&cfg, cfgFile, explicit)
 
 	if *resume != "" {
 		cfg.InitialMode = cake.RunResume
@@ -328,6 +290,59 @@ func run() (err error) {
 		}
 	}
 	return nil
+}
+
+// loadStartupConfig enforces executable provenance at the project-local layer.
+// Explicit files remain trusted, including an explicitly selected local file.
+func loadStartupConfig(configPath string, explicitConfig, noConfig bool, warnings io.Writer) (*config.Config, error) {
+	switch {
+	case explicitConfig:
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading config: %w", err)
+		}
+		return cfg, nil
+	case noConfig:
+		return nil, nil
+	default:
+		xdgPath, localPath := config.DefaultPaths()
+		xdgCfg, err := config.Load(xdgPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading XDG config %s: %w", xdgPath, err)
+		}
+		localCfg, ignoredCakeBin, err := config.LoadProject(localPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading project-local config %s: %w", localPath, err)
+		}
+		if ignoredCakeBin {
+			fmt.Fprintf(warnings, "cake-repl: warning: ignoring cake-bin in project-local config %q; use XDG config, -config, or -cake-bin to select the executable\n", localPath)
+		}
+		return config.Merge(xdgCfg, localCfg), nil
+	}
+}
+
+// applyConfigFile applies file defaults only where a CLI flag was not supplied.
+func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[string]bool) {
+	if cfgFile != nil {
+		if !explicit["model"] && cfgFile.Model != "" {
+			cfg.Model = cfgFile.Model
+		}
+		if !explicit["profile"] && cfgFile.Profile != "" {
+			cfg.Profile = cfgFile.Profile
+		}
+		if !explicit["cake-bin"] && cfgFile.CakeBin != "" {
+			cfg.CakeBin = cfgFile.CakeBin
+		}
+		if !explicit["output-limit"] && cfgFile.OutputLimit != 0 {
+			cfg.OutputLimit = cfgFile.OutputLimit
+		}
+		if !explicit["max-timeline-items"] && cfgFile.MaxTimelineItems != 0 {
+			cfg.MaxTimelineItems = cfgFile.MaxTimelineItems
+		}
+		if !explicit["tool-color"] && cfgFile.ToolColor {
+			cfg.ToolColor = true
+		}
+	}
 }
 
 // resumeCommand renders a shell-ready command that resumes sessionID with the

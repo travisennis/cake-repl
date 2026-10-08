@@ -99,8 +99,12 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 - **Config is startup-only.** Config files set stable REPL defaults before the
   TUI starts, using hardcoded defaults < XDG config < project-local config <
-  CLI flags. Session-specific values stay outside the persisted config shape.
-  See [`docs/adr/002-config-file-for-repl-defaults.md`](docs/adr/002-config-file-for-repl-defaults.md).
+  CLI flags. The automatic project-local layer cannot set `cake-bin`: that key
+  is ignored with a startup warning, so executable selection comes only from
+  XDG config, explicit `-config`, or `-cake-bin`. Session-specific values stay
+  outside the persisted config shape. See
+  [`ADR 002`](docs/adr/002-config-file-for-repl-defaults.md) and its partial
+  supersession in [`ADR 006`](docs/adr/006-project-local-config-cannot-select-the-cake-executable.md).
 - **One cake process at a time.** Submitting while a task runs is rejected; the
   model tracks a single live `*cake.Run`.
 - **Graceful cancellation.** Cancel sends SIGTERM then SIGKILL after a grace

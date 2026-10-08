@@ -163,3 +163,55 @@ func TestDefaultPathsRespectsXDGEnv(t *testing.T) {
 		t.Errorf("XDG path = %q, want %q", xdg, want)
 	}
 }
+
+func TestLoadProjectExcludesExecutable(t *testing.T) {
+	for _, value := range []string{`"./repo-cake"`, `""`, `"\u001b[2Jrepo-cake"`} {
+		t.Run(value, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".cake-repl.toml")
+			content := "cake-bin = " + value + `
+model = "local-model"
+profile = "local-profile"
+output-limit = 5000
+max-timeline-items = 200
+tool-color = true
+`
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, ignored, err := LoadProject(path)
+			if err != nil || !ignored {
+				t.Fatalf("LoadProject = %v, %v, want ignored key", ignored, err)
+			}
+			got := Merge(&Config{CakeBin: "../trusted-cake"}, cfg)
+			want := Config{CakeBin: "../trusted-cake", Model: "local-model", Profile: "local-profile", OutputLimit: 5000, MaxTimelineItems: 200, ToolColor: true}
+			if *got != want {
+				t.Fatalf("merged config = %+v, want %+v", *got, want)
+			}
+		})
+	}
+}
+
+func TestLoadProjectWithoutExecutable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
+	for _, content := range []string{"", `model = "local-model"`} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, ignored, err := LoadProject(path); err != nil || ignored {
+			t.Fatalf("LoadProject without cake-bin = %v, %v", ignored, err)
+		}
+	}
+	if _, ignored, err := LoadProject(filepath.Join(t.TempDir(), "missing")); err != nil || ignored {
+		t.Fatalf("LoadProject missing file = %v, %v", ignored, err)
+	}
+}
+
+func TestLoadProjectInvalidSyntax(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
+	if err := os.WriteFile(path, []byte(`cake-bin = `), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadProject(path); err == nil {
+		t.Fatal("LoadProject with invalid TOML: want error")
+	}
+}

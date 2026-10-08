@@ -22,8 +22,14 @@ commands or help text (`internal/app/commands.go`), key bindings
 - **Config file shape.** TOML config supports only stable REPL defaults:
   `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`, and
   `tool-color`. Merge order is hardcoded defaults < XDG config < project-local
-  config < CLI flags. Session-specific values must stay out of
-  config.
+  config < CLI flags, except `cake-bin`: the automatically loaded
+  `.cake-repl.toml` key is ignored with a plain startup warning naming the file
+  and key, even with `-no-color`. Executable precedence is hardcoded `cake` <
+  XDG/explicit `-config` < `-cake-bin` (including trusted relative paths).
+  Explicit `-config` may select the project file; `-no-config` skips file values
+  and warnings. Other project-local keys retain their existing behavior. See
+  [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md).
+  Session-specific values must stay out of config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
   `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
   stable. `/new`, `/resume`, and `/sessions` require an idle REPL; `Ctrl+N`

@@ -50,6 +50,12 @@ different defaults.
 
 ## Decision Outcome
 
+Later clarification: [ADR 006](006-project-local-config-cannot-select-the-cake-executable.md)
+partially supersedes the executable-selection portion below. Automatically
+loaded project-local config can no longer set `cake-bin`; XDG config, explicit
+`-config`, and `-cake-bin` remain allowed sources. The original decision and
+motivation below are retained as history.
+
 Chosen option: **XDG plus project-local TOML config**, read once at startup.
 
 The config file contract is:

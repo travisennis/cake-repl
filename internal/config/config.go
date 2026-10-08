@@ -45,15 +45,31 @@ func DefaultPaths() (xdgPath, localPath string) {
 // unconditionally. A file that exists but cannot be read or decoded (e.g.
 // permission errors, invalid TOML) aborts with an error.
 func Load(path string) (*Config, error) {
+	cfg, _, err := load(path)
+	return cfg, err
+}
+
+// LoadProject loads automatically discovered project defaults, excluding the
+// executable. ignoredCakeBin reports key presence, even when its value is empty.
+func LoadProject(path string) (cfg *Config, ignoredCakeBin bool, err error) {
+	cfg, meta, err := load(path)
+	if err != nil {
+		return nil, false, err
+	}
+	cfg.CakeBin = ""
+	return cfg, meta.IsDefined("cake-bin"), nil
+}
+
+func load(path string) (*Config, toml.MetaData, error) {
 	cfg := &Config{}
-	_, err := toml.DecodeFile(path, cfg)
+	meta, err := toml.DecodeFile(path, cfg)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return cfg, nil
+			return cfg, meta, nil
 		}
-		return nil, err
+		return nil, meta, err
 	}
-	return cfg, nil
+	return cfg, meta, nil
 }
 
 // Merge applies src values to dst for each non-zero field in src. dst is

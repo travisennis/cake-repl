@@ -6,6 +6,13 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 
 ## Compatibility surfaces
 
+- **Executable selection.** Automatically loaded project-local `.cake-repl.toml`
+  cannot set `cake-bin`; ignore the key and warn at startup using plain text
+  that names the file and key without echoing the executable value. XDG config,
+  explicit `-config` (including the project file), and `-cake-bin` remain
+  allowed sources. See
+  [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md).
+
 - **Session pinning (security boundary).** Once a session id has been
   announced, `sessionState` pins future prompts to `--resume <session-id>`.
   This prevents another cake process that creates a newer session in the same
