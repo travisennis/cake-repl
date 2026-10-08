@@ -28,7 +28,8 @@ It communicates only through:
 - `--no-session`, `--model` / `--profile` pass-through flags,
 - `--add-dir <dir>` read-only sandbox directories (repeatable),
 - `--toolbox <dir>` user-defined tool directories (repeatable),
-- `--sandbox <policy>`, `--tools <names>` / `--no-tools`,
+- `--sandbox <policy>` (default `workspace-write-interactive`, not cake's
+  `workspace-write`), `--tools <names>` / `--no-tools`,
 - `--no-skills` / `--skills <names>`, and `--system-prompt <path>`,
 - `--` to terminate flag parsing before the prompt argument.
 

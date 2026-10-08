@@ -8,8 +8,9 @@ consumes cake events. This is the project's core external contract.
 
 - **cake invocation.** Live prompts run as `cake --output-format stream-json`
   with optional `--resume <uuid>`, `--no-session`, `--model` / `--profile`,
-  optional repeated `--add-dir <dir>` and `--toolbox <dir>`, optional
-  `--sandbox <policy>`, `--tools <names>` / `--no-tools`, `--no-skills` /
+  optional repeated `--add-dir <dir>` and `--toolbox <dir>`, and a
+  `--sandbox <policy>` that defaults to `workspace-write-interactive` (ADR 017);
+  `--tools <names>` / `--no-tools`, `--no-skills` /
   `--skills <names>`, and `--system-prompt <path>`. An initial fresh prompt
   may additionally use `--fork [<uuid>]`; once cake reports the forked session
   ID, later prompts use only its pinned `--resume <uuid>`. Read-only startup

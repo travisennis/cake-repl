@@ -13,6 +13,15 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   allowed sources. See
   [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md).
 
+- **Sandbox policy default.** Live invocations pass
+  `--sandbox workspace-write-interactive` unless the user overrides `-sandbox`.
+  This is a deliberate escalation over cake's own `workspace-write` default
+  because the REPL is interactive: `workspace-write-interactive` adds the macOS
+  capabilities that let a command launch and automate other applications. An
+  explicit empty `-sandbox ""` omits the flag, letting cake resolve its own
+  policy from `CAKE_SANDBOX` or its settings. See
+  [ADR 017](../adr/017-default-the-cake-sandbox-to-workspace-write-interactive.md).
+
 - **Session pinning (security boundary).** Once a session id has been
   announced, `sessionState` pins future prompts to `--resume <session-id>`.
   This prevents another cake process that creates a newer session in the same

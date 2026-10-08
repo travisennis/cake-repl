@@ -90,7 +90,7 @@ Flags:
 | `-profile <name>` | passed through to cake |
 | `-add-dir <dir>` | add a directory to cake's sandbox as read-only; repeatable |
 | `-toolbox <dir>` | add a directory of user-defined cake tools; repeatable |
-| `-sandbox <policy>` | sandbox policy passed through to cake |
+| `-sandbox <policy>` | sandbox policy passed through to cake (default: `workspace-write-interactive`) |
 | `-tools <names>` | restrict cake to a comma-separated list of registered tool names; passed through to cake |
 | `-no-tools` | expose no tools to cake |
 | `-no-skills` | disable all cake skills |
@@ -107,6 +107,14 @@ Flags:
 | `-max-timeline-items <n>` | limit timeline to `<n>` entries (default: no limit) |
 | `-tool-color` | keep ANSI color in tool output instead of stripping it (default: strip) |
 | `-version` | print version and exit |
+
+cake-repl runs cake with the `workspace-write-interactive` sandbox policy by
+default, unlike cake's own `workspace-write` default, because a REPL is
+interactive and that profile adds the macOS capabilities that let a command
+launch and automate other applications. Pass `-sandbox <policy>` to choose
+another policy (`read-only`, `workspace-write`, `workspace-write-interactive`, or
+`danger-full-access`), or `-sandbox ""` to let cake resolve its own policy from
+`CAKE_SANDBOX` or its settings.
 
 ## Keybindings
 
@@ -198,7 +206,9 @@ down. The status line and timeline only show it shortened.
   `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`,
   `-system-prompt`, and a non-default `-cake-bin` — after `-resume <id>`, so a
   pasted resume keeps the sandbox and model the original run used instead of
-  silently falling back to cake's defaults.
+  silently falling back to the startup defaults. The one exception is an
+  explicit `-sandbox ""` opt-out: the hint omits empty values, so a pasted
+  resume falls back to the `workspace-write-interactive` default.
 
 ## Config file
 

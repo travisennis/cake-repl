@@ -18,7 +18,11 @@ commands or help text (`internal/app/commands.go`), key bindings
   `-config`/`-no-config`, uuid shape, positional args rejected) are
   user-facing. The cake pass-through flags must stay aligned with the cake
   contract. `-fork` applies to the initial fresh prompt; later prompts use
-  the pinned session when one is reported.
+  the pinned session when one is reported. `-sandbox` defaults to
+  `workspace-write-interactive`, not cake's own `workspace-write`, because a
+  REPL is interactive; an explicit empty value omits `--sandbox` so cake
+  resolves its own policy. See
+  [ADR 017](../adr/017-default-the-cake-sandbox-to-workspace-write-interactive.md).
 - **Config file shape.** TOML config supports only stable REPL defaults:
   `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`, and
   `tool-color`. Merge order is hardcoded defaults < XDG config < project-local
@@ -61,6 +65,9 @@ in plain text like every other surface.
   `-tools`, `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`, and a
   non-default `-cake-bin`) after `-resume <id>`, so a pasted resume does not
   silently drop the sandbox policy or model the original run was started with.
+  The one exception is an explicit empty `-sandbox ""` opt-out: the hint omits
+  empty values, so a pasted resume falls back to the default policy. That
+  provenance gap is tracked by task 104.
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
   labeled conversation sections; user content retains a slim gutter at normal

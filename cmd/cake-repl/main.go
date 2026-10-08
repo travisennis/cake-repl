@@ -22,6 +22,13 @@ import (
 	"github.com/travisennis/cake-repl/internal/version"
 )
 
+// defaultSandbox is the sandbox policy cake-repl passes to cake unless the user
+// overrides it. It is deliberately not cake's own default (workspace-write): a
+// REPL is interactive, and workspace-write-interactive adds the macOS
+// capabilities that let a command launch and automate other applications. See
+// ADR 017.
+const defaultSandbox = "workspace-write-interactive"
+
 // syncWriter serializes writes to an underlying io.Writer. The debug log is
 // written from both the cake runner goroutine and the Bubble Tea update
 // goroutine, so the writer that reaches both paths must be safe for concurrent
@@ -162,7 +169,7 @@ func run() (err error) {
 	flag.Var(&addDirs, "add-dir", "directory to add to cake's sandbox as read-only (repeatable)")
 	var toolboxDirs stringList
 	flag.Var(&toolboxDirs, "toolbox", "directory of user-defined cake tools (repeatable)")
-	sandbox := flag.String("sandbox", "", "sandbox policy passed through to cake")
+	sandbox := flag.String("sandbox", defaultSandbox, "sandbox policy passed through to cake")
 	noSkills := flag.Bool("no-skills", false, "disable all cake skills")
 	skills := flag.String("skills", "", "comma-separated skill names passed through to cake")
 	systemPrompt := flag.String("system-prompt", "", "path to a custom cake system prompt file")
@@ -349,9 +356,10 @@ func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[strin
 // same startup controls this process ran with. Cake session controls such as
 // -sandbox, -model, and -cwd shape every cake invocation and are not recorded
 // anywhere cake exposes for replay, so a resume command that omitted them would
-// silently change the resumed run's behavior (for example, reverting a
-// read-only sandbox to cake's workspace-write default, or letting a config file
-// re-supply a model the run was started without).
+// silently change the resumed run's behavior (for example, reverting an
+// explicitly selected read-only sandbox to the workspace-write-interactive
+// default, or letting a config file re-supply a model the run was started
+// without).
 func resumeCommand(cfg app.Config, configPath string, noConfig bool, sessionID string) string {
 	parts := []string{"cake-repl", "-resume", shellQuote(sessionID)}
 	addFlag := func(name, value string) {
