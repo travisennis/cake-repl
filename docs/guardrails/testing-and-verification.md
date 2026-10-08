@@ -16,7 +16,10 @@ this guardrail covers the project's test conventions and the verification ladder
   package; name tests after behavior.
 - **Runner tests use fake `cake` shell scripts** (successful streams, malformed
   lines, non-zero exits, cancellation). They must not require a real `cake`
-  binary — keep it that way so the suite stays hermetic.
+  binary — keep it that way so the suite stays hermetic. The separate
+  `scripts/fake-cake.sh` wraps the same fixtures for a driven session (the
+  [`drive-tui`](../../.agents/skills/drive-tui/SKILL.md) skill); it is evidence
+  tooling, not part of the suite.
 - Put focused tests next to changed code, especially for: stream-json parsing,
   session run-mode transitions, slash-command parsing, and UI formatting.
 - **Stream fixtures live in `internal/cake/testdata/fixtures/*.ndjson`** — one

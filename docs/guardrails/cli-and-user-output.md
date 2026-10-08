@@ -148,11 +148,16 @@ in plain text like every other surface.
 
 - `just test` (covers `commands_test.go`, `update_test.go`, `status_test.go`,
   `toolblock_test.go`). Add cases for new flags, commands, or render kinds.
-- For UI/output changes, capture a terminal screenshot for the handoff.
+- For UI/output changes, capture a terminal screenshot for the handoff with the
+  [`drive-tui`](../../.agents/skills/drive-tui/SKILL.md) skill: it launches the
+  built binary in a headless tmux pane against the checked-in fake cake, so the
+  procedure is repeatable and spends no money.
 - For inline-mode changes, drive the real binary in a terminal at 80x24 and
   after a resize: check that history stays visible above the region, that the
   region respects the cap, and that exit leaves the timeline region and no
   composer rows. No test drives a terminal, so this capture is the evidence.
+  Use the `drive-tui` skill for the mechanics, and pre-fill the pane with output
+  before launching so there is history above the region to check.
 - Manually sanity-check with `just run -no-color` when touching theming.
 
 ## Common failure modes

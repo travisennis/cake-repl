@@ -19,6 +19,11 @@ workflows (`.github/workflows/`), `.goreleaser.yaml`, `.golangci.yml`, or
   `benchstat` is deliberately outside this set: it is an optional developer
   tool for reading `just bench` output, no CI job uses it, and `install-tools`
   does not install it.
+- **Developer host tools.** `tmux` is how the
+  [`drive-tui`](../../.agents/skills/drive-tui/SKILL.md) skill drives the REPL for
+  a terminal capture. It is a host prerequisite for that skill only: not a pinned
+  tool, not a `go.mod` dependency, and no CI job uses it — the same standing as
+  `benchstat`.
 - **Dependency surface.** The runtime stack is the charmbracelet ecosystem
   (bubbletea, bubbles, lipgloss) plus termenv. Prefer the standard library; add
   dependencies deliberately and keep `go mod tidy` clean.
