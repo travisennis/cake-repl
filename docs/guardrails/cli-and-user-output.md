@@ -112,7 +112,11 @@ in plain text like every other surface.
   All timeline and status-line text is sanitized before styling: ANSI escape
   sequences are stripped, tabs expand to the next eight-column stop, and
   remaining C0/C1 controls are dropped, so tool output renders as plain text
-  without its own colors. This is the default and cannot be turned off
+  without its own colors. Assistant markdown is scrubbed a second time after
+  glamour renders it, because decoding unescapes HTML character references
+  (`&#7;`, `&#27;[2J`) into exactly those controls; the rendered markdown keeps
+  only the reviewed SGR that carries the theme's styling, and `-no-color`
+  strips it all. This is the default and cannot be turned off
   implicitly. The one exception is the opt-in `-tool-color` (config
   `tool-color`, default false): tool *output* blocks then keep SGR (`CSI ... m`)
   sequences whose parameters are in a reviewed set, with embedded resets

@@ -89,8 +89,12 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
 - **Sanitize at the render boundary.** `ui.RenderItem` and `ui.StatusLine`
   strip terminal control sequences from stream content before styling it, so
   no timeline item kind can write escapes to the terminal and width math stays
-  honest. Sanitization works on a copy; `internal/app` and the debug log keep
-  the raw bytes. See
+  honest. Assistant markdown is scrubbed twice on purpose: glamour unescapes
+  HTML character references while rendering (`&#7;`, `&#27;[2J`), so the
+  decoded output is scrubbed again before it leaves the boundary — Ascii keeps
+  no sequences, and a color profile keeps only the reviewed, rendition-only SGR
+  that carries the theme's styling. Sanitization works on a copy; `internal/app`
+  and the debug log keep the raw bytes. See
   [`docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md`](docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
 - **Session state is a pure state machine.** `sessionState` (in `session.go`)
   decides the next run mode with no I/O, which is what makes the

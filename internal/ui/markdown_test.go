@@ -258,3 +258,137 @@ func TestRenderMarkdown_FallbackOnError(t *testing.T) {
 		t.Errorf("output should contain the input text, plain=%q", plain)
 	}
 }
+
+// TestRenderMarkdown_ScrubsDecodedControls covers the boundary markdown
+// decoding opens: glamour unescapes HTML character references after the
+// caller's [Sanitize] pass, so a message can reintroduce C0 controls and whole
+// escape sequences into styled output. Every context that decodes — prose,
+// emphasis, heading, code span, link text, blockquote, list, strikethrough, and
+// inline HTML — must come out clean under both profiles, with the visible text
+// intact.
+func TestRenderMarkdown_ScrubsDecodedControls(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+
+	decoded := []struct {
+		name string
+		text string
+	}{
+		{"prose bel", "before&#7;after"},
+		{"emphasis backspace", "**before&#8;after**"},
+		{"heading carriage return", "# before&#13;after"},
+		{"code span del", "`before&#127;after`"},
+		{"link text nul", "[before&#0;after](https://example.com)"},
+		{"blockquote bel", "> before&#7;after"},
+		{"list backspace", "- before&#8;after"},
+		{"strikethrough carriage return", "~~before&#13;after~~"},
+		{"inline html bel", "<span>before&#7;after</span>"},
+		{"erase display", "before&#27;[2Jafter"},
+		{"clipboard write", "before&#27;]52;c;aGF4&#7;after"},
+		{"hyperlink", "before&#27;]8;;https://evil.example&#7;after"},
+		{"hex escape", "before&#x1b;[2Jafter"},
+		// A decoded escape consumes the byte after it (ESC | is a two-byte
+		// escape sequence), so the scrub drops both.
+		{"lone escape", "before&#27;|after"},
+		{"tab", "before&#9;after"},
+		// C1 references decode to printable characters (&#155; is "›"), never
+		// to a C1 rune; the assertion still rejects any C1 control.
+		{"c1 reference", "before&#155;after"},
+	}
+
+	for profileName, profile := range map[string]termenv.Profile{
+		"ascii":     termenv.Ascii,
+		"truecolor": termenv.TrueColor,
+	} {
+		for _, tt := range decoded {
+			t.Run(profileName+"/"+tt.name, func(t *testing.T) {
+				lipgloss.SetColorProfile(profile)
+
+				got := RenderMarkdown(tt.text, 60)
+				assertNoTerminalControls(t, got)
+				if profile == termenv.Ascii && strings.Contains(got, "\x1b") {
+					t.Errorf("no-color render contains an escape byte: %q", got)
+				}
+				for _, want := range []string{"before", "after"} {
+					if !strings.Contains(got, want) {
+						t.Errorf("visible text %q lost: %q", want, got)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestRenderMarkdown_PreservesCleanStyledOutput pins that the decode scrub is
+// invisible for clean markdown: the rendered output is exactly what the glamour
+// renderer produced, so no theme styling is lost. Glamour emits only reviewed,
+// rendition-only SGR for this theme, which is what makes keeping it compatible
+// with the decode scrub (ADR 009).
+func TestRenderMarkdown_PreservesCleanStyledOutput(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	const input = "# Heading\n\n> quote\n\n- **bold** and *italic*\n\n`code` and [link](https://example.com)\n\n```go\nfmt.Println(\"hi\")\n```\n"
+	const width = 60
+
+	mdMu.Lock()
+	r := getRendererLocked(width, termenv.TrueColor)
+	mdMu.Unlock()
+	if r == nil {
+		t.Fatal("renderer construction failed")
+	}
+	raw, err := r.Render(input)
+	if err != nil {
+		t.Fatalf("glamour render failed: %v", err)
+	}
+	// Mirror RenderMarkdown's newline trim.
+	raw = strings.TrimPrefix(raw, "\n")
+	raw = strings.TrimSuffix(raw, "\n")
+	if !strings.Contains(raw, "\x1b[") {
+		t.Fatal("expected the theme to emit SGR under TrueColor")
+	}
+
+	if got := RenderMarkdown(input, width); got != raw {
+		t.Errorf("decode scrub changed clean styled output:\ngot  %q\nwant %q", got, raw)
+	}
+}
+
+// TestRenderMarkdown_RetainsMarkdownContent covers what the scrub must not
+// touch: ordinary markdown and links, character references in prose that decode
+// to visible text, and code samples, which keep character references literal
+// because glamour does not decode inside a fenced code block. That last case is
+// why the decode boundary is enforced on the rendered output rather than by
+// rewriting the source.
+func TestRenderMarkdown_RetainsMarkdownContent(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	markdown := RenderMarkdown("**bold** and `code` and [link](https://example.com)", 60)
+	for _, want := range []string{"bold", "code", "link", "https://example.com"} {
+		if !strings.Contains(stripANSI(markdown), want) {
+			t.Errorf("markdown content %q lost: %q", want, markdown)
+		}
+	}
+
+	decoded := RenderMarkdown("a &amp; b &lt; c", 60)
+	if !strings.Contains(stripANSI(decoded), "a & b < c") {
+		t.Errorf("visible character references did not decode: %q", decoded)
+	}
+
+	literal := RenderMarkdown("```\nkeep &#7; literal\n```\n", 60)
+	if !strings.Contains(stripANSI(literal), "keep &#7; literal") {
+		t.Errorf("code sample lost its literal character reference: %q", literal)
+	}
+
+	// A tab-indented code sample keeps its code text: the scrub expands the tab
+	// to the next eight-column stop (ADR 005) rather than dropping it.
+	code := RenderMarkdown("```go\nfunc main() {\n\tfmt.Println(\"hi\")\n}\n```\n", 60)
+	if !strings.Contains(stripANSI(code), "fmt.Println(\"hi\")") {
+		t.Errorf("tab-indented code sample lost its code: %q", code)
+	}
+	if strings.Contains(code, "\t") {
+		t.Errorf("tab byte survived markdown rendering: %q", code)
+	}
+}

@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
-	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 )
 
@@ -23,6 +22,14 @@ var (
 // width, respecting the current terminal color profile (so --no-color produces
 // readable plain text). Its compact style mirrors the REPL's cyan accent,
 // blue links, yellow code, and muted structural elements.
+//
+// The returned string is safe to write to the terminal even though the input
+// has already been sanitized: markdown decoding unescapes HTML character
+// references (&#7;, &#x1b;, ...), so a message can reintroduce C0 controls and
+// whole escape sequences after the caller's [Sanitize] pass. The decoded result
+// is therefore scrubbed again here — the Ascii profile keeps no sequences at
+// all, and a color profile keeps only the reviewed, rendition-only SGR that
+// carries the theme's styling (ADR 005, ADR 009).
 //
 // A private memoization cache avoids constructing a new glamour renderer on
 // every call: the renderer is rebuilt only when width or color profile change.
@@ -58,17 +65,22 @@ func RenderMarkdown(text string, width int) string {
 	// newline; strip them for consistency with other timeline item rendering.
 	out = strings.TrimPrefix(out, "\n")
 	out = strings.TrimSuffix(out, "\n")
+
+	// Scrub the decoded output before it can reach the terminal: the Ascii
+	// profile keeps no sequences at all, and a color profile keeps only the
+	// reviewed SGR that carries the theme's styling. Glamour can retain
+	// emphasis control sequences even with an Ascii profile, and it decodes
+	// character references into controls under both, so neither profile can
+	// skip this step.
 	if profile == termenv.Ascii {
-		// Glamour can retain emphasis control sequences even with an Ascii
-		// profile, so strip every ANSI sequence before width padding.
-		out = xansi.Strip(out)
+		out = Sanitize(out)
 		if strings.TrimSpace(out) == "" {
 			out = text
 		}
 		return lipgloss.NewStyle().Width(width).Render(out)
 	}
 
-	return out
+	return scrubKeepingSGR(out, "")
 }
 
 // getRendererLocked returns a cached or newly built glamour renderer for the given

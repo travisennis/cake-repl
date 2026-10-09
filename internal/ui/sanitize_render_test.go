@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -30,10 +32,49 @@ func assertNoInjection(t *testing.T, got string) {
 		{"backspace", "\b"},
 		{"bel", "\x07"},
 		{"nul", "\x00"},
+		{"del", "\x7f"},
 	} {
 		if strings.Contains(got, bad.seq) {
 			t.Errorf("%s survived rendering: %q", bad.name, got)
 		}
+	}
+}
+
+// sgrSequence matches a reviewed SGR (CSI ... m) sequence: the one escape
+// family the render boundary may pass through (ADR 009). Anything else that
+// starts with ESC is a failure.
+var sgrSequence = regexp.MustCompile("^\x1b\\[[0-9;]*m")
+
+// assertNoTerminalControls asserts on a rendered string directly, independent
+// of how it was produced: it must be valid UTF-8, it may carry no control rune
+// the terminal would act on (any C0 or C1 control or DEL; newline is the only
+// permitted one), and every escape byte in it must begin a reviewed SGR
+// sequence. The Ascii profile is stricter still — callers assert it carries no
+// escape byte at all.
+func assertNoTerminalControls(t *testing.T, got string) {
+	t.Helper()
+	if !utf8.ValidString(got) {
+		t.Errorf("rendered output is not valid UTF-8: %q", got)
+	}
+	for _, r := range got {
+		if r == '\n' || r == 0x1b {
+			continue // line structure; escape bytes are checked below
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			t.Errorf("control rune %#U survived rendering: %q", r, got)
+		}
+	}
+	for i := 0; i < len(got); {
+		if got[i] != 0x1b {
+			i++
+			continue
+		}
+		if m := sgrSequence.FindString(got[i:]); m != "" {
+			i += len(m)
+			continue
+		}
+		t.Errorf("escape sequence outside the reviewed SGR family survived at offset %d: %q", i, got)
+		i++
 	}
 }
 
@@ -323,7 +364,10 @@ func TestRenderItem_ToolColorIsToolOutputOnly(t *testing.T) {
 	th := DefaultTheme()
 	th.ToolColor = true
 	const mark = "\x1b[38;5;196mmarker" // a bright red the theme never uses
-	for _, kind := range []Kind{KindError, KindWarning, KindHook, KindInfo, KindReasoning, KindUser} {
+	// KindAssistant is included because it renders through glamour, which
+	// decodes character references into escapes: tool color must not open a
+	// passthrough there either.
+	for _, kind := range []Kind{KindError, KindWarning, KindHook, KindInfo, KindReasoning, KindUser, KindAssistant} {
 		got := RenderItem(th, Item{Kind: kind, Text: mark}, 60, DefaultOutputLimit, ToolOutputTruncated)
 		if strings.Contains(got, "\x1b[38;5;196m") {
 			t.Errorf("kind %d kept stream escapes with tool color on: %q", kind, got)
@@ -364,5 +408,62 @@ func TestRenderItem_AssistantSanitizedBeforeMarkdown(t *testing.T) {
 	// identical to rendering the raw text.
 	if got := RenderItem(th, Item{Kind: KindAssistant, Text: Sanitize(md)}, 60, DefaultOutputLimit, ToolOutputTruncated); got != want {
 		t.Errorf("sanitization changed normal markdown rendering:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderItem_AssistantDecodedControlsScrubbed is the end-to-end form of the
+// markdown decode boundary: RenderItem sanitizes the source, and glamour then
+// unescapes HTML character references, so numeric references reintroduce C0
+// controls and whole escape sequences into the assistant path. The rendered
+// item must carry none of them under either profile, and the visible text must
+// survive.
+func TestRenderItem_AssistantDecodedControlsScrubbed(t *testing.T) {
+	th := DefaultTheme()
+
+	decoded := []struct {
+		name string
+		text string
+	}{
+		{"bel", "before&#7;after"},
+		{"backspace", "before&#8;after"},
+		{"carriage return", "before&#13;after"},
+		{"del", "before&#127;after"},
+		{"nul", "before&#0;after"},
+		{"erase display", "before&#27;[2Jafter"},
+		{"clipboard write", "before&#27;]52;c;aGF4&#7;after"},
+		{"hyperlink", "before&#27;]8;;https://evil.example&#7;after"},
+		{"hex escape", "before&#x1b;[2Jafter"},
+		// A decoded escape consumes the byte after it (ESC | is a two-byte
+		// escape sequence), so the scrub drops both.
+		{"lone escape", "before&#27;|after"},
+		{"tab", "before&#9;after"},
+		// C1 references decode to printable characters (&#155; is "›"), never
+		// to a C1 rune; the assertion still rejects any C1 control.
+		{"c1 reference", "before&#155;after"},
+	}
+
+	for profileName, profile := range map[string]termenv.Profile{
+		"ascii":     termenv.Ascii,
+		"truecolor": termenv.TrueColor,
+	} {
+		for _, tt := range decoded {
+			t.Run(profileName+"/"+tt.name, func(t *testing.T) {
+				orig := lipgloss.ColorProfile()
+				defer lipgloss.SetColorProfile(orig)
+				lipgloss.SetColorProfile(profile)
+
+				got := RenderItem(th, Item{Kind: KindAssistant, Text: tt.text}, 80, DefaultOutputLimit, ToolOutputTruncated)
+				assertNoInjection(t, got)
+				assertNoTerminalControls(t, got)
+				if profile == termenv.Ascii && strings.Contains(got, "\x1b") {
+					t.Errorf("no-color render contains an escape byte: %q", got)
+				}
+				for _, want := range []string{"before", "after"} {
+					if !strings.Contains(got, want) {
+						t.Errorf("visible text %q lost: %q", want, got)
+					}
+				}
+			})
+		}
 	}
 }

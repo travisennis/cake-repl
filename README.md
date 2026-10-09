@@ -332,16 +332,18 @@ validation is available with `just release-check`.
   `-max-timeline-items` to bound how many entries are kept.
 - Terminal control sequences are stripped from everything cake sends before it
   is drawn, so a command's own ANSI colors are not shown and tabs expand to
-  eight-column stops. This is deliberate and is the default: tool output is the
-  stdout of arbitrary commands, and escape sequences there could clear the
-  screen, write your clipboard, or forge hyperlinks. Pass `-tool-color` (or set
-  `tool-color = true` in the config file) to keep SGR color in tool output
-  blocks; SGR only sets rendition, so it cannot do any of those things, and
-  every other escape family, and every item kind other than tool output, stays
-  stripped. `-no-color` still forces plain output. Only tools that force color
-  emit SGR here, because cake runs them with piped stdout: `git diff --color`
-  and `rg --color=always` do, a bare `rg` or `eza` does not. The raw bytes are
-  still recorded when `-debug-log` is set.
+  eight-column stops. That includes what markdown decoding would otherwise
+  introduce: character references such as `&#7;` or `&#27;[2J` are removed from
+  rendered assistant messages before they are drawn. This is deliberate and is
+  the default: tool output is the stdout of arbitrary commands, and escape
+  sequences there could clear the screen, write your clipboard, or forge
+  hyperlinks. Pass `-tool-color` (or set `tool-color = true` in the config file)
+  to keep SGR color in tool output blocks; SGR only sets rendition, so it cannot
+  do any of those things, and every other escape family, and every item kind
+  other than tool output, stays stripped. `-no-color` still forces plain output.
+  Only tools that force color emit SGR here, because cake runs them with piped
+  stdout: `git diff --color` and `rg --color=always` do, a bare `rg` or `eza`
+  does not. The raw bytes are still recorded when `-debug-log` is set.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.

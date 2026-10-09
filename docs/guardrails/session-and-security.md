@@ -68,6 +68,17 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   forced off under the Ascii profile. See
   [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
   and [ADR 009](../adr/009-opt-in-sgr-passthrough-for-tool-output.md).
+- **Assistant markdown is decoded after sanitization (security boundary).**
+  Glamour unescapes HTML character references while rendering, so numeric
+  references such as `&#7;`, `&#13;`, or `&#27;[2J` introduce C0 controls and
+  whole escape sequences after the render boundary's `ui.Sanitize` pass. The
+  rendered markdown is therefore scrubbed again before it can leave
+  `ui.RenderMarkdown`: the Ascii profile keeps no sequences at all, and a color
+  profile keeps only the reviewed, rendition-only SGR that carries the theme's
+  styling, through the same policy as `-tool-color`. Never rewrite the markdown
+  source to close this hole — glamour does not decode inside fenced code blocks
+  or link destinations, so a source pass would corrupt code samples. See
+  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
 - **Process lifecycle.** One cake process at a time, including while replay
   hydration is active. Cancel = SIGTERM then SIGKILL after `WaitDelay` (kill
   outright on Windows). stderr retained as a bounded tail for error display.
@@ -119,6 +130,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   SGR in tool output; widen it to other item kinds or other escape families and
   it becomes this failure mode. Relying on glamour to discard escapes is not a
   defense.
+- **Trusting the input pass to cover decoded markdown.** `ui.Sanitize` runs on
+  the markdown source, but glamour unescapes character references while
+  rendering, so the rendered output needs its own scrub; removing that scrub
+  (or replacing it with `ansi.Strip`, which leaves bare C0 bytes) reopens the
+  hole.
 - **Cancellation races.** Treating a finished run as canceled because Ctrl+C
   arrived late — classify from the `cmd.Cancel` flag plus signal-terminated
   process status on POSIX, not the context. See `runner.go` for how the atomic

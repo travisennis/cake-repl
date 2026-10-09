@@ -65,6 +65,22 @@ func SanitizeToolOutput(s string, keepSGR bool, openSeq string) string {
 	if !keepSGR {
 		return Sanitize(s)
 	}
+	return scrubKeepingSGR(s, openSeq)
+}
+
+// scrubKeepingSGR is the reviewed-SGR policy shared by every render path that
+// has legitimate styling of its own to protect: the opt-in tool-output
+// passthrough ([SanitizeToolOutput]) and glamour's rendered markdown, whose
+// output carries the theme's SGR but is decoded from untrusted source (see
+// [RenderMarkdown]). It keeps SGR sequences whose parameters are in the
+// reviewed set and drops everything else the way [Sanitize] does, so no cursor
+// motion, erase, clipboard write, or hyperlink can ride along, and it scrubs
+// the surrounding text — including any control byte a decode step produced —
+// identically.
+//
+// openSeq is re-emitted after every kept reset so an enclosing style resumes;
+// callers with no enclosing style pass the empty string.
+func scrubKeepingSGR(s string, openSeq string) string {
 	if s == "" {
 		return s
 	}
