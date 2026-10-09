@@ -272,6 +272,14 @@ func run() (err error) {
 		opts = append(opts, tea.WithAltScreen())
 	}
 	p := tea.NewProgram(app.New(cfg), opts...)
+	// A catchable external SIGTSTP stops this process without giving the
+	// terminal back, so the shell's fg resumes a REPL that still believes it
+	// owns raw mode. Release the terminal before stopping and re-own it after
+	// SIGCONT; only meaningful when this process owns a terminal. See ADR 018.
+	if stdoutIsTerminal() {
+		stopSuspend := watchSuspend(p, *inline, suspendLogf(cfg.DebugLog))
+		defer stopSuspend()
+	}
 	m, err := p.Run()
 	mod, ok := m.(app.Model)
 	if ok {
@@ -297,6 +305,27 @@ func run() (err error) {
 		}
 	}
 	return nil
+}
+
+// terminalProgram is the slice of *tea.Program the suspend watcher drives. It is
+// declared once here rather than in each build-tagged file so the two never
+// drift. It is an interface so the suspend cycle's ordering can be exercised
+// without a real program.
+type terminalProgram interface {
+	ReleaseTerminal() error
+	RestoreTerminal() error
+}
+
+// suspendLogf returns the logger for terminal-lifecycle diagnostics. It writes
+// to the -debug-log writer, or discards when none was configured. The debug log
+// uses one `tag: message` line per event (`stdout:`, `exit:`), so callers pass a
+// message that starts with the `suspend:` tag.
+func suspendLogf(w io.Writer) func(string, ...any) {
+	return func(format string, args ...any) {
+		if w != nil {
+			fmt.Fprintf(w, format+"\n", args...)
+		}
+	}
 }
 
 // loadStartupConfig enforces executable provenance at the project-local layer.

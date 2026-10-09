@@ -78,6 +78,17 @@ most about half the window), and exiting erases the composer and status rows so
 the timeline region, the resume message, and the shell prompt sit next to each
 other. The alternate screen stays the default.
 
+An external stop signal — `kill -TSTP <pid>` from another shell, or any
+equivalent — no longer strands the terminal. cake-repl releases the terminal
+before it stops and re-owns it when `fg` resumes it, so the shell keeps a
+usable prompt while the REPL is stopped and the resume restores raw input,
+cursor, mouse, and screen modes and repaints the same conversation: prompt
+history, the timeline, and the composer are all still there. A cake run that was
+in flight is paused with the REPL rather than killed, and its output arrives
+after the resume. In `-inline` mode the suspension happens on the alternate
+screen, so anything you run in the shell while the REPL is stopped is not kept
+once you return to it.
+
 Flags:
 
 | Flag | Meaning |
@@ -334,6 +345,12 @@ validation is available with `just release-check`.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
+- Suspension recovery covers catchable stop signals. Because the stop uses
+  SIGSTOP, the shell reports the resumed job as `suspended (signal)`; continuing
+  it in the background (`bg`) puts the REPL back in charge of the terminal while
+  the shell still holds it, exactly as Bubble Tea's own suspend behaves; a bare
+  SIGSTOP, or the REPL dying while it is stopped, cannot release the terminal
+  first, so recover with `fg` or reset the terminal (`reset`, `stty sane`).
 - `-inline` keeps the transcript in the REPL's own viewport rather than the
   terminal scrollback, so terminal search and copy do not reach it, and the
   live region is capped (at most about half the window), so a long

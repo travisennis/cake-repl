@@ -41,6 +41,7 @@ scope unless the cake contract itself has changed. See
 
 ```
 cmd/cake-repl/main.go    Entry point: flag parsing, validation, Bubble Tea program startup.
+cmd/cake-repl/suspend.go Terminal release/restore around an external SIGTSTP (POSIX).
 internal/config/         TOML config-file loading for REPL startup defaults.
 internal/cake/           cake-as-engine: subprocess lifecycle + stream-json decoding.
   events.go              Typed live and replay event structs and the Event interface (the wire schema).
@@ -113,6 +114,15 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   `cmd.Cancel` successfully signaled the process and, on POSIX, whether the
   process was signal-terminated—not from `ctx.Err()`—so a late Ctrl+C cannot
   relabel a finished run.
+- **The terminal is handed back before the process stops.** A catchable external
+  SIGTSTP is handled in `cmd/cake-repl`: the terminal is released before the
+  process stops, the process group (REPL and its cake child) is stopped with
+  SIGSTOP, and after SIGCONT the modes Bubble Tea's `RestoreTerminal` leaves off
+  are written before it re-acquires the terminal and repaints. Nothing in the
+  model changes, so the conversation survives, and the engine is paused rather
+  than killed. Inline mode parks the suspension on the alternate screen. See
+  [`docs/adr/018-recover-terminal-ownership-around-an-external-suspend.md`](docs/adr/018-recover-terminal-ownership-around-an-external-suspend.md)
+  and [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 
 ## Related docs
 

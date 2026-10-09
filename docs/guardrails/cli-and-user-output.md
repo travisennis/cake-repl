@@ -155,7 +155,12 @@ in plain text like every other surface.
   title reset — so the timeline region, the resume message, and the shell
   prompt are adjacent. The alternate screen remains the default. Mouse
   reporting stays on, so the wheel scrolls the timeline and terminal history is
-  reachable through the terminal's own scrollback keys.
+  reachable through the terminal's own scrollback keys. An external suspend
+  parks the suspension on the alternate screen (ADR 018), so the shell's own
+  job-control output never lands in the live region and the resumed frame is
+  rewritten in place; the consequence is that shell output produced while the
+  REPL is stopped is discarded on resume, and the resumed frame can sit above
+  blank rows when the window grew while stopped.
 
 ## Required checks / test focus
 
@@ -171,6 +176,11 @@ in plain text like every other surface.
   composer rows. No test drives a terminal, so this capture is the evidence.
   Use the `drive-tui` skill for the mechanics, and pre-fill the pane with output
   before launching so there is history above the region to check.
+- For terminal-ownership or suspend changes, drive both render modes through an
+  external SIGTSTP and `fg` — idle and with a run in flight — and capture the
+  resumed frame plus the pane's termios and `#{mouse_any_flag}` before, during,
+  and after. The resumed frame must show one composer, one status line, and the
+  conversation, and `Up` must recall history rather than echo `^[[A`.
 - Manually sanity-check with `just run -no-color` when touching theming.
 
 ## Common failure modes

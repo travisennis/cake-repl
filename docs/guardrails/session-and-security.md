@@ -71,6 +71,22 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Process lifecycle.** One cake process at a time, including while replay
   hydration is active. Cancel = SIGTERM then SIGKILL after `WaitDelay` (kill
   outright on Windows). stderr retained as a bounded tail for error display.
+- **Terminal ownership across a suspend (security boundary).** The REPL owns raw
+  input, the cursor, mouse reporting, and (by default) the alternate screen, so
+  it must never stop or exit without giving them back. An external, catchable
+  SIGTSTP is handled in `cmd/cake-repl/suspend.go`: the terminal is released
+  (`ReleaseTerminal`) before the process stops, the whole process group is
+  stopped with SIGSTOP (SIGTSTP cannot be re-raised once `signal.Notify` has
+  taken it; a group stop pauses the cake child with the REPL instead of leaving
+  it running unwatched), and after SIGCONT the modes Bubble Tea's
+  `RestoreTerminal` leaves off — mouse reporting — are written while the
+  renderer is still stopped, then the terminal is re-acquired. A release that
+  fails abandons the cycle and leaves the REPL running rather than stopping with
+  raw mode still enabled. Inline mode parks the suspension on the alternate
+  screen so the shell's own output cannot land in the live region. Uncatchable
+  SIGSTOP and a REPL killed while stopped are best-effort and documented, never
+  implied. See
+  [ADR 018](../adr/018-recover-terminal-ownership-around-an-external-suspend.md).
 - **Replay isolation.** Replay is read-only and must not alter the session run
   mode or create a new session. Its late events are discarded after `Ctrl+N`,
   and a canceled replay is drained before another cake process starts.
@@ -79,9 +95,13 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 
 - `just test` for `session_test.go` (cover every transition, especially
   success-pins-resume, failure-pins-resume, and failure-without-a-session-id-
-  does-not-advance).
+  does-not-advance) and `cmd/cake-repl` for the suspend cycle's step order and
+  its safe failure on an unreleasable terminal.
 - `just test-race` for any `runner.go` change.
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
+- Terminal behavior around a suspend has no unit-test surface beyond the step
+  order and mode sequences, so a change there needs the driven session in
+  [cli-and-user-output.md](cli-and-user-output.md), in both render modes.
 
 ## Common failure modes
 
@@ -105,6 +125,14 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   flag preserves ordering.
 - **Zombie / runaway processes.** Removing the SIGKILL fallback or `WaitDelay`,
   or allowing more than one concurrent run.
+- **Stopping or exiting with the terminal still owned.** Stopping before
+  releasing raw mode, the cursor, mouse reporting, or the alternate screen;
+  assuming `RestoreTerminal` restores every mode (it restores bracketed paste
+  and focus reporting, but not mouse reporting); stopping with SIGTSTP after the
+  runtime has taken it, which is swallowed; killing the engine instead of pausing
+  it with the process group; or letting a shell's job-control output land in the
+  live region because the suspension was not parked on the alternate screen in
+  inline mode.
 
 ## Related docs
 

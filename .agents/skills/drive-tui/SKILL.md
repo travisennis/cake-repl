@@ -170,6 +170,54 @@ tmux display -p -t "$session" '#{window_width}x#{window_height}'   # 120x40
 For a width-sensitive change, assert on wrapped **content**, not on the border
 width: pick a fixture or prompt whose text wraps differently at the two widths.
 
+### 5a. Suspend and resume
+
+Driving a stop signal needs a job-control shell between tmux and the binary, so
+launch the pane as a pristine interactive shell and start the REPL from it. That
+shell is also the only `fg` there is:
+
+```bash
+run=$(mktemp -d "${TMPDIR:-/tmp}/cake-repl-drive.XXXXXX")
+tmux new-session -d -s "$session" -c "$run/project" -x 100 -y 30 \
+  "env -i HOME=$run PATH=/usr/bin:/bin:/usr/sbin:/sbin TERM=xterm-256color zsh -f"
+tmux send-keys -t "$session" -l "$root/bin/cake-repl -cake-bin $root/scripts/fake-cake.sh \
+  -no-config -no-color -no-session -cwd $run/project -history-file $run/history"
+tmux send-keys -t "$session" Enter
+```
+
+`env -i` with `HOME` pointed at the scratch directory keeps the pane free of user
+rc files and history, so a capture cannot disclose them.
+
+The REPL owns the terminal and leaves `ISIG` off, so Ctrl+Z is just a keystroke.
+To raise the real signal, arm the pane's line discipline first and then send the
+key — that raises SIGTSTP for the pane's foreground process group, which is the
+job the shell made for the REPL, so the shell is never signalled by mistake:
+
+```bash
+tty=$(tmux display -p -t "$session" '#{pane_tty}')
+stty -f "$tty" isig                      # re-arm before EVERY cycle; raw mode clears it
+tmux send-keys -t "$session" C-z
+sleep 1                                  # the shell now owns the terminal
+```
+
+Observe from the shell's side rather than the app's: while the REPL is stopped,
+`tmux display -p -t "$session" '#{pane_current_command}'` is the shell, and
+`#{mouse_any_flag}` is `0` if the REPL released mouse reporting. Resume with a
+literal `fg` plus Enter, then check the modes and the input path:
+
+```bash
+tmux send-keys -t "$session" -l 'fg'; tmux send-keys -t "$session" Enter
+sleep 1
+stty -f "$tty" -a | sed -n 2p          # lflags: -icanon -isig ... -echo when raw mode is back
+tmux display -p -t "$session" '#{mouse_any_flag}'   # 1 again
+tmux send-keys -t "$session" Up        # the composer must recall history, not show ^[[A
+tmux send-keys -t "$session" Escape '[<0;25;10M'    # a synthetic SGR mouse report must not appear in the frame
+```
+
+A resumed frame that shows the shell's own notice, `^[[A`, or two composers is
+failing. Run the cycle idle, with a run in flight (`FAKE_CAKE_DELAY` keeps it on
+screen), and with the window resized while the REPL is stopped.
+
 ### 6. Capture the artifact
 
 ```bash
