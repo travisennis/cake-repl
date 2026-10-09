@@ -15,9 +15,9 @@ The status line leads with current idle/running state, followed by labeled
 session, next-run, model, and working-directory context. The model shown is the
 identity cake reports on the stream once available — the `[[models]]` entry
 name, falling back to the provider model ID — and otherwise the `-model`/config
-value. After a successful
-turn, the next prompt automatically continues the same cake session when cake
-reports a session ID.
+value. Once a run reports a session ID — at `task_start` or its completion —
+the next prompt continues the same cake session, whether that run succeeded,
+failed, or was canceled.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output, the
@@ -191,9 +191,10 @@ down. The status line and timeline only show it shortened.
   `task_start`. Until then the `-model`/config value is shown, which is also
   what an older cake keeps showing. A new session or a switch to a different
   `-resume` target drops the reported identity.
-- A failed or canceled task with a reported session ID is still pinned, so the
-  next prompt continues the session the run left behind instead of starting a
-  new one.
+- A run that ends before completing — canceled, a nonzero exit, a wait error, or
+  a stream that closes mid-task — is still pinned to the session id it
+  announced, so the next prompt continues the session the run left behind
+  instead of orphaning it.
 - `/new` clears local session state; the next prompt starts fresh.
 - `Ctrl+N` clears the timeline and local session state immediately. If a task
   is running, it is canceled and its remaining events are discarded. Prompt

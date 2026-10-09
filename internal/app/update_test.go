@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -930,6 +931,112 @@ func TestFinishRunCanceledBeforeTaskStartDoesNotInventSession(t *testing.T) {
 	mode, resumeID := m.session.RunOptions()
 	if mode != cake.RunFresh || resumeID != "" {
 		t.Errorf("after cancel mode=%v id=%q, want fresh with no id", mode, resumeID)
+	}
+}
+
+func TestFinishRunNonzeroExitPinsAnnouncedSession(t *testing.T) {
+	m := newLaidOutModel()
+	m.running = true
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 7, Stderr: "boom"})
+	m = tm.(Model)
+	requireTitle(t, cmd, "cake-repl: ")
+	if mode, resumeID := m.session.RunOptions(); mode != cake.RunResume || resumeID != "d8fceb36" {
+		t.Errorf("after nonzero exit mode=%v id=%q, want resume pinned to d8fceb36", mode, resumeID)
+	}
+	it := lastItem(t, m)
+	if it.Kind != ui.KindError || !strings.Contains(it.Text, "exited with code 7") {
+		t.Errorf("got kind=%v text=%q, want nonzero-exit error", it.Kind, it.Text)
+	}
+}
+
+func TestFinishRunWaitErrorPinsAnnouncedSession(t *testing.T) {
+	m := newLaidOutModel()
+	m.running = true
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
+	tm, cmd := m.finishRun(cake.Result{Err: errors.New("wait failed")})
+	m = tm.(Model)
+	requireTitle(t, cmd, "cake-repl: ")
+	if mode, resumeID := m.session.RunOptions(); mode != cake.RunResume || resumeID != "d8fceb36" {
+		t.Errorf("after wait error mode=%v id=%q, want resume pinned to d8fceb36", mode, resumeID)
+	}
+	it := lastItem(t, m)
+	if it.Kind != ui.KindError || !strings.Contains(it.Text, "wait failed") {
+		t.Errorf("got kind=%v text=%q, want wait-error item", it.Kind, it.Text)
+	}
+}
+
+func TestFinishRunIncompleteCleanExitPinsAnnouncedSession(t *testing.T) {
+	m := newLaidOutModel()
+	m.running = true
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
+	requireTitle(t, cmd, "cake-repl: ")
+	if mode, resumeID := m.session.RunOptions(); mode != cake.RunResume || resumeID != "d8fceb36" {
+		t.Errorf("after incomplete exit mode=%v id=%q, want resume pinned to d8fceb36", mode, resumeID)
+	}
+	it := lastItem(t, m)
+	if it.Kind != ui.KindWarning || !strings.Contains(it.Text, "before completing") {
+		t.Errorf("got kind=%v text=%q, want incomplete-exit warning", it.Kind, it.Text)
+	}
+}
+
+func TestFinishRunWithoutAnnouncedSessionLeavesModeUnchanged(t *testing.T) {
+	m := newLaidOutModel()
+	m.running = true
+	tm, _ := m.finishRun(cake.Result{ExitCode: 1})
+	m = tm.(Model)
+	if mode, resumeID := m.session.RunOptions(); mode != cake.RunFresh || resumeID != "" {
+		t.Errorf("no-id failure mode=%v id=%q, want fresh with no id", mode, resumeID)
+	}
+}
+
+// Ending a run that was retargeted but never announced its own id must keep
+// the explicit new target rather than pinning back to the previous session.
+func TestFinishRunAfterRetargetKeepsNewTarget(t *testing.T) {
+	const newTarget = "bbbbbbbb-1111-2222-3333-444444444444"
+	m := newLaidOutModel()
+	m.running = true
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "aaaaaaaa-1111-2222-3333-444444444444"})
+	m.session.OnTaskComplete(success("aaaaaaaa-1111-2222-3333-444444444444"))
+	m.session.UseResume(newTarget)
+	tm, _ := m.finishRun(cake.Result{Canceled: true})
+	m = tm.(Model)
+	if mode, resumeID := m.session.RunOptions(); mode != cake.RunResume || resumeID != newTarget {
+		t.Errorf("after retarget + cancel mode=%v id=%q, want resume %q", mode, resumeID, newTarget)
+	}
+}
+
+// A fake cake that announces a session and then exits nonzero before any
+// completion record drives the full typed task_start -> terminal Result path,
+// so pinning is proven for the failure an incomplete event stream produces.
+func TestRunLoopPinsSessionAnnouncedBeforeFailure(t *testing.T) {
+	const announced = "11111111-2222-3333-4444-555555555555"
+	bin := writeFakeCake(t, `
+printf '%s\n' '{"type":"task_start","session_id":"11111111-2222-3333-4444-555555555555","task_id":"t-1"}'
+exit 3
+`)
+	m := newLaidOutModel()
+	m.cfg.CakeBin = bin
+	m.cfg.Cwd = t.TempDir()
+	tm, _ := m.startRun("hello")
+	m = tm.(Model)
+
+	for range 5 {
+		msg := waitForRun(m.run)()
+		tm, _ = m.Update(msg)
+		m = tm.(Model)
+		if m.run == nil {
+			break
+		}
+	}
+	if m.running {
+		t.Fatal("run never settled")
+	}
+	mode, resumeID := m.session.RunOptions()
+	if mode != cake.RunResume || resumeID != announced {
+		t.Errorf("after failed run mode=%v id=%q, want resume pinned to %q", mode, resumeID, announced)
 	}
 }
 

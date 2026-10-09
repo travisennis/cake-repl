@@ -880,7 +880,6 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 
 	switch {
 	case res.Canceled:
-		m.session.OnCancel()
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceled"})
 	case res.Err != nil:
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: "cake failed: " + res.Err.Error()})
@@ -893,6 +892,13 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	case !m.sawComplete:
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "cake exited before completing the task"})
 	}
+
+	// Whatever ended the run — cancellation, a nonzero exit, a wait error, or
+	// a clean EOF before task_complete — a session id announced for this
+	// invocation stays resumable. Pin it so the next prompt continues the same
+	// session instead of orphaning the work. A completion already pinned
+	// through OnTaskComplete, and pinning is idempotent.
+	m.session.OnRunEnded()
 
 	m.syncViewport()
 	if m.exitAfter {

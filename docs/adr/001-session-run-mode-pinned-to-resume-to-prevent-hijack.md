@@ -101,7 +101,7 @@ User-visible slash commands that override the state machine:
 - Good, because **a failed run is recoverable**: the work a failing task
   completed stays reachable from the next prompt instead of being orphaned.
 - Good, because **it's simple**: the state machine is ~90 lines with eight
-  methods (`RunOptions`, `OnTaskStart`, `OnTaskComplete`, `OnCancel`,
+  methods (`RunOptions`, `OnTaskStart`, `OnTaskComplete`, `OnRunEnded`,
   `pinToSession`, `Reset`, `UseContinue`, `UseResume`). No goroutines, no file
   I/O, no locking.
 - Neutral, because **the REPL can't recover if the pinned session file is
@@ -119,7 +119,7 @@ User-visible slash commands that override the state machine:
   The explicit `--resume` pinning and hijack-prevention rationale remain in
   force; the `--continue` fallback and manual continue mode were removed.
 - Implementation: `internal/app/session.go` (the `sessionState` struct and its
-  methods, including `OnCancel` for the cancellation pin).
+  methods, including `OnRunEnded` for termination and cancellation pins).
 - Tests: `internal/app/session_test.go` (ten cases covering all transitions
   including cancellation).
 - Guardrail: [`docs/guardrails/session-and-security.md`](../guardrails/session-and-security.md)

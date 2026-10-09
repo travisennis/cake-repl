@@ -15,6 +15,12 @@ type sessionState struct {
 	// cake has not reported one, so the status line falls back to the
 	// CLI/config value. It is cleared whenever the session target changes.
 	Model string
+	// AnnouncedID is the session id the current invocation reported through
+	// task_start (or, failing that, its completion). Only an id an invocation
+	// actually announced may pin the next prompt: a stale id left behind by an
+	// earlier session must never retarget the run. It is cleared whenever the
+	// session target changes, so it always belongs to the invocation being run.
+	AnnouncedID string
 }
 
 // RunOptions returns the mode and resume id for the next cake invocation.
@@ -35,10 +41,13 @@ func (s *sessionState) OnModel(modelConfig, model string) {
 	}
 }
 
-// OnTaskStart records ids announced at the start of a task.
+// OnTaskStart records ids announced at the start of a task. The announced
+// session id becomes the current invocation's identity, the only one eligible
+// to pin the next prompt if the run ends without a completion record.
 func (s *sessionState) OnTaskStart(e cake.TaskStart) {
 	s.SessionID = e.SessionID
 	s.TaskID = e.TaskID
+	s.AnnouncedID = e.SessionID
 }
 
 // OnTaskComplete records the outcome. Once a session id is known, future
@@ -52,6 +61,7 @@ func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 	s.LastComplete = &e
 	if e.SessionID != "" {
 		s.SessionID = e.SessionID
+		s.AnnouncedID = e.SessionID
 	}
 	if e.TaskID != "" {
 		s.TaskID = e.TaskID
@@ -60,22 +70,23 @@ func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 	s.pinToSession()
 }
 
-// OnCancel records that the current run was interrupted by the user. If a
-// session id has already been announced, future prompts are pinned to that
-// session so the next submission does not accidentally create a new one. This
-// preserves the hijack-prevention boundary even when a task is cut short.
-func (s *sessionState) OnCancel() {
+// OnRunEnded pins the next prompt to the session id the just-finished run
+// announced. It covers every way a run can stop without delivering a
+// completion record — cancellation, a nonzero exit, a wait error, or a clean
+// EOF mid-task — so resumable work cake already wrote is continued instead of
+// orphaned. A run that announced no id leaves the current run mode unchanged.
+func (s *sessionState) OnRunEnded() {
 	s.pinToSession()
 }
 
-// pinToSession points the next prompt at the known session id. When there is
-// no known id, the current run mode remains unchanged.
+// pinToSession points the next prompt at the id the current invocation
+// announced. When it announced none, the current run mode remains unchanged.
 func (s *sessionState) pinToSession() {
-	if s.SessionID == "" {
+	if s.AnnouncedID == "" {
 		return
 	}
 	s.NextMode = cake.RunResume
-	s.ResumeID = s.SessionID
+	s.ResumeID = s.AnnouncedID
 }
 
 // Reset clears all session state; the next prompt starts a fresh session.
@@ -87,6 +98,10 @@ func (s *sessionState) Reset() {
 func (s *sessionState) UseResume(id string) {
 	s.NextMode = cake.RunResume
 	s.ResumeID = id
+	// The previous invocation's announced id belongs to the old target; drop
+	// it so ending a run before the new target announces its own id cannot
+	// pin back to the session we just retargeted away from.
+	s.AnnouncedID = ""
 	// The displayed model belongs to the previous session; drop it so the
 	// status line does not show a stale identity for the newly targeted one.
 	s.Model = ""

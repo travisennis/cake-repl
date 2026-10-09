@@ -66,7 +66,7 @@ func TestNewResetsToFresh(t *testing.T) {
 	if mode, _ := s.RunOptions(); mode != cake.RunFresh {
 		t.Errorf("mode after reset = %v, want fresh", mode)
 	}
-	if s.SessionID != "" || s.LastComplete != nil {
+	if s.SessionID != "" || s.AnnouncedID != "" || s.LastComplete != nil {
 		t.Errorf("reset should clear state: %+v", s)
 	}
 }
@@ -115,36 +115,67 @@ func TestFailureAfterExplicitResumePinsToReportedSession(t *testing.T) {
 	}
 }
 
-func TestCancelAfterTaskStartPinsToSession(t *testing.T) {
+func TestRunEndedAfterTaskStartPinsToSession(t *testing.T) {
 	var s sessionState
 	s.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
-	s.OnCancel()
+	s.OnRunEnded()
 
 	mode, id := s.RunOptions()
 	if mode != cake.RunResume || id != "d8fceb36" {
-		t.Errorf("after cancel mode=%v id=%q, want resume pinned to d8fceb36", mode, id)
+		t.Errorf("after run end mode=%v id=%q, want resume pinned to d8fceb36", mode, id)
 	}
 }
 
-func TestCancelBeforeTaskStartDoesNotInventSession(t *testing.T) {
+func TestRunEndedBeforeTaskStartDoesNotInventSession(t *testing.T) {
 	var s sessionState
-	s.OnCancel()
+	s.OnRunEnded()
 
 	mode, id := s.RunOptions()
 	if mode != cake.RunFresh || id != "" {
-		t.Errorf("fresh + cancel before TaskStart mode=%v id=%q, want fresh with empty id", mode, id)
+		t.Errorf("fresh + run end before TaskStart mode=%v id=%q, want fresh with empty id", mode, id)
 	}
 }
 
-func TestCancelDuringExplicitResumePreservesResumeID(t *testing.T) {
+func TestRunEndedDuringExplicitResumePreservesResumeID(t *testing.T) {
 	var s sessionState
 	s.UseResume("11111111-2222-3333-4444-555555555555")
 	s.OnTaskStart(cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"})
-	s.OnCancel()
+	s.OnRunEnded()
 
 	mode, id := s.RunOptions()
 	if mode != cake.RunResume || id != "11111111-2222-3333-4444-555555555555" {
-		t.Errorf("after cancel mode=%v id=%q, want resume pinned to explicit session", mode, id)
+		t.Errorf("after run end mode=%v id=%q, want resume pinned to explicit session", mode, id)
+	}
+}
+
+// A completed session A leaves its id behind as history. Retargeting to B and
+// then ending the new run before it announces its own id must not pin back to
+// A: only the current invocation's announced id may pin.
+func TestRunEndedAfterRetargetDoesNotRestorePreviousSession(t *testing.T) {
+	var s sessionState
+	s.OnTaskStart(cake.TaskStart{SessionID: "aaaaaaaa-1111-2222-3333-444444444444"})
+	s.OnTaskComplete(success("aaaaaaaa-1111-2222-3333-444444444444"))
+
+	s.UseResume("bbbbbbbb-1111-2222-3333-444444444444")
+	s.OnRunEnded()
+
+	mode, id := s.RunOptions()
+	if mode != cake.RunResume || id != "bbbbbbbb-1111-2222-3333-444444444444" {
+		t.Errorf("after retarget + run end mode=%v id=%q, want resume pinned to the new target", mode, id)
+	}
+}
+
+// Ending a run that announced its own id re-pins the announced session even
+// when a different target was requested, matching the completion path.
+func TestRunEndedAfterRetargetPinsAnnouncedSession(t *testing.T) {
+	var s sessionState
+	s.UseResume("bbbbbbbb-1111-2222-3333-444444444444")
+	s.OnTaskStart(cake.TaskStart{SessionID: "aaaaaaaa-1111-2222-3333-444444444444"})
+	s.OnRunEnded()
+
+	mode, id := s.RunOptions()
+	if mode != cake.RunResume || id != "aaaaaaaa-1111-2222-3333-444444444444" {
+		t.Errorf("after run end mode=%v id=%q, want resume pinned to the announced session", mode, id)
 	}
 }
 

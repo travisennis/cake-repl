@@ -98,10 +98,11 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   [`docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md`](docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
 - **Session state is a pure state machine.** `sessionState` (in `session.go`)
   decides the next run mode with no I/O, which is what makes the
-  hijack-prevention behavior testable. Once a session id is known it pins
-  future prompts to `--resume <session-id>`, whether the task succeeded,
-  failed, or was canceled. No-session-ID completion leaves the current mode
-  unchanged; the REPL has no latest-session fallback. See
+  hijack-prevention behavior testable. Once a run announces a session id it
+  pins future prompts to `--resume <session-id>`, whether the run succeeded,
+  failed, was canceled, or ended before a completion record. No-session-ID
+  completion leaves the current mode unchanged; the REPL has no latest-session
+  fallback. See
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 - **Config is startup-only.** Config files set stable REPL defaults before the
   TUI starts, using hardcoded defaults < XDG config < project-local config <

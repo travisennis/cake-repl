@@ -37,8 +37,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   Hydration is not a live task, so the running state remains idle. A replay
   failure or unsupported cake binary produces a warning and leaves the explicit
   `--resume <uuid>` pin unchanged so the user can continue.
-- **Run-mode transitions.** `RunFresh` → (any completion reporting a session
-  id) → `RunResume`; `/new` resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
+- **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
+  at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
+  resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
   drains an active run without letting its late events or cancellation restore
   the old session pin; `/resume` sets the next mode explicitly. An initial
   `--fork` is consumed by its first fresh prompt, then the resulting session

@@ -27,7 +27,7 @@ The REPL can select a fresh cake session with `/new`, but users cannot begin a v
 
 Chosen option: 3, because it gives users an immediate visible transition while retaining the established subprocess cancellation and session-hijack protections.
 
-`Ctrl+N` resets local session state to fresh, clears the timeline, clears obsolete pending tool-call bookkeeping, and adds a `New session` informational item. Prompt history, the current input draft, model/profile configuration, working directory, and tool-output display mode remain unchanged. If a cake run is active, the shortcut requests cancellation and the app drains the run to completion while suppressing any subsequent events from that old run. The old run's cancellation result must not call `sessionState.OnCancel`, because doing so would restore the old session pin across the explicit boundary.
+`Ctrl+N` resets local session state to fresh, clears the timeline, clears obsolete pending tool-call bookkeeping, and adds a `New session` informational item. Prompt history, the current input draft, model/profile configuration, working directory, and tool-output display mode remain unchanged. If a cake run is active, the shortcut requests cancellation and the app drains the run to completion while suppressing any subsequent events from that old run. The old run's cancellation result must not call `sessionState.OnRunEnded`, because doing so would restore the old session pin across the explicit boundary.
 
 No confirmation or session-summary write is performed. cake remains the owner of session persistence, and cake-repl continues not to read or write cake session files.
 
