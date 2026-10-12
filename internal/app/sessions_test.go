@@ -317,15 +317,6 @@ func TestBrowserViewAsciiNoANSI(t *testing.T) {
 	}
 }
 
-// laidOut returns a model after its first layout at the given cell size, as if
-// the program had received that WindowSizeMsg.
-func laidOut(width, height int) Model {
-	m := New(Config{})
-	m.width, m.height = width, height
-	m.layout()
-	return m
-}
-
 // TestBrowserViewStaysWithinTimelineRegion checks the fixed-chrome promise at a
 // range of sizes and states: every browser state — loading, error, empty, list
 // — occupies exactly the timeline's rows so the composer and status line never

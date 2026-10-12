@@ -13,13 +13,19 @@ import (
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
-// newLaidOutModel returns a model after its first layout, as if the program
-// received the initial WindowSizeMsg.
-func newLaidOutModel() Model {
+// laidOut returns a model after its first layout at the given cell size, as if
+// the program had received that WindowSizeMsg.
+func laidOut(width, height int) Model {
 	m := New(Config{})
-	m.width, m.height = 80, 24
+	m.width, m.height = width, height
 	m.layout()
 	return m
+}
+
+// newLaidOutModel returns a model after its first layout at the default test
+// size, as if the program received the initial WindowSizeMsg.
+func newLaidOutModel() Model {
+	return laidOut(80, 24)
 }
 
 // TestNewWiresToolColor checks that the -tool-color opt-in reaches the theme
