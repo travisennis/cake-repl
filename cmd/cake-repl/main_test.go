@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/travisennis/cake-repl/internal/app"
+	"github.com/travisennis/cake-repl/internal/cake"
 )
 
 func TestValidateFlagsVersionShortCircuits(t *testing.T) {
@@ -224,6 +227,7 @@ func TestResumeCommand(t *testing.T) {
 		cfg        app.Config
 		configPath string
 		noConfig   bool
+		explicit   map[string]bool
 		want       string
 	}{
 		{
@@ -278,10 +282,34 @@ func TestResumeCommand(t *testing.T) {
 			cfg:  app.Config{Cwd: "/my project", Sandbox: "read-only"},
 			want: "cake-repl -resume " + id + " -cwd '/my project' -sandbox read-only",
 		},
+		{
+			name:     "explicit empty model is preserved",
+			cfg:      app.Config{CakeBin: "cake", Cwd: "/project"},
+			explicit: map[string]bool{"model": true},
+			want:     "cake-repl -resume " + id + " -cwd /project -model ''",
+		},
+		{
+			name:     "explicit empty profile is preserved",
+			cfg:      app.Config{CakeBin: "cake", Cwd: "/project"},
+			explicit: map[string]bool{"profile": true},
+			want:     "cake-repl -resume " + id + " -cwd /project -profile ''",
+		},
+		{
+			name:     "explicit empty sandbox is preserved",
+			cfg:      app.Config{CakeBin: "cake", Cwd: "/project"},
+			explicit: map[string]bool{"sandbox": true},
+			want:     "cake-repl -resume " + id + " -cwd /project -sandbox ''",
+		},
+		{
+			name:     "explicit default cake bin is preserved",
+			cfg:      app.Config{CakeBin: "cake", Cwd: "/project"},
+			explicit: map[string]bool{"cake-bin": true},
+			want:     "cake-repl -resume " + id + " -cake-bin cake -cwd /project",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resumeCommand(tt.cfg, tt.configPath, tt.noConfig, id)
+			got := resumeCommand(tt.cfg, tt.configPath, tt.noConfig, id, tt.explicit)
 			if got != tt.want {
 				t.Errorf("resumeCommand() = %q, want %q", got, tt.want)
 			}
@@ -304,6 +332,303 @@ func TestShellQuote(t *testing.T) {
 		if got := shellQuote(tt.in); got != tt.want {
 			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// splitShellFields splits a shell-quoted command line the way a POSIX shell
+// would: whitespace separates fields, single quotes group a span verbatim, and a
+// backslash outside quotes escapes the next byte (shellQuote puts a backslash
+// between two quoted spans for an embedded quote). It only needs to understand
+// the quoting shellQuote produces.
+func splitShellFields(s string) []string {
+	var fields []string
+	var cur strings.Builder
+	inQuote, started, escaped := false, false, false
+	flush := func() {
+		fields = append(fields, cur.String())
+		cur.Reset()
+		started = false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case escaped:
+			cur.WriteByte(c)
+			escaped, started = false, true
+		case !inQuote && c == '\\':
+			escaped, started = true, true
+		case c == '\'':
+			inQuote, started = !inQuote, true
+		case !inQuote && (c == ' ' || c == '\t'):
+			if started {
+				flush()
+			}
+		default:
+			cur.WriteByte(c)
+			started = true
+		}
+	}
+	if started {
+		flush()
+	}
+	return fields
+}
+
+// hasFlag reports whether a split argv contains name as a standalone token.
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == name {
+			return true
+		}
+	}
+	return false
+}
+
+// hasFlagValue reports whether a split argv carries name immediately followed by
+// value, matching the flag/value pairing resumeCommand emits.
+func hasFlagValue(args []string, name, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+// flagValue pairs a flag name with a value the hint should carry.
+type flagValue struct {
+	name  string
+	value string
+}
+
+// resumeProjection narrows an app.Config to the cake-invocation controls the
+// exit hint reproduces, so a round trip compares only the fields that matter.
+type resumeProjection struct {
+	CakeBin      string
+	Cwd          string
+	Model        string
+	Profile      string
+	Tools        string
+	NoTools      bool
+	AddDirs      []string
+	ToolboxDirs  []string
+	Sandbox      string
+	NoSkills     bool
+	Skills       string
+	SystemPrompt string
+}
+
+func projectResume(cfg app.Config) resumeProjection {
+	return resumeProjection{
+		CakeBin:      cfg.CakeBin,
+		Cwd:          cfg.Cwd,
+		Model:        cfg.Model,
+		Profile:      cfg.Profile,
+		Tools:        cfg.Tools,
+		NoTools:      cfg.NoTools,
+		AddDirs:      cfg.AddDirs,
+		ToolboxDirs:  cfg.ToolboxDirs,
+		Sandbox:      cfg.Sandbox,
+		NoSkills:     cfg.NoSkills,
+		Skills:       cfg.Skills,
+		SystemPrompt: cfg.SystemPrompt,
+	}
+}
+
+// parsedStartup is a startup argv after the real flag parse and config merge.
+type parsedStartup struct {
+	cfg        app.Config
+	explicit   map[string]bool
+	configPath string
+	noConfig   bool
+}
+
+// parseStartupArgs runs argv through the same bindFlags/effectiveConfig path the
+// binary uses, against whatever config files the test has laid out. It never
+// spawns cake.
+func parseStartupArgs(t *testing.T, argv []string) parsedStartup {
+	t.Helper()
+	fs := flag.NewFlagSet("cake-repl", flag.ContinueOnError)
+	f := bindFlags(fs)
+	if err := fs.Parse(normalizeForkArgs(argv)); err != nil {
+		t.Fatalf("parsing %v: %v", argv, err)
+	}
+	explicit := explicitFlags(fs)
+	cfg, err := effectiveConfig(f, explicit, io.Discard)
+	if err != nil {
+		t.Fatalf("effective config for %v: %v", argv, err)
+	}
+	return parsedStartup{cfg: cfg, explicit: explicit, configPath: *f.configPath, noConfig: *f.noConfig}
+}
+
+// TestResumeCommandRoundTrip drives the exit hint through the whole startup path:
+// a startup argv becomes an effective config, the hint is rendered from it, and
+// the hint is split and parsed back into an effective config. A pasted resume
+// must reproduce the original run's cake invocation, including explicit overrides
+// whose effective value is empty (-model "", -sandbox "") or the default
+// (-cake-bin cake). Config files are fake and local; no real cake is spawned.
+func TestResumeCommandRoundTrip(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+
+	// Model/profile/cake-bin all come from a config file, so an explicit override
+	// has something to suppress on the reload.
+	const xdgConfig = "model = \"xdg-model\"\nprofile = \"xdg-profile\"\ncake-bin = \"/xdg/cake\"\n"
+	const localConfig = "model = \"local-model\"\nprofile = \"local-profile\"\n"
+	// Selected only by an explicit -config, so it may also carry cake-bin.
+	const explicitConfig = "model = \"explicit-model\"\nprofile = \"explicit-profile\"\ncake-bin = \"./explicit-cake\"\n"
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantArgs   []flagValue
+		wantFlags  []string
+		wantAbsent []string
+		wantModel  string
+		wantProf   string
+		wantSand   string
+		wantBin    string
+	}{
+		{
+			name:      "plain run keeps config-derived values",
+			wantModel: "local-model",
+			wantProf:  "local-profile",
+			wantSand:  defaultSandbox,
+			wantBin:   "/xdg/cake",
+		},
+		{
+			name:      "explicit model and profile clears beat config",
+			args:      []string{"-model", "", "-profile", ""},
+			wantArgs:  []flagValue{{"-model", ""}, {"-profile", ""}},
+			wantModel: "",
+			wantProf:  "",
+			wantSand:  defaultSandbox,
+			wantBin:   "/xdg/cake",
+		},
+		{
+			name:      "explicit default cake bin beats config",
+			args:      []string{"-cake-bin", "cake"},
+			wantArgs:  []flagValue{{"-cake-bin", "cake"}},
+			wantModel: "local-model",
+			wantProf:  "local-profile",
+			wantSand:  defaultSandbox,
+			wantBin:   "cake",
+		},
+		{
+			name:      "explicit empty sandbox survives",
+			args:      []string{"-sandbox", ""},
+			wantArgs:  []flagValue{{"-sandbox", ""}},
+			wantModel: "local-model",
+			wantProf:  "local-profile",
+			wantSand:  "",
+			wantBin:   "/xdg/cake",
+		},
+		{
+			name:      "explicit non-default sandbox survives",
+			args:      []string{"-sandbox", "read-only"},
+			wantArgs:  []flagValue{{"-sandbox", "read-only"}},
+			wantModel: "local-model",
+			wantProf:  "local-profile",
+			wantSand:  "read-only",
+			wantBin:   "/xdg/cake",
+		},
+		{
+			name: "every session control round trips through quoting",
+			args: []string{
+				"-model", "cli-model", "-profile", "cli-profile",
+				"-sandbox", "danger-full-access",
+				"-add-dir", "vendor", "-add-dir", "/abs dir",
+				"-toolbox", ".cake/tools", "-tools", "bash,read",
+				"-no-tools", "-no-skills", "-skills", "go,testing",
+				"-system-prompt", "/tmp/it's prompt.md",
+			},
+			wantArgs:  []flagValue{{"-add-dir", "/abs dir"}, {"-system-prompt", "/tmp/it's prompt.md"}},
+			wantModel: "cli-model",
+			wantProf:  "cli-profile",
+			wantSand:  "danger-full-access",
+			wantBin:   "/xdg/cake",
+		},
+		{
+			name:      "explicit config file round trips",
+			args:      []string{"-config", "explicit.toml"},
+			wantArgs:  []flagValue{{"-config", "explicit.toml"}},
+			wantModel: "explicit-model",
+			wantProf:  "explicit-profile",
+			wantSand:  defaultSandbox,
+			wantBin:   "./explicit-cake",
+		},
+		{
+			name:       "no-config skips config values",
+			args:       []string{"-no-config"},
+			wantFlags:  []string{"-no-config"},
+			wantAbsent: []string{"-config"},
+			wantModel:  "",
+			wantProf:   "",
+			wantSand:   defaultSandbox,
+			wantBin:    "cake",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+			writeFile := func(path, content string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeFile(filepath.Join(dir, "xdg", "cake-repl", "config.toml"), xdgConfig)
+			writeFile(filepath.Join(dir, ".cake-repl.toml"), localConfig)
+			writeFile(filepath.Join(dir, "explicit.toml"), explicitConfig)
+
+			// -cwd points at a directory with a space so the hint has to quote it.
+			spaceDir := filepath.Join(dir, "my project")
+			if err := os.MkdirAll(spaceDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			args := append(append([]string{}, tt.args...), "-cwd", spaceDir)
+
+			start := parseStartupArgs(t, args)
+			hint := resumeCommand(start.cfg, start.configPath, start.noConfig, id, start.explicit)
+
+			fields := splitShellFields(hint)
+			if len(fields) < 3 || fields[0] != "cake-repl" || fields[1] != "-resume" || fields[2] != id {
+				t.Fatalf("hint = %q, want it to lead with %q", hint, "cake-repl -resume "+id)
+			}
+			for _, fv := range tt.wantArgs {
+				if !hasFlagValue(fields, fv.name, fv.value) {
+					t.Errorf("hint = %q, want it to carry %q %q", hint, fv.name, fv.value)
+				}
+			}
+			for _, name := range tt.wantFlags {
+				if !hasFlag(fields, name) {
+					t.Errorf("hint = %q, want it to carry %q", hint, name)
+				}
+			}
+			for _, name := range tt.wantAbsent {
+				if hasFlag(fields, name) {
+					t.Errorf("hint = %q, want it to omit %q", hint, name)
+				}
+			}
+
+			resumed := parseStartupArgs(t, fields[1:])
+			if got, want := projectResume(resumed.cfg), projectResume(start.cfg); !reflect.DeepEqual(got, want) {
+				t.Errorf("resumed controls = %+v, want %+v", got, want)
+			}
+			if resumed.cfg.InitialMode != cake.RunResume || resumed.cfg.ResumeID != id {
+				t.Errorf("resumed run mode = (%v, %q), want (%v, %q)",
+					resumed.cfg.InitialMode, resumed.cfg.ResumeID, cake.RunResume, id)
+			}
+			got := resumed.cfg
+			if got.Model != tt.wantModel || got.Profile != tt.wantProf || got.Sandbox != tt.wantSand || got.CakeBin != tt.wantBin {
+				t.Errorf("resumed (model, profile, sandbox, cake-bin) = (%q, %q, %q, %q), want (%q, %q, %q, %q)",
+					got.Model, got.Profile, got.Sandbox, got.CakeBin, tt.wantModel, tt.wantProf, tt.wantSand, tt.wantBin)
+			}
+		})
 	}
 }
 

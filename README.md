@@ -224,12 +224,14 @@ down. The status line and timeline only show it shortened.
 - On exit, cake-repl prints the command that resumes the session. The hint
   reproduces the effective startup run controls — `-cwd`, `-config <path>` or
   `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
-  `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`,
-  `-system-prompt`, and a non-default `-cake-bin` — after `-resume <id>`, so a
-  pasted resume keeps the sandbox and model the original run used instead of
-  silently falling back to the startup defaults. The one exception is an
-  explicit `-sandbox ""` opt-out: the hint omits empty values, so a pasted
-  resume falls back to the `workspace-write-interactive` default.
+  `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
+  `-system-prompt`, plus `-cake-bin` when it was set explicitly or is not the
+  default `cake` — after `-resume <id>`, so a pasted resume keeps the sandbox and
+  model the original run used instead of silently falling back to the startup
+  defaults. An explicit override that clears or defaults a value — `-sandbox ""`,
+  `-model ""`, `-profile ""`, or `-cake-bin cake` — is re-emitted (for example
+  `-sandbox ''`), so reloading the config cannot reintroduce a value the original
+  run suppressed.
 
 ## Config file
 

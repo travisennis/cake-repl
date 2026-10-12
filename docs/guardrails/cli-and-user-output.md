@@ -62,12 +62,13 @@ in plain text like every other surface.
   the explicit resume pin usable. The command `main` prints on exit reuses the
   effective startup run controls (`-cwd`, `-config <path>` or `-no-config`,
   plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`, `-toolbox`,
-  `-tools`, `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`, and a
-  non-default `-cake-bin`) after `-resume <id>`, so a pasted resume does not
-  silently drop the sandbox policy or model the original run was started with.
-  The one exception is an explicit empty `-sandbox ""` opt-out: the hint omits
-  empty values, so a pasted resume falls back to the default policy. That
-  provenance gap is tracked by task 104.
+  `-tools`, `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`, and
+  `-cake-bin` when it was set explicitly or is non-default) after `-resume
+  <id>`, so a pasted resume does not silently drop the sandbox policy or model
+  the original run was started with. An explicit override that clears or
+  defaults a value (`-sandbox ""`, `-model ""`, `-profile ""`, or `-cake-bin
+  cake`) is re-emitted — for example `-sandbox ''` — so reloading the config on
+  resume cannot reintroduce a value the original run suppressed.
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
   labeled conversation sections; user content retains a slim gutter at normal

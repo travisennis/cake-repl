@@ -155,120 +155,167 @@ func main() {
 	}
 }
 
+// startupFlags holds the bound values of every startup flag. bindFlags registers
+// them on fs and returns the holder, so the process command line and the
+// exit-hint round-trip tests parse one shared flag surface.
+type startupFlags struct {
+	cakeBin          *string
+	resume           *string
+	fork             optionalString
+	noSession        *bool
+	model            *string
+	profile          *string
+	tools            *string
+	noTools          *bool
+	addDirs          stringList
+	toolboxDirs      stringList
+	sandbox          *string
+	noSkills         *bool
+	skills           *string
+	systemPrompt     *string
+	cwd              *string
+	inline           *bool
+	noColor          *bool
+	debugLog         *string
+	historyFile      *string
+	showVersion      *bool
+	configPath       *string
+	noConfig         *bool
+	outputLimit      *int
+	maxTimelineItems *int
+	toolColor        *bool
+}
+
+// bindFlags registers the startup flag surface on fs. Flag names, defaults, and
+// help text are user-facing; keep them aligned with README.md and the CLI/output
+// guardrail.
+func bindFlags(fs *flag.FlagSet) *startupFlags {
+	f := &startupFlags{}
+	f.cakeBin = fs.String("cake-bin", "cake", "cake executable to run")
+	f.resume = fs.String("resume", "", "resume a specific cake session and reload its visible history")
+	fs.Var(&f.fork, "fork", "fork the latest cake session, or the specified session UUID")
+	f.noSession = fs.Bool("no-session", false, "do not save the cake session to disk")
+	f.model = fs.String("model", "", "model name passed through to cake")
+	f.profile = fs.String("profile", "", "behavior profile passed through to cake")
+	f.tools = fs.String("tools", "", "comma-separated tool names passed through to cake (restricts the session to these tools)")
+	f.noTools = fs.Bool("no-tools", false, "expose no tools to cake")
+	fs.Var(&f.addDirs, "add-dir", "directory to add to cake's sandbox as read-only (repeatable)")
+	fs.Var(&f.toolboxDirs, "toolbox", "directory of user-defined cake tools (repeatable)")
+	f.sandbox = fs.String("sandbox", defaultSandbox, "sandbox policy passed through to cake")
+	f.noSkills = fs.Bool("no-skills", false, "disable all cake skills")
+	f.skills = fs.String("skills", "", "comma-separated skill names passed through to cake")
+	f.systemPrompt = fs.String("system-prompt", "", "path to a custom cake system prompt file")
+	f.cwd = fs.String("cwd", "", "working directory to run cake from (default: current directory)")
+	f.inline = fs.Bool("inline", false, "render inline: keep recent terminal history visible above the REPL instead of using the alternate screen")
+	f.noColor = fs.Bool("no-color", false, "disable styling")
+	f.debugLog = fs.String("debug-log", "", "write cake-repl debug output to this file")
+	f.historyFile = fs.String("history-file", "", "path to persist prompt history across restarts (default: no persistence)")
+	f.showVersion = fs.Bool("version", false, "print version and exit")
+	f.configPath = fs.String("config", "", "path to config file (overrides default XDG and project-local config)")
+	f.noConfig = fs.Bool("no-config", false, "skip loading config file")
+	f.outputLimit = fs.Int("output-limit", 0, "truncate tool output after this many characters (0 = use internal default 2000)")
+	f.maxTimelineItems = fs.Int("max-timeline-items", 0, "limit timeline to this many entries (0 = no limit)")
+	f.toolColor = fs.Bool("tool-color", false, "keep ANSI color in tool output (default: strip it)")
+	return f
+}
+
+// explicitFlags reports which flags the user set on the command line, so a
+// config-file value applies only where the flag was omitted, and the exit hint
+// can re-emit an explicit override whose effective value is empty or the
+// default.
+func explicitFlags(fs *flag.FlagSet) map[string]bool {
+	explicit := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	return explicit
+}
+
+// effectiveConfig resolves bound flags and config-file defaults into the
+// effective app.Config. The merge order is hardcoded defaults < config file <
+// CLI flags; explicit names the flags the user set, and warnings receives any
+// startup advisory.
+func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writer) (app.Config, error) {
+	dir, err := resolveCwd(*f.cwd)
+	if err != nil {
+		return app.Config{}, err
+	}
+	cfgFile, err := loadStartupConfig(*f.configPath, explicit["config"], *f.noConfig, warnings)
+	if err != nil {
+		return app.Config{}, err
+	}
+	cfg := app.Config{
+		CakeBin:          *f.cakeBin,
+		Cwd:              dir,
+		Model:            *f.model,
+		Profile:          *f.profile,
+		Tools:            *f.tools,
+		NoTools:          *f.noTools,
+		AddDirs:          f.addDirs,
+		ToolboxDirs:      f.toolboxDirs,
+		Sandbox:          *f.sandbox,
+		NoSkills:         *f.noSkills,
+		Skills:           *f.skills,
+		SystemPrompt:     *f.systemPrompt,
+		Fork:             f.fork.set,
+		ForkID:           f.fork.value,
+		NoSession:        *f.noSession,
+		HistoryFile:      *f.historyFile,
+		OutputLimit:      *f.outputLimit,
+		MaxTimelineItems: *f.maxTimelineItems,
+		ToolColor:        *f.toolColor,
+		Inline:           *f.inline,
+	}
+	applyConfigFile(&cfg, cfgFile, explicit)
+	if *f.resume != "" {
+		cfg.InitialMode = cake.RunResume
+		cfg.ResumeID = *f.resume
+	}
+	return cfg, nil
+}
+
 func run() (err error) {
-	cakeBin := flag.String("cake-bin", "cake", "cake executable to run")
-	resume := flag.String("resume", "", "resume a specific cake session and reload its visible history")
-	var fork optionalString
-	flag.Var(&fork, "fork", "fork the latest cake session, or the specified session UUID")
-	noSession := flag.Bool("no-session", false, "do not save the cake session to disk")
-	model := flag.String("model", "", "model name passed through to cake")
-	profile := flag.String("profile", "", "behavior profile passed through to cake")
-	tools := flag.String("tools", "", "comma-separated tool names passed through to cake (restricts the session to these tools)")
-	noTools := flag.Bool("no-tools", false, "expose no tools to cake")
-	var addDirs stringList
-	flag.Var(&addDirs, "add-dir", "directory to add to cake's sandbox as read-only (repeatable)")
-	var toolboxDirs stringList
-	flag.Var(&toolboxDirs, "toolbox", "directory of user-defined cake tools (repeatable)")
-	sandbox := flag.String("sandbox", defaultSandbox, "sandbox policy passed through to cake")
-	noSkills := flag.Bool("no-skills", false, "disable all cake skills")
-	skills := flag.String("skills", "", "comma-separated skill names passed through to cake")
-	systemPrompt := flag.String("system-prompt", "", "path to a custom cake system prompt file")
-	cwd := flag.String("cwd", "", "working directory to run cake from (default: current directory)")
-	inline := flag.Bool("inline", false, "render inline: keep recent terminal history visible above the REPL instead of using the alternate screen")
-	noColor := flag.Bool("no-color", false, "disable styling")
-	debugLog := flag.String("debug-log", "", "write cake-repl debug output to this file")
-	historyFile := flag.String("history-file", "", "path to persist prompt history across restarts (default: no persistence)")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	configPath := flag.String("config", "", "path to config file (overrides default XDG and project-local config)")
-	noConfig := flag.Bool("no-config", false, "skip loading config file")
-	outputLimit := flag.Int("output-limit", 0, "truncate tool output after this many characters (0 = use internal default 2000)")
-	maxTimelineItems := flag.Int("max-timeline-items", 0, "limit timeline to this many entries (0 = no limit)")
-	toolColor := flag.Bool("tool-color", false, "keep ANSI color in tool output (default: strip it)")
+	f := bindFlags(flag.CommandLine)
 	if err = flag.CommandLine.Parse(normalizeForkArgs(os.Args[1:])); err != nil {
 		return err
 	}
 
-	if err = validateFlags(*showVersion, *resume, fork.set, fork.value, flag.Args(), *configPath, *noConfig); err != nil {
+	if err = validateFlags(*f.showVersion, *f.resume, f.fork.set, f.fork.value, flag.Args(), *f.configPath, *f.noConfig); err != nil {
 		return err
 	}
-	if *showVersion {
+	if *f.showVersion {
 		fmt.Fprintln(os.Stdout, version.Binary)
 		return nil
 	}
 
-	// Collect explicitly-set flag names so config-file values only apply when
-	// the user did not pass the corresponding flag. This implements the merge
-	// order: hardcoded defaults < config file < CLI flags.
-	explicit := make(map[string]bool)
-	flag.Visit(func(f *flag.Flag) {
-		explicit[f.Name] = true
-	})
+	explicit := explicitFlags(flag.CommandLine)
 
-	if *noColor {
+	if *f.noColor {
 		lipgloss.SetColorProfile(termenv.Ascii)
 	}
 
-	var dir string
-	dir, err = resolveCwd(*cwd)
+	cfg, err := effectiveConfig(f, explicit, os.Stderr)
 	if err != nil {
 		return err
 	}
 
-	cfgFile, err := loadStartupConfig(*configPath, explicit["config"], *noConfig, os.Stderr)
-	if err != nil {
-		return err
-	}
-
-	// Build the final app.Config: hardcoded defaults < config file < CLI flags.
-	cfg := app.Config{
-		CakeBin:          *cakeBin,
-		Cwd:              dir,
-		Model:            *model,
-		Profile:          *profile,
-		Tools:            *tools,
-		NoTools:          *noTools,
-		AddDirs:          addDirs,
-		ToolboxDirs:      toolboxDirs,
-		Sandbox:          *sandbox,
-		NoSkills:         *noSkills,
-		Skills:           *skills,
-		SystemPrompt:     *systemPrompt,
-		Fork:             fork.set,
-		ForkID:           fork.value,
-		NoSession:        *noSession,
-		HistoryFile:      *historyFile,
-		OutputLimit:      *outputLimit,
-		MaxTimelineItems: *maxTimelineItems,
-		ToolColor:        *toolColor,
-		Inline:           *inline,
-	}
-
-	applyConfigFile(&cfg, cfgFile, explicit)
-
-	if *resume != "" {
-		cfg.InitialMode = cake.RunResume
-		cfg.ResumeID = *resume
-	}
-
-	if *debugLog != "" {
-		var f *os.File
-		f, err = os.OpenFile(*debugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if *f.debugLog != "" {
+		var logFile *os.File
+		logFile, err = os.OpenFile(*f.debugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return fmt.Errorf("opening -debug-log: %w", err)
 		}
 		defer func() {
-			if closeErr := f.Close(); err == nil && closeErr != nil {
+			if closeErr := logFile.Close(); err == nil && closeErr != nil {
 				err = fmt.Errorf("closing -debug-log: %w", closeErr)
 			}
 		}()
-		cfg.DebugLog = &syncWriter{w: f}
+		cfg.DebugLog = &syncWriter{w: logFile}
 	}
 
 	// Inline mode renders in the normal buffer so recent terminal history stays
 	// visible above the REPL; the alternate screen restores the terminal on exit
 	// but hides that history for the whole session (ADR 015).
 	opts := []tea.ProgramOption{tea.WithMouseCellMotion()}
-	if !*inline {
+	if !*f.inline {
 		opts = append(opts, tea.WithAltScreen())
 	}
 	p := tea.NewProgram(app.New(cfg), opts...)
@@ -277,7 +324,7 @@ func run() (err error) {
 	// owns raw mode. Release the terminal before stopping and re-own it after
 	// SIGCONT; only meaningful when this process owns a terminal. See ADR 018.
 	if stdoutIsTerminal() {
-		stopSuspend := watchSuspend(p, *inline, suspendLogf(cfg.DebugLog))
+		stopSuspend := watchSuspend(p, *f.inline, suspendLogf(cfg.DebugLog))
 		defer stopSuspend()
 	}
 	m, err := p.Run()
@@ -286,7 +333,7 @@ func run() (err error) {
 		// CancelRunning is a no-op unless a run was still in flight, which is
 		// exactly the case for a quit that never reached the model.
 		mod.CancelRunning()
-		if *inline {
+		if *f.inline {
 			// Inline mode leaves the timeline on the terminal; drop the composer
 			// rows so the shell prompt is not preceded by a stale input box.
 			eraseInlineComposer(mod.ComposerRows())
@@ -301,7 +348,7 @@ func run() (err error) {
 	if ok {
 		if sessionID, _ := mod.SessionData(); sessionID != "" {
 			fmt.Fprintf(os.Stderr, "\nResume this session with:\n")
-			fmt.Fprintln(os.Stderr, resumeCommand(cfg, *configPath, *noConfig, sessionID))
+			fmt.Fprintln(os.Stderr, resumeCommand(cfg, *f.configPath, *f.noConfig, sessionID, explicit))
 		}
 	}
 	return nil
@@ -389,15 +436,30 @@ func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[strin
 // explicitly selected read-only sandbox to the workspace-write-interactive
 // default, or letting a config file re-supply a model the run was started
 // without).
-func resumeCommand(cfg app.Config, configPath string, noConfig bool, sessionID string) string {
+//
+// explicit names the flags the user set at startup. An override whose effective
+// value is empty (an explicit -model "" or -sandbox "") or equal to the default
+// (an explicit -cake-bin cake) must be re-emitted, because reloading the config
+// on resume would otherwise re-supply a value the original run suppressed.
+func resumeCommand(cfg app.Config, configPath string, noConfig bool, sessionID string, explicit map[string]bool) string {
 	parts := []string{"cake-repl", "-resume", shellQuote(sessionID)}
+	// addFlag always emits the name and a shell-quoted value, even when the value
+	// is empty, so an explicit empty override survives the paste; shellQuote
+	// renders "" as ''.
 	addFlag := func(name, value string) {
-		if value != "" {
-			parts = append(parts, name, shellQuote(value))
+		parts = append(parts, name, shellQuote(value))
+	}
+	// addControl emits a value-taking flag when the user set it explicitly or
+	// when its effective value is non-empty. A bare default stays out of the
+	// hint, so an ordinary resume stays short and still reproduces the run.
+	addControl := func(name, value string, explicitFlag bool) {
+		if explicitFlag || value != "" {
+			addFlag(name, value)
 		}
 	}
-	// The default cake binary name is omitted so a plain resume stays short.
-	if cfg.CakeBin != "" && cfg.CakeBin != "cake" {
+	// The default executable name is omitted unless it was an explicit override,
+	// which must be re-emitted so a config file cannot re-select its own value.
+	if explicit["cake-bin"] || (cfg.CakeBin != "" && cfg.CakeBin != "cake") {
 		addFlag("-cake-bin", cfg.CakeBin)
 	}
 	// Config selection is part of the run: pasting a hint without -no-config
@@ -405,27 +467,27 @@ func resumeCommand(cfg app.Config, configPath string, noConfig bool, sessionID s
 	if noConfig {
 		parts = append(parts, "-no-config")
 	} else {
-		addFlag("-config", configPath)
+		addControl("-config", configPath, explicit["config"])
 	}
 	addFlag("-cwd", cfg.Cwd)
-	addFlag("-model", cfg.Model)
-	addFlag("-profile", cfg.Profile)
-	addFlag("-sandbox", cfg.Sandbox)
+	addControl("-model", cfg.Model, explicit["model"])
+	addControl("-profile", cfg.Profile, explicit["profile"])
+	addControl("-sandbox", cfg.Sandbox, explicit["sandbox"])
 	for _, dir := range cfg.AddDirs {
 		parts = append(parts, "-add-dir", shellQuote(dir))
 	}
 	for _, dir := range cfg.ToolboxDirs {
 		parts = append(parts, "-toolbox", shellQuote(dir))
 	}
-	addFlag("-tools", cfg.Tools)
+	addControl("-tools", cfg.Tools, explicit["tools"])
 	if cfg.NoTools {
 		parts = append(parts, "-no-tools")
 	}
 	if cfg.NoSkills {
 		parts = append(parts, "-no-skills")
 	}
-	addFlag("-skills", cfg.Skills)
-	addFlag("-system-prompt", cfg.SystemPrompt)
+	addControl("-skills", cfg.Skills, explicit["skills"])
+	addControl("-system-prompt", cfg.SystemPrompt, explicit["system-prompt"])
 	return strings.Join(parts, " ")
 }
 

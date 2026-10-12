@@ -78,10 +78,11 @@ pass-through behavior.
   session/security guardrails.
 - Neutral, because the runner, the stream-json contract, and the config-file
   shape are untouched.
-- Bad, because a run started with `-sandbox ""` is not yet reproduced by the exit
-  hint, which omits empty values, so a pasted resume falls back to the default
-  policy. The limitation is documented in `README.md` and the CLI/output
-  guardrail, and the provenance fix is owned by task 104.
+- Bad, because a run started with `-sandbox ""` was not reproduced by the exit
+  hint at the time this decision landed, so a pasted resume fell back to the
+  default policy. The exit hint now re-emits an explicit empty `-sandbox` (as
+  `-sandbox ''`), closing that gap. See `README.md` and the CLI/output guardrail;
+  fixed by task 104.
 
 ## More Information
 
