@@ -84,6 +84,44 @@ func TestShortID(t *testing.T) {
 	}
 }
 
+// TestStatusLine_FlattensMultilineMetadata checks that newline-bearing field
+// values (cwd, model, session, next) render on exactly one row at the requested
+// cell width. Sanitize deliberately preserves newlines for timeline text, so
+// the one-row status line must flatten them itself; otherwise a cwd or model
+// carrying a newline pushes the layout to a second row.
+func TestStatusLine_FlattensMultilineMetadata(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	const width = 40
+	cases := []struct {
+		name   string
+		status Status
+	}{
+		{"cwd", Status{State: "idle", Cwd: "project\nsub"}},
+		{"model", Status{State: "idle", Model: "gpt-x\nsecond"}},
+		{"session", Status{State: "idle", Session: "abc12345\nmore"}},
+		{"next", Status{State: "idle", Next: "resume abc\n12345"}},
+		{"controls", Status{State: "idle", Cwd: "pro\nject\x1b[2J\x07"}},
+	}
+	for _, tc := range cases {
+		got := StatusLine(DefaultTheme(), width, tc.status)
+		if h := lipgloss.Height(got); h != 1 {
+			t.Errorf("%s: height = %d, want 1: %q", tc.name, h, got)
+		}
+		if w := lipgloss.Width(got); w != width {
+			t.Errorf("%s: width = %d, want %d: %q", tc.name, w, width, got)
+		}
+		for _, r := range got {
+			if r < 0x20 || r == 0x7f {
+				t.Errorf("%s: unsafe control %q survived: %q", tc.name, r, got)
+				break
+			}
+		}
+	}
+}
+
 func TestStatusLine_AsciiNoANSI(t *testing.T) {
 	orig := lipgloss.ColorProfile()
 	defer lipgloss.SetColorProfile(orig)

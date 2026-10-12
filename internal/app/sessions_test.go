@@ -317,6 +317,69 @@ func TestBrowserViewAsciiNoANSI(t *testing.T) {
 	}
 }
 
+// laidOut returns a model after its first layout at the given cell size, as if
+// the program had received that WindowSizeMsg.
+func laidOut(width, height int) Model {
+	m := New(Config{})
+	m.width, m.height = width, height
+	m.layout()
+	return m
+}
+
+// TestBrowserViewStaysWithinTimelineRegion checks the fixed-chrome promise at a
+// range of sizes and states: every browser state — loading, error, empty, list
+// — occupies exactly the timeline's rows so the composer and status line never
+// move, and no row is wider than the terminal. The error body is arbitrary,
+// multiline stderr, and the key hint must be bounded to the width too.
+func TestBrowserViewStaysWithinTimelineRegion(t *testing.T) {
+	longErr := strings.Repeat("cake: a short stderr line\n", 100)
+	sessions := []cake.SessionSummary{
+		{SessionID: browserID1, FirstPrompt: "first task"},
+		{SessionID: browserID2, FirstPrompt: "second task"},
+	}
+	cases := []struct {
+		name   string
+		width  int
+		height int
+		setup  func(*Model)
+	}{
+		{"loading", 80, 24, func(m *Model) { m.browserOpen, m.browserLoading = true, true }},
+		{"list", 80, 24, func(m *Model) {
+			m.browserOpen = true
+			tm, _ := m.Update(sessionsLoadedMsg{sessions: sessions})
+			*m = tm.(Model)
+		}},
+		{"empty", 80, 24, func(m *Model) { m.browserOpen = true }},
+		{"error", 80, 24, func(m *Model) { m.browserOpen, m.browserErr = true, longErr }},
+		{"narrow error", 20, 24, func(m *Model) { m.browserOpen, m.browserErr = true, longErr }},
+		{"narrow list", 20, 24, func(m *Model) {
+			m.browserOpen = true
+			tm, _ := m.Update(sessionsLoadedMsg{sessions: sessions})
+			*m = tm.(Model)
+		}},
+		{"height 1 error", 20, 7, func(m *Model) { m.browserOpen, m.browserErr = true, longErr }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := laidOut(tc.width, tc.height)
+			tc.setup(&m)
+			view := m.View()
+			lines := strings.Split(view, "\n")
+			// The whole frame is the timeline region plus the composer and the
+			// one-row status line; a browser state that overflows pushes them off.
+			if len(lines) != m.height {
+				t.Fatalf("view height = %d, want %d: the composer/status line moved\n%s", len(lines), m.height, view)
+			}
+			region := lines[:m.timeline.Height]
+			for i, line := range region {
+				if w := lipgloss.Width(line); w > m.width {
+					t.Errorf("region row %d width = %d, want <= %d: %q", i, w, m.width, line)
+				}
+			}
+		})
+	}
+}
+
 func TestSessionsRejectedWhileRunning(t *testing.T) {
 	m := newLaidOutModel()
 	m.running = true

@@ -42,9 +42,11 @@ func StatusLine(th Theme, width int, status Status) string {
 		// Session id, next-run id, and model reach here from cake or config, so
 		// they are sanitized for the same reason RenderItem sanitizes timeline
 		// text: escapes would survive styling and desync the padding math below.
-		// State is exempt because callers compose it from styled local widgets
-		// (the spinner), not from stream content.
-		value := Sanitize(field.value)
+		// The sanitized value is then flattened to a single line, because the
+		// status bar is a one-row layout while Sanitize deliberately keeps
+		// newlines for timeline structure. State is exempt because callers
+		// compose it from styled local widgets (the spinner), not stream content.
+		value := flattenLine(Sanitize(field.value))
 		if value == "" {
 			continue
 		}
@@ -60,6 +62,21 @@ func StatusLine(th Theme, width int, status Status) string {
 		line += strings.Repeat(" ", width-w)
 	}
 	return th.StatusBar.MaxWidth(width).Render(line)
+}
+
+// flattenLine replaces embedded carriage returns and newlines with spaces so a
+// field value occupies exactly one row. Sanitize keeps newlines for timeline
+// text; the single-row status line must flatten them itself.
+func flattenLine(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 // ShortID trims a UUID-ish string to its first 8 runes for status display.

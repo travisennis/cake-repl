@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/ui"
 )
@@ -35,24 +36,33 @@ func (m Model) View() string {
 // browserView renders the /sessions overlay in place of the timeline: the
 // navigable list, or a loading/empty/error body, followed by a one-line key
 // hint. It occupies the timeline's height so the composer and status line do
-// not move while the browser is open.
+// not move while the browser is open, so every state is bounded to the
+// timeline's width and height however long or multiline its text is.
 func (m Model) browserView() string {
 	bodyHeight := browserBodyHeight(m.timeline.Height)
+	// fill pads a short text body to the full region and caps a long or
+	// multiline one; capBody only truncates, leaving the list's own layout
+	// alone. The error body is arbitrary stderr, so it must be capped, not just
+	// padded: a minimum Height alone lets it overflow and displace the chrome.
+	fill := lipgloss.NewStyle().Width(m.width).Height(bodyHeight).MaxWidth(m.width).MaxHeight(bodyHeight)
+	capBody := lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(bodyHeight)
+
 	var body string
 	switch {
 	case m.browserLoading:
-		body = m.theme.Debug.Width(m.width).Height(bodyHeight).Render("loading sessions…")
+		body = fill.Render(m.theme.Debug.Render("loading sessions…"))
 	case m.browserErr != "":
-		body = m.theme.Warning.Width(m.width).Height(bodyHeight).Render("sessions unavailable: " + ui.Sanitize(m.browserErr))
+		body = fill.Render(m.theme.Warning.Render("sessions unavailable: " + ui.Sanitize(m.browserErr)))
 	case len(m.sessionList.Items()) == 0:
-		body = m.theme.Info.Width(m.width).Height(bodyHeight).Render("no sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd)))
+		body = fill.Render(m.theme.Info.Render("no sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))))
 	default:
-		body = m.sessionList.View()
+		body = capBody.Render(m.sessionList.View())
 	}
 	if m.timeline.Height <= 1 {
 		return body
 	}
-	return body + "\n" + m.theme.PromptHint.Render("↑/↓ move · enter resume · esc close")
+	hint := m.theme.PromptHint.MaxWidth(m.width).MaxHeight(1).Render("↑/↓ move · enter resume · esc close")
+	return body + "\n" + hint
 }
 
 func (m Model) statusLine() string {
