@@ -57,6 +57,23 @@ func (m *Model) resizeSessionList(viewportHeight int) {
 	m.sessionList.SetSize(w, h)
 }
 
+// resetSessionList drops every row and resets the cursor. It runs when a load
+// starts and when one fails so the list only ever holds rows from the current
+// successful listing; otherwise a stale item from a previous visit would stay
+// selectable behind the loading or error body the user is looking at.
+func (m *Model) resetSessionList() {
+	m.sessionList.SetItems(nil)
+	m.sessionList.ResetSelected()
+}
+
+// browserSelectable reports whether the browser is showing a list with a row
+// the user can act on. It is the precondition for selection: Enter is a no-op
+// while a load is in flight, after a failed load, or on an empty listing, so it
+// can only ever resume a row visible on the current screen.
+func (m *Model) browserSelectable() bool {
+	return !m.browserLoading && m.browserErr == "" && len(m.sessionList.Items()) > 0
+}
+
 // browserBodyHeight returns the rows the browser list body occupies at a given
 // timeline viewport height. The browser replaces the timeline and reserves one
 // row for the key hint when there is room.

@@ -225,6 +225,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.browserLoading = false
 		if msg.err != nil {
 			m.browserErr = ui.TruncateOutput(msg.err.Error(), m.cfg.OutputLimit)
+			// The rows on screen are gone, so the list must not keep the previous
+			// listing selectable behind the error.
+			m.resetSessionList()
 			return m, nil
 		}
 		m.browserErr = ""
@@ -338,13 +341,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handleBrowserKey routes keys while the /sessions browser is open. It returns
 // before the composer sees the message, so the hidden input cannot swallow
 // navigation. Esc, q, and Ctrl+C close the browser without action; Enter pins
-// the next prompt to the selected session.
+// the next prompt to the session the user can actually see selected.
 func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "ctrl+c":
 		m.browserOpen = false
 		return m, nil
 	case "enter":
+		// Only a row from the current successful listing is selectable: while a
+		// reload is in flight, after a failed reload, or on an empty listing the
+		// browser shows no list, so Enter is a no-op instead of resuming an
+		// invisible row from a previous visit.
+		if !m.browserSelectable() {
+			return m, nil
+		}
 		if it, ok := m.sessionList.SelectedItem().(sessionItem); ok {
 			m.browserOpen = false
 			return m.resumeSession(it.summary.SessionID)
@@ -576,6 +586,9 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.browserOpen = true
 		m.browserLoading = true
 		m.browserErr = ""
+		// Drop the previous listing before the reload starts: while it loads the
+		// browser shows the loading body, so no stale row may remain selectable.
+		m.resetSessionList()
 		m.sessionList.Title = "sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))
 		return m, m.listSessionsCmd()
 

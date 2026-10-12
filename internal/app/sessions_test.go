@@ -136,6 +136,115 @@ func TestBrowserEnterPinsSelectedSession(t *testing.T) {
 	}
 }
 
+// TestBrowserEnterIgnoredWhileReloading: after a successful visit is left
+// behind, reopening the browser starts a fresh load. While that load is in
+// flight the previous rows are gone, so Enter must not resume one of them.
+func TestBrowserEnterIgnoredWhileReloading(t *testing.T) {
+	m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
+	m.session.UseResume(browserID2)
+	beforeMode, beforeID := m.session.RunOptions()
+
+	tm, cmd := m.execCommand(Command{Kind: CmdSessions})
+	m = tm.(Model)
+	if !m.browserOpen || !m.browserLoading {
+		t.Fatalf("reopen: open=%v loading=%v", m.browserOpen, m.browserLoading)
+	}
+	if cmd == nil {
+		t.Fatal("expected a reload command")
+	}
+	if items := m.sessionList.Items(); len(items) != 0 {
+		t.Fatalf("stale rows survive the reload: %d items", len(items))
+	}
+	// The loading body replaces the list, so the old row is not on the screen.
+	if view := m.View(); !strings.Contains(view, "loading sessions") || strings.Contains(view, "11111111") {
+		t.Errorf("reload view should show loading only:\n%s", view)
+	}
+
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := tm.(Model)
+	if !got.browserOpen {
+		t.Error("Enter during a reload must leave the browser open")
+	}
+	if mode, id := got.session.RunOptions(); mode != beforeMode || id != beforeID {
+		t.Errorf("run options changed: %v %q -> %v %q", beforeMode, beforeID, mode, id)
+	}
+	if got.session.ResumeID != browserID2 {
+		t.Errorf("resume id = %q, want the untouched %q", got.session.ResumeID, browserID2)
+	}
+}
+
+// TestBrowserEnterIgnoredAfterFailedReload: a failed reload must not leave the
+// previous listing selectable behind the error body.
+func TestBrowserEnterIgnoredAfterFailedReload(t *testing.T) {
+	m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
+	m.session.UseResume(browserID2)
+	beforeMode, beforeID := m.session.RunOptions()
+
+	tm, _ := m.execCommand(Command{Kind: CmdSessions})
+	m = tm.(Model)
+	tm, _ = m.Update(sessionsLoadedMsg{err: errors.New("cake exploded")})
+	m = tm.(Model)
+	if items := m.sessionList.Items(); len(items) != 0 {
+		t.Fatalf("a failed reload left %d selectable rows", len(items))
+	}
+	if !strings.Contains(m.View(), "cake exploded") {
+		t.Errorf("error body missing the message:\n%s", m.View())
+	}
+
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := tm.(Model)
+	if !got.browserOpen {
+		t.Error("Enter after a failed reload must leave the browser open")
+	}
+	if mode, id := got.session.RunOptions(); mode != beforeMode || id != beforeID {
+		t.Errorf("run options changed: %v %q -> %v %q", beforeMode, beforeID, mode, id)
+	}
+}
+
+// TestBrowserEnterIgnoredOnEmptyListing: a successful listing with no sessions
+// gives Enter nothing to resume.
+func TestBrowserEnterIgnoredOnEmptyListing(t *testing.T) {
+	m := browserModel(t, nil)
+	m.session.UseResume(browserID2)
+	beforeMode, beforeID := m.session.RunOptions()
+
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := tm.(Model)
+	if !got.browserOpen {
+		t.Error("Enter on an empty listing must leave the browser open")
+	}
+	if mode, id := got.session.RunOptions(); mode != beforeMode || id != beforeID {
+		t.Errorf("run options changed: %v %q -> %v %q", beforeMode, beforeID, mode, id)
+	}
+}
+
+// TestBrowserEnterSelectsOnlyTheCurrentListing: once the reload lands, only a
+// row from the new listing is selectable, and Enter leaves the composer alone.
+func TestBrowserEnterSelectsOnlyTheCurrentListing(t *testing.T) {
+	m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
+
+	tm, _ := m.execCommand(Command{Kind: CmdSessions})
+	m = tm.(Model)
+	m.input.SetValue("draft")
+	tm, _ = m.Update(sessionsLoadedMsg{sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "two"}}})
+	m = tm.(Model)
+	if m.sessionList.Index() != 0 {
+		t.Fatalf("cursor = %d, want the first row of the new listing", m.sessionList.Index())
+	}
+
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := tm.(Model)
+	if got.browserOpen {
+		t.Error("Enter should close the browser")
+	}
+	if got.session.ResumeID != browserID2 {
+		t.Errorf("resume id = %q, want %q", got.session.ResumeID, browserID2)
+	}
+	if got.input.Value() != "draft" {
+		t.Errorf("browser Enter must not touch the composer: %q", got.input.Value())
+	}
+}
+
 func TestBrowserCloseKeysLeaveNoState(t *testing.T) {
 	for _, k := range []tea.KeyMsg{
 		{Type: tea.KeyEsc},
