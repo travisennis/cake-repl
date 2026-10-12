@@ -14,6 +14,11 @@ import (
 // Config represents the config file structure. Fields use TOML tags matching
 // the expected key names in the file. Zero values mean "not set" in a file
 // that was actually loaded.
+//
+// ToolColor is the exception: false is a meaningful value, not "unset", so an
+// explicit `tool-color = false` can turn off an inherited true. Its presence is
+// tracked in ToolColorSet, taken from the decoded file's TOML metadata rather
+// than inferred from the value.
 type Config struct {
 	Model            string `toml:"model"`
 	Profile          string `toml:"profile"`
@@ -21,6 +26,7 @@ type Config struct {
 	MaxTimelineItems int    `toml:"max-timeline-items"`
 	CakeBin          string `toml:"cake-bin"`
 	ToolColor        bool   `toml:"tool-color"`
+	ToolColorSet     bool   `toml:"-"`
 }
 
 // DefaultPaths returns the XDG config path and the project-local config path.
@@ -69,6 +75,7 @@ func load(path string) (*Config, toml.MetaData, error) {
 		}
 		return nil, meta, err
 	}
+	cfg.ToolColorSet = meta.IsDefined("tool-color")
 	return cfg, meta, nil
 }
 
@@ -93,8 +100,12 @@ func Merge(dst, src *Config) *Config {
 	if src.CakeBin != "" {
 		dst.CakeBin = src.CakeBin
 	}
-	if src.ToolColor {
-		dst.ToolColor = true
+	// tool-color is a boolean whose false value is meaningful, so it merges on
+	// key presence rather than on a non-zero value. Only a file that actually
+	// supplied the key changes the effective value; a missing key inherits dst.
+	if src.ToolColorSet {
+		dst.ToolColor = src.ToolColor
+		dst.ToolColorSet = true
 	}
 	return dst
 }

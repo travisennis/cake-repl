@@ -53,6 +53,9 @@ tool-color = true
 	if !cfg.ToolColor {
 		t.Error("ToolColor = false, want true")
 	}
+	if !cfg.ToolColorSet {
+		t.Error("ToolColorSet = false, want true for a present tool-color key")
+	}
 }
 
 func TestLoadInvalidSyntax(t *testing.T) {
@@ -105,7 +108,7 @@ func TestMergeEmptySrc(t *testing.T) {
 
 func TestMergeOverrides(t *testing.T) {
 	dst := &Config{Model: "old", Profile: "old", OutputLimit: 1000, MaxTimelineItems: 50, CakeBin: "old"}
-	src := &Config{Model: "new", Profile: "new", OutputLimit: 5000, MaxTimelineItems: 200, CakeBin: "new", ToolColor: true}
+	src := &Config{Model: "new", Profile: "new", OutputLimit: 5000, MaxTimelineItems: 200, CakeBin: "new", ToolColor: true, ToolColorSet: true}
 	got := Merge(dst, src)
 	if got.Model != "new" || got.Profile != "new" || got.OutputLimit != 5000 || got.MaxTimelineItems != 200 || got.CakeBin != "new" || !got.ToolColor {
 		t.Errorf("Merge did not override all fields: %+v", got)
@@ -135,6 +138,52 @@ func TestMergeSrcZeroDoesNotOverride(t *testing.T) {
 	got := Merge(dst, src)
 	if got.Model != "existing" || got.OutputLimit != 3000 {
 		t.Errorf("Merge with zero src fields overwrote dst: %+v", got)
+	}
+}
+
+// TestLoadMergeToolColorPrecedence decodes real files and merges them the way
+// startup does: an explicit project-local `tool-color = false` must turn off an
+// inherited XDG true, while an absent project key inherits the XDG value. The
+// boolean's false value is meaningful, so it cannot ride the non-zero merge rule
+// the other keys use.
+func TestLoadMergeToolColorPrecedence(t *testing.T) {
+	tests := []struct {
+		name    string
+		xdg     string
+		project string
+		want    bool
+	}{
+		{name: "project false overrides XDG true", xdg: "tool-color = true\n", project: "tool-color = false\n", want: false},
+		{name: "absent project key inherits XDG true", xdg: "tool-color = true\n", project: "model = \"local\"\n", want: true},
+		{name: "project true overrides XDG false", xdg: "tool-color = false\n", project: "tool-color = true\n", want: true},
+		{name: "absent everywhere stays false", xdg: "", project: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			xdgPath := filepath.Join(dir, "xdg.toml")
+			projectPath := filepath.Join(dir, ".cake-repl.toml")
+			if err := os.WriteFile(xdgPath, []byte(tt.xdg), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(projectPath, []byte(tt.project), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			xdgCfg, err := Load(xdgPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projectCfg, _, err := LoadProject(projectPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got := Merge(xdgCfg, projectCfg)
+			if got.ToolColor != tt.want {
+				t.Fatalf("effective ToolColor = %v, want %v", got.ToolColor, tt.want)
+			}
+		})
 	}
 }
 
@@ -183,7 +232,7 @@ tool-color = true
 				t.Fatalf("LoadProject = %v, %v, want ignored key", ignored, err)
 			}
 			got := Merge(&Config{CakeBin: "../trusted-cake"}, cfg)
-			want := Config{CakeBin: "../trusted-cake", Model: "local-model", Profile: "local-profile", OutputLimit: 5000, MaxTimelineItems: 200, ToolColor: true}
+			want := Config{CakeBin: "../trusted-cake", Model: "local-model", Profile: "local-profile", OutputLimit: 5000, MaxTimelineItems: 200, ToolColor: true, ToolColorSet: true}
 			if *got != want {
 				t.Fatalf("merged config = %+v, want %+v", *got, want)
 			}

@@ -389,6 +389,61 @@ tool-color = true
 	}
 }
 
+// TestStartupConfigToolColorPrecedence checks the effective app.Config that
+// startup builds from real XDG and project-local files. tool-color must honor
+// the documented project-over-XDG precedence in both directions (including an
+// explicit false), an absent key must fall back to the hardcoded default, and
+// an explicit CLI -tool-color must win over either file layer.
+func TestStartupConfigToolColorPrecedence(t *testing.T) {
+	tests := []struct {
+		name     string
+		xdg      string
+		local    string
+		cliSet   bool
+		cliValue bool
+		want     bool
+	}{
+		{name: "project false overrides XDG true", xdg: "tool-color = true\n", local: "tool-color = false\n", want: false},
+		{name: "absent project key inherits XDG true", xdg: "tool-color = true\n", local: "model = \"local\"\n", want: true},
+		{name: "project true overrides XDG false", xdg: "tool-color = false\n", local: "tool-color = true\n", want: true},
+		{name: "absent key falls back to default off", xdg: "", local: "model = \"local\"\n", want: false},
+		{name: "CLI false beats XDG true", xdg: "tool-color = true\n", local: "", cliSet: true, cliValue: false, want: false},
+		{name: "CLI false beats project true", xdg: "", local: "tool-color = true\n", cliSet: true, cliValue: false, want: false},
+		{name: "CLI true beats project false", xdg: "", local: "tool-color = false\n", cliSet: true, cliValue: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+			xdgPath := filepath.Join(dir, "xdg", "cake-repl", "config.toml")
+			if err := os.MkdirAll(filepath.Dir(xdgPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for path, content := range map[string]string{xdgPath: tt.xdg, ".cake-repl.toml": tt.local} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var warnings bytes.Buffer
+			fileCfg, err := loadStartupConfig("", false, false, &warnings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := app.Config{}
+			explicit := map[string]bool{}
+			if tt.cliSet {
+				cfg.ToolColor = tt.cliValue
+				explicit["tool-color"] = true
+			}
+			applyConfigFile(&cfg, fileCfg, explicit)
+			if cfg.ToolColor != tt.want {
+				t.Fatalf("effective ToolColor = %v, want %v", cfg.ToolColor, tt.want)
+			}
+		})
+	}
+}
+
 func TestStartupConfigMalformedFiles(t *testing.T) {
 	for _, layer := range []string{"XDG", "project-local", "explicit"} {
 		t.Run(layer, func(t *testing.T) {

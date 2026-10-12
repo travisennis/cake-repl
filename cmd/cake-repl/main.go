@@ -375,8 +375,8 @@ func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[strin
 		if !explicit["max-timeline-items"] && cfgFile.MaxTimelineItems != 0 {
 			cfg.MaxTimelineItems = cfgFile.MaxTimelineItems
 		}
-		if !explicit["tool-color"] && cfgFile.ToolColor {
-			cfg.ToolColor = true
+		if !explicit["tool-color"] && cfgFile.ToolColorSet {
+			cfg.ToolColor = cfgFile.ToolColor
 		}
 	}
 }
