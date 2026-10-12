@@ -14,29 +14,31 @@ import (
 
 const replayTestSessionID = "11111111-2222-3333-4444-555555555555"
 
+// replayStartMessage drives the same Init command batch Bubble Tea runs at
+// startup and returns the replay startup message it produced.
+func replayStartMessage(t *testing.T, m Model) replayStartedMsg {
+	t.Helper()
+	init := m.Init()
+	batch, ok := init().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("Init message type = %T, want tea.BatchMsg", init())
+	}
+	for _, cmd := range batch {
+		if msg := cmd(); msg != nil {
+			if start, ok := msg.(replayStartedMsg); ok {
+				return start
+			}
+		}
+	}
+	t.Fatal("Init did not start replay")
+	return replayStartedMsg{}
+}
+
 // hydrateTestModel drives the same Init command and replay message flow that
 // Bubble Tea uses at startup. It returns only after replay has finished.
 func hydrateTestModel(t *testing.T, m Model) Model {
 	t.Helper()
-	batch, ok := m.Init()().(tea.BatchMsg)
-	if !ok {
-		t.Fatalf("Init message type = %T, want tea.BatchMsg", m.Init()())
-	}
-
-	var start replayStartedMsg
-	var found bool
-	for _, cmd := range batch {
-		if msg := cmd(); msg != nil {
-			if candidate, ok := msg.(replayStartedMsg); ok {
-				start = candidate
-				found = true
-				break
-			}
-		}
-	}
-	if !found {
-		t.Fatal("Init did not start replay")
-	}
+	start := replayStartMessage(t, m)
 
 	tm, cmd := m.Update(start)
 	m = tm.(Model)
@@ -205,6 +207,116 @@ exit 0
 	result := collectCakeRunResult(t, live.run)
 	if result.ExitCode != 0 {
 		t.Fatalf("prompt after replay failure result = %+v", result)
+	}
+}
+
+// TestReplayStartupFailureShowsWarningImmediately pins the ADR 011 promise
+// that a startup failure is visible and non-fatal: when the replay subprocess
+// cannot even start, the warning must be on screen as soon as the startup
+// message is handled, with no later key or resize to flush the view.
+func TestReplayStartupFailureShowsWarningImmediately(t *testing.T) {
+	m := New(Config{
+		CakeBin:     filepath.Join(t.TempDir(), "missing-cake"),
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 80, 24
+	m.layout()
+	m.syncViewport()
+
+	start := replayStartMessage(t, m)
+	if start.err == nil {
+		t.Fatalf("missing cake binary started replay: %+v", start)
+	}
+
+	tm, cmd := m.Update(start)
+	m = tm.(Model)
+	if cmd != nil {
+		t.Fatal("failed replay startup returned an unexpected command")
+	}
+	if m.hydrating || m.replayPending {
+		t.Fatalf("failed replay left hydration active: hydrating=%v pending=%v", m.hydrating, m.replayPending)
+	}
+	if view := m.View(); !strings.Contains(view, "session replay unavailable") {
+		t.Fatalf("startup warning not visible without another event:\n%s", view)
+	}
+	if mode, id := m.session.RunOptions(); mode != cake.RunResume || id != replayTestSessionID {
+		t.Fatalf("failed replay changed the startup pin: %v %q", mode, id)
+	}
+}
+
+// TestReplayStartupFailureHonorsPendingExit covers /exit while replay is
+// starting: the failed startup still quits, and the warning is synced into
+// the frame the quit renders.
+func TestReplayStartupFailureHonorsPendingExit(t *testing.T) {
+	m := New(Config{
+		CakeBin:     filepath.Join(t.TempDir(), "missing-cake"),
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 80, 24
+	m.layout()
+	m.syncViewport()
+	start := replayStartMessage(t, m)
+
+	tm, cmd := m.execCommand(Command{Kind: CmdExit})
+	m = tm.(Model)
+	if !m.exitAfter || cmd != nil {
+		t.Fatalf("exit while hydrating: exitAfter=%v cmd set=%v", m.exitAfter, cmd != nil)
+	}
+
+	tm, cmd = m.Update(start)
+	m = tm.(Model)
+	if view := m.View(); !strings.Contains(view, "session replay unavailable") {
+		t.Fatalf("startup warning missing from the final frame:\n%s", view)
+	}
+	if cmd == nil {
+		t.Fatal("failed replay startup did not return the pending quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("cmd() = %T, want tea.QuitMsg", cmd())
+	}
+}
+
+// TestReplayStartupFailureAfterNewSessionStaysBehindTheBoundary covers Ctrl+N
+// pressed while replay is starting: the failed startup message still releases
+// the pending state, but neither its warning nor its session context crosses
+// the new-session boundary.
+func TestReplayStartupFailureAfterNewSessionStaysBehindTheBoundary(t *testing.T) {
+	m := New(Config{
+		CakeBin:     filepath.Join(t.TempDir(), "missing-cake"),
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 80, 24
+	m.layout()
+	start := replayStartMessage(t, m)
+
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Fatalf("ctrl+n returned a command: %v", cmd)
+	}
+	if m.hydrating || !m.replayPending {
+		t.Fatalf("ctrl+n state: hydrating=%v pending=%v", m.hydrating, m.replayPending)
+	}
+
+	tm, cmd = m.Update(start)
+	m = tm.(Model)
+	if cmd != nil {
+		t.Fatal("failed startup after ctrl+n returned a command")
+	}
+	if m.replayPending {
+		t.Fatal("failed startup left the replay pending after ctrl+n")
+	}
+	if view := m.View(); strings.Contains(view, "session replay unavailable") {
+		t.Fatalf("startup warning crossed the new-session boundary:\n%s", view)
+	}
+	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Fatalf("failed startup re-pinned the left session: %v %q", mode, id)
 	}
 }
 
