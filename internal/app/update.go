@@ -179,6 +179,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay unavailable: " + msg.err.Error()})
 				}
 			}
+			// A startup failure is promised to be visibly non-fatal (ADR 011),
+			// so push the warning into the viewport now instead of leaving it
+			// for the next key or resize to flush.
+			m.syncViewport()
 			if m.exitAfter {
 				return m, tea.Quit
 			}
