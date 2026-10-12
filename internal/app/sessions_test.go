@@ -109,6 +109,10 @@ func TestBrowserEnterPinsSelectedSession(t *testing.T) {
 		{SessionID: browserID1, FirstPrompt: "one"},
 		{SessionID: browserID2, FirstPrompt: "two"},
 	})
+	// The REPL is in session 1; Enter on row 2 is a retarget, so it drops the
+	// identity of the session being left exactly like /resume does.
+	m.session.OnTaskStart(cake.TaskStart{SessionID: browserID1, TaskID: "t-1"})
+	m.session.OnTaskComplete(success(browserID1))
 
 	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyDown}) // select the second row
 	m = tm.(Model)
@@ -120,6 +124,9 @@ func TestBrowserEnterPinsSelectedSession(t *testing.T) {
 	}
 	if got.session.ResumeID != browserID2 {
 		t.Errorf("resume id = %q, want %q", got.session.ResumeID, browserID2)
+	}
+	if got.session.SessionID != "" {
+		t.Errorf("session id = %q, want the left session's identity dropped", got.session.SessionID)
 	}
 	if mode, _ := got.session.RunOptions(); mode != cake.RunResume {
 		t.Errorf("run mode = %v, want RunResume", mode)

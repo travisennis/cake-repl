@@ -248,9 +248,12 @@ func (m Model) CancelRunning() {
 	}
 }
 
-// SessionData returns the current session ID and working directory for
-// display (the exit banner and /session copy). If no task has run yet it
-// falls back to the resume ID when one was provided via -resume.
+// SessionData returns the id of the session the REPL is continuing and the
+// working directory, for display (the exit banner and /session copy). The
+// reported id wins when an invocation has announced one; otherwise the pending
+// -resume target is reported, so a retarget is exported before the new session
+// has announced anything. Retargeting clears the reported id (see UseResume),
+// so a session the REPL has left is never exported in its place.
 func (m Model) SessionData() (sessionID, cwd string) {
 	if m.session.SessionID != "" {
 		return m.session.SessionID, m.cfg.Cwd

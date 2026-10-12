@@ -43,7 +43,18 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   drains an active run without letting its late events or cancellation restore
   the old session pin; `/resume` sets the next mode explicitly. An initial
   `--fork` is consumed by its first fresh prompt, then the resulting session
-  is pinned with `--resume`. **Active-run restriction:** `/new`, `/resume`, and
+  is pinned with `--resume`. **Retargeting drops the identity of the session
+  left behind.** `/resume <uuid>` and the `/sessions` browser's `Enter` are one
+  shared transition: when the target actually changes, the reported session id,
+  task id, announced id, and reported model are cleared, so the status line's
+  session field, `/session`, `/session copy`, and the exit hint can only name
+  the session the next prompt continues. Until the new target reports an id of
+  its own, `/session copy` and the exit hint fall back to the pinned target,
+  and the status line carries no session id (rendered as `–`) while its
+  next-run field names that target. Re-selecting the already current target is
+  a no-op that keeps the reported identity and model; `/session`'s `last:` line
+  stays as the previous run's labeled history — it is display only and can
+  never pin. **Active-run restriction:** `/new`, `/resume`, and
   `/sessions` are rejected while a task is running with a warning to finish or
   cancel first. Only `/session`, `/help`, `/clear`, and `/exit` remain available
   during a run.
@@ -107,8 +118,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 
 - `just test` for `session_test.go` (cover every transition, especially
   success-pins-resume, failure-pins-resume, and failure-without-a-session-id-
-  does-not-advance) and `cmd/cake-repl` for the suspend cycle's step order and
-  its safe failure on an unreleasable terminal.
+  does-not-advance) and for the retarget boundary in `internal/app`
+  (`session_test.go`, `model_test.go`, `update_test.go`): the left session's
+  identity is dropped and never displayed or exported, while `SessionData`,
+  `/session copy`, and the exit hint name the new target. Also covers
+  `cmd/cake-repl` for the suspend cycle's step order and its safe failure on an
+  unreleasable terminal.
 - `just test-race` for any `runner.go` change.
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
 - Terminal behavior around a suspend has no unit-test surface beyond the step
@@ -120,6 +135,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Reintroducing the hijack.** Selecting an unrelated latest session after a
   completion that did not report a session id, instead of leaving the current
   run mode unchanged or requiring an explicit `/resume`.
+- **Presenting the session left behind as the current one.** Retargeting without
+  clearing the previous reported identity, so the status line, `/session`,
+  `/session copy`, or the exit hint keeps naming session A after the user chose
+  session B — copy and the exit hint must export the pinned target, never the
+  session the REPL left.
 - **Orphaning a session.** Leaving the run mode at `RunFresh` after a failure
   that reported a session id, so the user's next prompt silently starts a new
   session and abandons everything the failed run wrote.

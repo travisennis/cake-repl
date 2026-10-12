@@ -200,7 +200,16 @@ down. The status line and timeline only show it shortened.
   is running, it is canceled and its remaining events are discarded. Prompt
   history, the current input draft, and model/profile settings are preserved.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts
-  stay pinned to the same session.
+  stay pinned to the same session. Choosing a different session — through
+  `/resume` or the `/sessions` browser's `Enter` — drops the reported identity
+  of the session you left (its session id, task id, and reported model), so the
+  status line's next-run field, `/session`, `/session copy`, and the exit hint
+  name the session the next prompt continues rather than the one you came from.
+  Until that session reports an id of its own, `/session copy` and the exit
+  hint use the pinned id you chose, and the status line shows no session id
+  while its next-run field names the pin. Re-selecting the current session
+  keeps its identity, and `/session`'s `last:` line still shows how the
+  previous run ended.
 - `/sessions` opens a navigable list of this directory's past sessions (a short
   id, a relative age, and the first prompt), read from the supported, read-only
   `cake sessions list --json` command. Arrow keys and `PgUp`/`PgDn` move the

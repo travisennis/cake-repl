@@ -84,8 +84,10 @@ in plain text like every other surface.
   model, and cwd context; the model is the identity cake reported on the stream
   once available (the `[[models]]` entry name, falling back to the provider
   model ID), else the `-model`/config value, and a new session or resume switch
-  drops the reported identity (ADR 014). It pads or truncates to the terminal
-  width. The prompt
+  drops the reported identity (ADR 014). The session field names the id cake
+  reported for the current session and carries none after a retarget until the
+  new target reports one, while the next-run field names the pinned target. It
+  pads or truncates to the terminal width. The prompt
   textarea is framed as
   a focused composer with ready/running state and concise submit, newline, and
   help hints; its borders remain visible without color. While the TUI is

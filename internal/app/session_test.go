@@ -179,6 +179,67 @@ func TestRunEndedAfterRetargetPinsAnnouncedSession(t *testing.T) {
 	}
 }
 
+// A retarget drops the identity of the session being left. Nothing the REPL
+// displays, copies, or prints on exit may present session A as the session the
+// next prompt continues. The last completion stays recorded because /session
+// labels it as history.
+func TestUseResumeRetargetDropsPreviousSessionIdentity(t *testing.T) {
+	var s sessionState
+	s.OnTaskStart(cake.TaskStart{SessionID: "aaaaaaaa-1111-2222-3333-444444444444", TaskID: "t-a"})
+	s.OnModel("zen", "glm-5.1")
+	s.OnTaskComplete(success("aaaaaaaa-1111-2222-3333-444444444444"))
+
+	s.UseResume("bbbbbbbb-1111-2222-3333-444444444444")
+
+	if s.SessionID != "" || s.TaskID != "" || s.AnnouncedID != "" || s.Model != "" {
+		t.Errorf("retarget kept previous identity: %+v", s)
+	}
+	if mode, id := s.RunOptions(); mode != cake.RunResume || id != "bbbbbbbb-1111-2222-3333-444444444444" {
+		t.Errorf("after retarget mode=%v id=%q, want resume pinned to the new target", mode, id)
+	}
+	if s.LastComplete == nil {
+		t.Error("retarget dropped the last completion, which is displayed as history")
+	}
+}
+
+// Re-selecting the session already targeted is not a retarget: the reported
+// identity and last completion stay, so /session keeps describing it.
+func TestUseResumeSameTargetKeepsReportedIdentity(t *testing.T) {
+	id := "aaaaaaaa-1111-2222-3333-444444444444"
+	var s sessionState
+	s.OnTaskStart(cake.TaskStart{SessionID: id, TaskID: "t-1"})
+	s.OnModel("zen", "")
+	s.OnTaskComplete(success(id))
+
+	s.UseResume(id)
+
+	if s.SessionID != id || s.TaskID != "t-1" || s.AnnouncedID != id || s.Model != "zen" {
+		t.Errorf("same-target resume dropped identity: %+v", s)
+	}
+	if mode, resumeID := s.RunOptions(); mode != cake.RunResume || resumeID != id {
+		t.Errorf("after same-target resume mode=%v id=%q, want resume %q", mode, resumeID, id)
+	}
+}
+
+// A run that ends without a session id after a retarget must not put the
+// session the REPL left back in charge, and must not invent one.
+func TestIDlessCompletionAfterRetargetKeepsNewTarget(t *testing.T) {
+	const newTarget = "bbbbbbbb-1111-2222-3333-444444444444"
+	var s sessionState
+	s.OnTaskStart(cake.TaskStart{SessionID: "aaaaaaaa-1111-2222-3333-444444444444", TaskID: "t-a"})
+	s.OnTaskComplete(success("aaaaaaaa-1111-2222-3333-444444444444"))
+	s.UseResume(newTarget)
+
+	s.OnTaskComplete(success(""))
+
+	if s.SessionID != "" {
+		t.Errorf("session id = %q, want none restored", s.SessionID)
+	}
+	if mode, id := s.RunOptions(); mode != cake.RunResume || id != newTarget {
+		t.Errorf("after id-less completion mode=%v id=%q, want resume pinned to %q", mode, id, newTarget)
+	}
+}
+
 func TestOnModelPrefersModelsConfigEntryName(t *testing.T) {
 	var s sessionState
 	s.OnModel("zen", "glm-5.1")

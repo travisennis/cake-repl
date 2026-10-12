@@ -77,6 +77,53 @@ func requireBatchTitle(t *testing.T, cmd tea.Cmd, want string) {
 	requireTitle(t, cmds[len(cmds)-1], want)
 }
 
+// SessionData backs the exit hint and /session copy, so it must name the
+// session the next prompt continues. The reported id of the current invocation
+// wins; otherwise the pending -resume target is reported, which is what a
+// retarget leaves behind once the previous session's identity is dropped.
+func TestSessionDataReportsCurrentContinuation(t *testing.T) {
+	const oldID = "aaaaaaaa-1111-2222-3333-444444444444"
+	const newTarget = "bbbbbbbb-1111-2222-3333-444444444444"
+	completed := func(s *sessionState) {
+		s.OnTaskStart(cake.TaskStart{SessionID: oldID, TaskID: "t-a"})
+		s.OnTaskComplete(success(oldID))
+	}
+	tests := []struct {
+		name string
+		set  func(*sessionState)
+		want string
+	}{
+		{"fresh", func(*sessionState) {}, ""},
+		{"startup resume before any report", func(s *sessionState) {
+			s.NextMode = cake.RunResume
+			s.ResumeID = newTarget
+		}, newTarget},
+		{"completed session", completed, oldID},
+		{"retarget", func(s *sessionState) {
+			completed(s)
+			s.UseResume(newTarget)
+		}, newTarget},
+		{"reported id wins over the pending target", func(s *sessionState) {
+			s.UseResume(newTarget)
+			s.OnTaskStart(cake.TaskStart{SessionID: oldID, TaskID: "t-a"})
+		}, oldID},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newLaidOutModel()
+			m.cfg.Cwd = "/tmp/project"
+			tt.set(&m.session)
+			id, cwd := m.SessionData()
+			if id != tt.want {
+				t.Errorf("session id = %q, want %q", id, tt.want)
+			}
+			if cwd != "/tmp/project" {
+				t.Errorf("cwd = %q, want the configured working directory", cwd)
+			}
+		})
+	}
+}
+
 func TestInitSetsWindowTitleToWorkingDirectory(t *testing.T) {
 	m := New(Config{Cwd: "/tmp/project\x1b]2;injected\a"})
 	msg := m.Init()()

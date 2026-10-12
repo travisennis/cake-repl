@@ -94,15 +94,26 @@ func (s *sessionState) Reset() {
 	*s = sessionState{NextMode: cake.RunFresh}
 }
 
-// UseResume makes the next prompt resume a specific session.
+// UseResume makes the next prompt resume a specific session. Retargeting away
+// from the current session drops the identity of the session being left, so no
+// surface — the status line, /session, /session copy, or the exit hint — can
+// present that session as the one the next prompt continues. Until the new
+// target announces a session id of its own it is named only by NextMode and
+// ResumeID. Re-selecting the current target is a no-op that keeps the reported
+// identity. LastComplete is deliberately kept: /session labels it as the last
+// result, so it reads as the history it is and never as the current identity.
 func (s *sessionState) UseResume(id string) {
+	if s.NextMode != cake.RunResume || s.ResumeID != id {
+		s.SessionID = ""
+		s.TaskID = ""
+		// The previous invocation's announced id belongs to the old target; drop
+		// it so ending a run before the new target announces its own id cannot
+		// pin back to the session we just retargeted away from.
+		s.AnnouncedID = ""
+		// The displayed model belongs to the previous session; drop it so the
+		// status line does not show a stale identity for the newly targeted one.
+		s.Model = ""
+	}
 	s.NextMode = cake.RunResume
 	s.ResumeID = id
-	// The previous invocation's announced id belongs to the old target; drop
-	// it so ending a run before the new target announces its own id cannot
-	// pin back to the session we just retargeted away from.
-	s.AnnouncedID = ""
-	// The displayed model belongs to the previous session; drop it so the
-	// status line does not show a stale identity for the newly targeted one.
-	s.Model = ""
 }

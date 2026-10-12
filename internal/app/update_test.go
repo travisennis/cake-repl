@@ -471,6 +471,79 @@ func TestSessionCopyReportsClipboardFailure(t *testing.T) {
 	}
 }
 
+// After a retarget, /session copy must name the session the next prompt will
+// continue, not the one the REPL left.
+func TestSessionCopyAfterRetargetCopiesNewTarget(t *testing.T) {
+	const oldID = "aaaaaaaa-1111-2222-3333-444444444444"
+	const newTarget = "bbbbbbbb-1111-2222-3333-444444444444"
+	m := newLaidOutModel()
+	m.session.OnTaskStart(cake.TaskStart{SessionID: oldID, TaskID: "t-a"})
+	m.session.OnTaskComplete(success(oldID))
+	tm, _ := m.resumeSession(newTarget)
+	m = tm.(Model)
+
+	var copied string
+	m.clipboard = func(s string) error { copied = s; return nil }
+	tm, _ = m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+
+	if copied != newTarget {
+		t.Errorf("copied = %q, want the new target %q", copied, newTarget)
+	}
+	if last := lastItem(t, tm.(Model)); last.Kind != ui.KindInfo {
+		t.Errorf("last item = %+v, want copy confirmation", last)
+	}
+}
+
+// /session separates the session the next prompt continues from the history of
+// the one the REPL left: the reported identity is gone, the last completion is
+// still shown under its own label.
+func TestExecCommandSessionInfoAfterRetargetSeparatesHistory(t *testing.T) {
+	const oldID = "aaaaaaaa-1111-2222-3333-444444444444"
+	const newTarget = "bbbbbbbb-1111-2222-3333-444444444444"
+	m := newLaidOutModel()
+	m.session.OnTaskStart(cake.TaskStart{SessionID: oldID, TaskID: "t-a"})
+	m.session.OnTaskComplete(success(oldID))
+	tm, _ := m.resumeSession(newTarget)
+	m = tm.(Model)
+
+	tm, _ = m.execCommand(Command{Kind: CmdSession})
+	it := lastItem(t, tm.(Model))
+	for _, want := range []string{
+		"session:  (none)",
+		"task:     (none)",
+		"next run: resume " + newTarget,
+		"last:     success",
+	} {
+		if !strings.Contains(it.Text, want) {
+			t.Errorf("session info missing %q:\n%s", want, it.Text)
+		}
+	}
+	if strings.Contains(it.Text, "session:  "+oldID) {
+		t.Errorf("session info still presents the left session as current:\n%s", it.Text)
+	}
+}
+
+// The status line's session field names the session cake has reported. After a
+// retarget there is none yet, so it must not keep showing the one left behind;
+// the next-run field names the pinned target instead.
+func TestStatusLineAfterRetargetDropsPreviousSession(t *testing.T) {
+	const oldID = "aaaaaaaa-1111-2222-3333-444444444444"
+	const newTarget = "bbbbbbbb-1111-2222-3333-444444444444"
+	m := newLaidOutModel()
+	m.session.OnTaskStart(cake.TaskStart{SessionID: oldID, TaskID: "t-a"})
+	m.session.OnTaskComplete(success(oldID))
+	tm, _ := m.resumeSession(newTarget)
+	m = tm.(Model)
+
+	line := m.statusLine()
+	if strings.Contains(line, ui.ShortID(oldID)) {
+		t.Errorf("status line still shows the left session:\n%s", line)
+	}
+	if !strings.Contains(line, "next: resume "+ui.ShortID(newTarget)) {
+		t.Errorf("status line does not name the new target:\n%s", line)
+	}
+}
+
 func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Model = "gpt-x"
