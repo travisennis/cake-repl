@@ -342,6 +342,12 @@ validation is available with `just release-check`.
   output ceiling above; rendered forms are capped by `-output-limit`), and
   trimming by default would silently drop scroll-back history. Set
   `-max-timeline-items` to bound how many entries are kept.
+- `-history-file` stores one JSONL record per submission, capped at 1 MiB per
+  record. A larger submission — for example a huge paste that begins with `/` —
+  is dropped with a content-free warning rather than written, so it cannot make
+  the next startup fail. If an oversized record is already in the file, startup
+  loads every other entry and warns that the record was skipped; the file itself
+  is never truncated by a failed read.
 - Terminal control sequences are stripped from everything cake sends before it
   is drawn, so a command's own ANSI colors are not shown and tabs expand to
   eight-column stops. That includes what markdown decoding would otherwise

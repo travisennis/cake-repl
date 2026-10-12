@@ -2,11 +2,15 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/travisennis/cake-repl/internal/ui"
 )
 
 func TestLoadHistoryNormal(t *testing.T) {
@@ -257,4 +261,206 @@ func TestLoadHistorySkipsBlankLines(t *testing.T) {
 			t.Errorf("entries[%d] = %q, want %q", i, e, want[i])
 		}
 	}
+}
+
+// TestLoadHistorySkipsOversizedRecord covers the oversized-record recovery
+// policy: a record line over maxHistoryRecordBytes is drained and skipped
+// (bounded memory, resuming at the next record) so the valid records around it
+// stay usable, the on-disk file is not rewritten, and a content-free warning
+// reports the drop.
+func TestLoadHistorySkipsOversizedRecord(t *testing.T) {
+	oversized := strings.Repeat("x", maxHistoryRecordBytes+16)
+	cases := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "middle",
+			content: encodeHistoryEntry("first") + oversized + "\n" + encodeHistoryEntry("last"),
+			want:    []string{"first", "last"},
+		},
+		{
+			name:    "start",
+			content: oversized + "\n" + encodeHistoryEntry("after"),
+			want:    []string{"after"},
+		},
+		{
+			name:    "end with newline",
+			content: encodeHistoryEntry("before") + oversized + "\n",
+			want:    []string{"before"},
+		},
+		{
+			name:    "end without newline",
+			content: encodeHistoryEntry("before") + oversized,
+			want:    []string{"before"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "history")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			m := New(Config{HistoryFile: path})
+			if !reflect.DeepEqual(m.history.entries, tc.want) {
+				t.Fatalf("entries = %q, want %q", m.history.entries, tc.want)
+			}
+			if m.history.idx != len(tc.want) {
+				t.Errorf("idx = %d, want %d", m.history.idx, len(tc.want))
+			}
+
+			warn, ok := warningItem(m)
+			if !ok {
+				t.Fatal("no warning reported the skipped oversized record")
+			}
+			if !strings.Contains(warn.Text, "oversized") {
+				t.Errorf("warning = %q, want an oversized-record notice", warn.Text)
+			}
+			if strings.Contains(warn.Text, "xxxx") {
+				t.Errorf("warning leaked the dropped record content: %q", warn.Text)
+			}
+
+			// The load must not rewrite (wipe) the file: the oversized record is
+			// still on disk byte-for-byte, and a reload behaves the same.
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != tc.content {
+				t.Error("load rewrote the history file despite a skipped record")
+			}
+			if again := New(Config{HistoryFile: path}); !reflect.DeepEqual(again.history.entries, tc.want) {
+				t.Errorf("reload entries = %q, want %q", again.history.entries, tc.want)
+			}
+		})
+	}
+}
+
+// TestPersistHistorySizeBoundary pins the writer/reader size contract: a
+// record whose encoded line is exactly maxHistoryRecordBytes is written and
+// read back, while one byte more is dropped (reported oversized) so it can
+// never be persisted into a record loadHistory would skip.
+func TestPersistHistorySizeBoundary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history")
+	m := New(Config{HistoryFile: path})
+
+	// encodeHistoryEntry adds the \x02 prefix, the two JSON quotes, and the
+	// newline, so the text is four bytes shorter than the encoded record.
+	atLimit := strings.Repeat("x", maxHistoryRecordBytes-4)
+	if m.persistHistory(atLimit) {
+		t.Error("entry at the size limit was reported oversized")
+	}
+	overLimit := strings.Repeat("x", maxHistoryRecordBytes-3)
+	if !m.persistHistory(overLimit) {
+		t.Error("entry over the size limit was not reported oversized")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(data), "\n"); got != 1 {
+		t.Fatalf("file has %d records, want 1", got)
+	}
+	m2 := New(Config{HistoryFile: path})
+	if len(m2.history.entries) != 1 || m2.history.entries[0] != atLimit {
+		t.Fatalf("reloaded entries = %d, want the at-limit record of %d bytes", len(m2.history.entries), len(atLimit))
+	}
+}
+
+// TestSubmitDropsOversizedHistoryEntryWithWarning exercises the submit path: a
+// large pasted slash input must not be written to history, and a content-free
+// warning on the timeline must report the drop without echoing prompt text.
+func TestSubmitDropsOversizedHistoryEntryWithWarning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history")
+	m := New(Config{HistoryFile: path})
+	m.width, m.height = 80, 24
+	m.layout()
+
+	const marker = "LEAK-MARKER"
+	m.input.SetValue("/help " + marker + strings.Repeat("x", maxHistoryRecordBytes))
+	tm, _ := m.submit()
+	got := tm.(Model)
+
+	// The oversized record was dropped, not written.
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), marker) {
+		t.Fatal("oversized prompt was written to the history file")
+	}
+
+	warn, ok := warningItem(got)
+	if !ok {
+		t.Fatal("no warning reported the dropped history record")
+	}
+	if !strings.Contains(warn.Text, "too large") {
+		t.Errorf("warning = %q, want a too-large notice", warn.Text)
+	}
+	if strings.Contains(warn.Text, marker) || strings.Contains(warn.Text, "xxxx") {
+		t.Errorf("warning leaked prompt content: %q", warn.Text)
+	}
+	// The command itself still ran: the help text reached the timeline.
+	if !timelineContains(got, HelpText) {
+		t.Error("the slash command did not run after the history drop")
+	}
+}
+
+// TestReadHistoryKeepsEntriesBeforeReadError proves a mid-file read error
+// still yields the entries read so far (and returns the error), so a caller
+// never discards valid history just because the tail failed.
+func TestReadHistoryKeepsEntriesBeforeReadError(t *testing.T) {
+	r := &errAfterReader{data: []byte("first\n"), err: errors.New("boom")}
+	entries, skipped, err := readHistory(r)
+	if err == nil {
+		t.Fatal("err = nil, want the read error")
+	}
+	if skipped != 0 {
+		t.Errorf("skipped = %d, want 0", skipped)
+	}
+	if !reflect.DeepEqual(entries, []string{"first"}) {
+		t.Errorf("entries = %q, want [first]", entries)
+	}
+}
+
+// errAfterReader yields data and then fails, standing in for a file that
+// errors mid-read.
+type errAfterReader struct {
+	data []byte
+	err  error
+}
+
+func (r *errAfterReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+// warningItem returns the first warning timeline item.
+func warningItem(m Model) (ui.Item, bool) {
+	for _, it := range m.items {
+		if it.Kind == ui.KindWarning {
+			return it, true
+		}
+	}
+	return ui.Item{}, false
+}
+
+// timelineContains reports whether any timeline item's text is exactly want.
+func timelineContains(m Model, want string) bool {
+	for _, it := range m.items {
+		if it.Text == want {
+			return true
+		}
+	}
+	return false
 }

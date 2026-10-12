@@ -508,8 +508,8 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	}
 
 	if cmd, ok, err := ParseCommand(text); ok {
-		if m.history.Add(text) {
-			m.persistHistory(text)
+		if m.history.Add(text) && m.persistHistory(text) {
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: historyTooLargeWarning()})
 		}
 		m.input.Reset()
 		m.layout()
@@ -617,23 +617,34 @@ func (m Model) resumeSession(id string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// persistHistory appends one entry to the history file when configured.
-// Write errors are silently ignored so a bad path never breaks the REPL.
+// persistHistory appends one entry to the history file when configured and
+// reports whether the entry was too large to record. A record whose encoded
+// line would exceed maxHistoryRecordBytes is dropped rather than written,
+// because loadHistory could never read it back; the caller may warn on a true
+// result but must not echo the prompt text.
+//
+// Write errors (a bad path or permissions) are silently ignored so they never
+// break the REPL; only the size guard is surfaced.
 //
 // Each entry is stored as "\x02" + JSON-encoded prompt + "\n". The \x02
 // prefix unambiguously marks JSONL records so loadHistory can distinguish
 // them from legacy plain-text lines. Appending via O_APPEND is safe for
 // concurrent writers.
-func (m Model) persistHistory(text string) {
+func (m Model) persistHistory(text string) (oversized bool) {
 	if m.cfg.HistoryFile == "" {
-		return
+		return false
+	}
+	rec := encodeHistoryEntry(text)
+	if len(rec) > maxHistoryRecordBytes {
+		return true
 	}
 	f, err := os.OpenFile(m.cfg.HistoryFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return
+		return false
 	}
 	defer f.Close() //nolint:errcheck // best-effort on close
-	_, _ = f.WriteString(encodeHistoryEntry(text))
+	_, _ = f.WriteString(rec)
+	return false
 }
 
 func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
@@ -670,8 +681,8 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	// A fork creates one fresh session boundary. Once the process has
 	// started, future prompts must use the session pin rather than fork again.
 	m.cfg.Fork = false
-	if m.history.Add(prompt) {
-		m.persistHistory(prompt)
+	if m.history.Add(prompt) && m.persistHistory(prompt) {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: historyTooLargeWarning()})
 	}
 	m.appendItem(ui.Item{Kind: ui.KindUser, Text: prompt})
 	m.input.Reset()

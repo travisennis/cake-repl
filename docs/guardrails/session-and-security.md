@@ -30,6 +30,17 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   so the next submission must not accidentally start a fresh session and orphan
   the work. If a task reports no session id, the current run mode remains
   unchanged; the REPL never selects an unrelated latest session.
+- **Prompt history is bounded and self-healing.** `-history-file` (when set)
+  stores one JSONL record per submission — the `\x02` prefix, a JSON-encoded
+  prompt, and a newline — keeps the file at `0o600` by creation, appends with
+  `O_APPEND`, and retains consecutive-duplicate suppression and the
+  1,000-entry retained-load cap. A record is capped at 1 MiB: the reader's
+  buffer is fixed at that bound, a submission whose record would exceed it is
+  dropped rather than written (with a content-free warning that never echoes the
+  prompt), and an oversized record already in the file is drained and skipped at
+  load with a content-free warning, keeping the valid records before and after
+  it. A failed or oversized read never truncates the file; the load-time
+  rewrite still happens only after a complete read.
 - **Session hydration.** Startup `-resume <uuid>` launches the read-only cake
   replay command before accepting a new prompt. Ordered replay events hydrate
   the local timeline; metadata restores known session/task ids, and replayed
@@ -151,6 +162,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   SGR in tool output; widen it to other item kinds or other escape families and
   it becomes this failure mode. Relying on glamour to discard escapes is not a
   defense.
+- **Persisting an unreadable prompt-history record.** Writing an entry larger
+  than the history reader's buffer, so the next startup cannot read the file, or
+  replacing the bounded reader with an unbounded one. Keep the writer and reader
+  on the same 1 MiB record bound and drain-and-skip oversized records instead.
 - **Trusting the input pass to cover decoded markdown.** `ui.Sanitize` runs on
   the markdown source, but glamour unescapes character references while
   rendering, so the rendered output needs its own scrub; removing that scrub

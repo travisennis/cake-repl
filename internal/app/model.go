@@ -6,6 +6,8 @@ package app
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -61,6 +63,13 @@ const (
 	statusHeight             = 1
 	maxHistoryEntries        = 1000
 	jsonlPrefix              = "\x02" // per-record marker for JSONL entries
+	// maxHistoryRecordBytes bounds one persisted history record, measured as
+	// its full JSONL line (the \x02 prefix, the JSON-encoded prompt, and the
+	// newline). The reader's buffer is fixed at this size, so it always fits
+	// one record: persistHistory writes only records within the bound, and
+	// loadHistory drains and skips larger ones while keeping the records around
+	// them, instead of failing the whole load.
+	maxHistoryRecordBytes = 1 << 20 // 1 MiB
 
 	// inlineViewportMax caps the timeline viewport in inline mode so the live
 	// region never grows tall enough to push the terminal's own history out of
@@ -182,10 +191,14 @@ func New(cfg Config) Model {
 //
 // Each line starting with jsonlPrefix ("\x02") is decoded as a JSON-encoded
 // string; all other lines are treated as plain-text legacy entries. Blank
-// lines are skipped.
+// lines are skipped. A record whose line exceeds maxHistoryRecordBytes is
+// drained and skipped, with a content-free warning, instead of aborting the
+// load, so valid entries before and after it stay usable.
 //
 // Entries beyond maxHistoryEntries are trimmed on load and the surviving
 // entries are rewritten with the JSONL prefix, migrating legacy files forward.
+// The file is rewritten only after a complete read, and the surviving entries
+// are still loaded; an oversized or unreadable file is never silently wiped.
 func (m *Model) loadHistory(path string) {
 	f, err := os.Open(path) //nolint:gosec // user-provided path from -history-file
 	if err != nil {
@@ -193,30 +206,9 @@ func (m *Model) loadHistory(path string) {
 	}
 	defer f.Close() //nolint:errcheck // best-effort on close
 
-	var entries []string
-	sc := bufio.NewScanner(f)
-	buf := make([]byte, 64*1024)
-	sc.Buffer(buf, 1024*1024)
-	for sc.Scan() {
-		line := sc.Text()
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, jsonlPrefix) {
-			var s string
-			if err := json.Unmarshal([]byte(line[len(jsonlPrefix):]), &s); err == nil {
-				entries = append(entries, s)
-				continue
-			}
-		}
-		// Plain text (legacy entry or unparseable JSONL) — keep verbatim.
-		entries = append(entries, line)
-	}
-	if err := sc.Err(); err != nil {
-		return // best-effort
-	}
+	entries, skipped, err := readHistory(f)
 
-	if len(entries) > maxHistoryEntries {
+	if err == nil && len(entries) > maxHistoryEntries {
 		entries = entries[len(entries)-maxHistoryEntries:]
 		// Rewrite the file to stay under the cap. Errors are best-effort.
 		// Write every retained entry with the JSONL prefix, migrating any
@@ -230,6 +222,80 @@ func (m *Model) loadHistory(path string) {
 
 	m.history.entries = entries
 	m.history.idx = len(entries)
+
+	if skipped > 0 {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: historySkipWarning(skipped)})
+	}
+}
+
+// readHistory parses history records from r. Each line starting with
+// jsonlPrefix is decoded as a JSON-encoded string; every other line is a
+// plain-text legacy entry, kept verbatim (including an unparseable JSONL
+// line). Blank lines are skipped.
+//
+// A line longer than maxHistoryRecordBytes is drained to its newline in
+// bounded chunks, counted in skipped, and the read resumes at the next record,
+// so one oversized record cannot hide the records after it. The reader buffer
+// is fixed at that bound, so memory stays flat no matter how large a record
+// is. A complete read returns a nil error; a mid-file read error returns the
+// entries read so far plus the error, letting the caller keep them without
+// rewriting the file.
+func readHistory(r io.Reader) (entries []string, skipped int, err error) {
+	br := bufio.NewReaderSize(r, maxHistoryRecordBytes)
+	for {
+		line, rerr := br.ReadSlice('\n')
+		if errors.Is(rerr, bufio.ErrBufferFull) {
+			skipped++
+			for errors.Is(rerr, bufio.ErrBufferFull) {
+				_, rerr = br.ReadSlice('\n')
+			}
+			if rerr != nil && !errors.Is(rerr, io.EOF) {
+				return entries, skipped, rerr
+			}
+			if errors.Is(rerr, io.EOF) {
+				return entries, skipped, nil
+			}
+			continue
+		}
+		if rerr != nil && !errors.Is(rerr, io.EOF) {
+			return entries, skipped, rerr
+		}
+		if s := trimHistoryLine(line); s != "" {
+			if strings.HasPrefix(s, jsonlPrefix) {
+				var v string
+				if json.Unmarshal([]byte(s[len(jsonlPrefix):]), &v) == nil {
+					entries = append(entries, v)
+				} else {
+					// Unparseable JSONL — keep the line verbatim.
+					entries = append(entries, s)
+				}
+			} else {
+				entries = append(entries, s)
+			}
+		}
+		if errors.Is(rerr, io.EOF) {
+			return entries, skipped, nil
+		}
+	}
+}
+
+// trimHistoryLine turns one ReadSlice result into its entry text, dropping the
+// trailing newline and an optional carriage return, mirroring bufio.ScanLines.
+func trimHistoryLine(line []byte) string {
+	s := strings.TrimSuffix(string(line), "\n")
+	return strings.TrimSuffix(s, "\r")
+}
+
+// historySkipWarning is the content-free notice for records skipped at load:
+// it names the count and the limit, never the dropped text.
+func historySkipWarning(n int) string {
+	return fmt.Sprintf("skipped %d oversized history record(s) (over %d MiB)", n, maxHistoryRecordBytes>>20)
+}
+
+// historyTooLargeWarning is the content-free notice for a submission too large
+// to persist: it names the limit, never the prompt text.
+func historyTooLargeWarning() string {
+	return fmt.Sprintf("prompt too large to save to history (over %d MiB)", maxHistoryRecordBytes>>20)
 }
 
 func encodeHistoryEntry(text string) string {
