@@ -104,7 +104,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
 - **Process lifecycle.** One cake process at a time, including while replay
   hydration is active. Cancel = SIGTERM then SIGKILL after `WaitDelay` (kill
-  outright on Windows). stderr retained as a bounded tail for error display.
+  outright on Windows). stderr retained as a bounded tail for error display. The
+  read-only session listing is model-owned too: it is canceled when the browser
+  closes, when it is replaced, and on quit, and `ListSessions` bounds its teardown
+  with `WaitDelay` (a hard kill — the listing has no state to flush) so a stuck
+  helper, or a descendant holding the inherited stdout pipe, cannot hang the REPL.
+  See [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md).
 - **Terminal ownership across a suspend (security boundary).** The REPL owns raw
   input, the cursor, mouse reporting, and (by default) the alternate screen, so
   it must never stop or exit without giving them back. An external, catchable
@@ -135,7 +140,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `/session copy`, and the exit hint name the new target. Also covers
   `cmd/cake-repl` for the suspend cycle's step order and its safe failure on an
   unreleasable terminal.
-- `just test-race` for any `runner.go` change.
+- `just test-race` for any `runner.go` change, and for the session-listing
+  lifecycle (cancellation, request identity, `WaitDelay`).
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
 - Terminal behavior around a suspend has no unit-test surface beyond the step
   order and mode sequences, so a change there needs the driven session in
@@ -176,7 +182,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   process status on POSIX, not the context. See `runner.go` for how the atomic
   flag preserves ordering.
 - **Zombie / runaway processes.** Removing the SIGKILL fallback or `WaitDelay`,
-  or allowing more than one concurrent run.
+  or allowing more than one concurrent run. For the read-only session listing,
+  the same applies to its `WaitDelay` bound and to the model-owned cancellation:
+  dropping either lets a slow listing keep running after the browser is closed or
+  the REPL exits.
 - **Stopping or exiting with the terminal still owned.** Stopping before
   releasing raw mode, the cursor, mouse reporting, or the alternate screen;
   assuming `RestoreTerminal` restores every mode (it restores bracketed paste

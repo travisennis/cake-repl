@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,12 +21,14 @@ const (
 )
 
 // browserModel returns a laid-out model with the /sessions browser open and one
-// listing already applied.
+// listing already applied, as if its request had completed: the list holds the
+// rows and no request is in flight.
 func browserModel(t *testing.T, sessions []cake.SessionSummary) Model {
 	t.Helper()
 	m := newLaidOutModel()
 	m.browserOpen = true
-	tm, _ := m.Update(sessionsLoadedMsg{sessions: sessions})
+	m.sessionListSeq, m.sessionListReq = 1, 1
+	tm, _ := m.Update(sessionsLoadedMsg{req: 1, sessions: sessions})
 	return tm.(Model)
 }
 
@@ -82,7 +85,7 @@ func TestSessionsLoadedErrorKeepsBrowserOpen(t *testing.T) {
 	m := browserModel(t, nil)
 	m.browserLoading = true
 
-	tm, _ := m.Update(sessionsLoadedMsg{err: errors.New("cake exploded\x1b[2J")})
+	tm, _ := m.Update(sessionsLoadedMsg{req: m.sessionListReq, err: errors.New("cake exploded\x1b[2J")})
 	got := tm.(Model)
 	if got.browserLoading {
 		t.Error("browser still loading after an error")
@@ -182,7 +185,7 @@ func TestBrowserEnterIgnoredAfterFailedReload(t *testing.T) {
 
 	tm, _ := m.execCommand(Command{Kind: CmdSessions})
 	m = tm.(Model)
-	tm, _ = m.Update(sessionsLoadedMsg{err: errors.New("cake exploded")})
+	tm, _ = m.Update(sessionsLoadedMsg{req: m.sessionListReq, err: errors.New("cake exploded")})
 	m = tm.(Model)
 	if items := m.sessionList.Items(); len(items) != 0 {
 		t.Fatalf("a failed reload left %d selectable rows", len(items))
@@ -226,7 +229,7 @@ func TestBrowserEnterSelectsOnlyTheCurrentListing(t *testing.T) {
 	tm, _ := m.execCommand(Command{Kind: CmdSessions})
 	m = tm.(Model)
 	m.input.SetValue("draft")
-	tm, _ = m.Update(sessionsLoadedMsg{sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "two"}}})
+	tm, _ = m.Update(sessionsLoadedMsg{req: m.sessionListReq, sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "two"}}})
 	m = tm.(Model)
 	if m.sessionList.Index() != 0 {
 		t.Fatalf("cursor = %d, want the first row of the new listing", m.sessionList.Index())
@@ -457,4 +460,243 @@ func TestBrowserItemsAreListItems(t *testing.T) {
 	if _, ok := items[0].(sessionItem); !ok {
 		t.Errorf("item %T is not a sessionItem", items[0])
 	}
+}
+
+// listingStopBound is the test's allowance for a canceled listing to return. It
+// sits well above the production bound (cake's sessionsWaitDelay, 3s): canceling
+// an exec'd sleeper stops it in milliseconds, so exceeding this means the helper
+// was never stopped.
+const listingStopBound = 10 * time.Second
+
+// blockingListing opens the /sessions browser and runs its listing against a
+// fake cake that blocks until the listing's context is canceled (or the process
+// is killed). It returns the model and a channel that delivers the listing
+// result once the command returns. A cleanup cancels any listing still active
+// when the test ends, so no fake process outlives the test.
+func blockingListing(t *testing.T, m Model) (Model, <-chan tea.Msg) {
+	t.Helper()
+	started := filepath.Join(t.TempDir(), "started")
+	t.Setenv("STARTED_FILE", started)
+	m.cfg.CakeBin = writeFakeCake(t, `
+touch "$STARTED_FILE"
+exec sleep 30
+`)
+	tm, cmd := m.execCommand(Command{Kind: CmdSessions})
+	m = tm.(Model)
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	waitForFile(t, started)
+	t.Cleanup(func() { m.cancelSessionList() })
+	return m, done
+}
+
+// waitForFile blocks until the fake cake has created path, so a test acts only
+// after the listing is actually running rather than racing its startup.
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fake listing never started: %s", path)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// awaitListing waits for a canceled listing's command to return, failing if it
+// does not stop within the bound.
+func awaitListing(t *testing.T, done <-chan tea.Msg) tea.Msg {
+	t.Helper()
+	select {
+	case msg := <-done:
+		return msg
+	case <-time.After(listingStopBound):
+		t.Fatalf("listing did not stop within %s", listingStopBound)
+		return nil
+	}
+}
+
+// TestSessionsReloadSupersedesLateListing uses deterministic held results:
+// request A is delivered only after its replacement B has started and again
+// after B completes. A must not touch B's items, error, selection, or loading
+// state.
+func TestSessionsReloadSupersedesLateListing(t *testing.T) {
+	m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
+
+	// Reopening cancels A and starts B; the browser is now loading B.
+	tm, _ := m.execCommand(Command{Kind: CmdSessions})
+	m = tm.(Model)
+	reqB := m.sessionListReq
+	if reqB == 0 {
+		t.Fatal("reload did not allocate a request identity")
+	}
+	reqA := reqB - 1
+
+	// A's result, held until after B started, must be dropped: no rows, no
+	// error, still loading B.
+	tm, _ = m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "stale"}}})
+	m = tm.(Model)
+	if !m.browserLoading {
+		t.Error("a superseded result cleared B's loading state")
+	}
+	if m.browserErr != "" {
+		t.Errorf("a superseded success set an error: %q", m.browserErr)
+	}
+	if items := m.sessionList.Items(); len(items) != 0 {
+		t.Errorf("a superseded result put %d rows on screen", len(items))
+	}
+
+	// A late failure from A must be ignored too.
+	tm, _ = m.Update(sessionsLoadedMsg{req: reqA, err: errors.New("stale failure")})
+	m = tm.(Model)
+	if m.browserErr != "" {
+		t.Errorf("a superseded error reached the browser: %q", m.browserErr)
+	}
+	if !m.browserLoading {
+		t.Error("a superseded error stopped B's load")
+	}
+
+	// B's own result applies.
+	tm, _ = m.Update(sessionsLoadedMsg{req: reqB, sessions: []cake.SessionSummary{
+		{SessionID: browserID1, FirstPrompt: "current one"},
+		{SessionID: browserID2, FirstPrompt: "current two"},
+	}})
+	m = tm.(Model)
+	if m.browserLoading {
+		t.Error("B's result left the browser loading")
+	}
+	if len(m.sessionList.Items()) != 2 {
+		t.Fatalf("B's result put %d rows on screen, want 2", len(m.sessionList.Items()))
+	}
+	// Move the cursor so a stale result would be visible if it reset selection.
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = tm.(Model)
+	if m.sessionList.Index() != 1 {
+		t.Fatalf("cursor = %d, want 1", m.sessionList.Index())
+	}
+
+	// A delivered again after B completed still must not touch B.
+	tm, _ = m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "late"}}})
+	m = tm.(Model)
+	items := m.sessionList.Items()
+	if len(items) != 2 {
+		t.Fatalf("a late result changed the listing: %d rows", len(items))
+	}
+	if got := items[0].(sessionItem).summary.FirstPrompt; got != "current one" {
+		t.Errorf("listing row = %q, want B's row", got)
+	}
+	if m.sessionList.Index() != 1 {
+		t.Errorf("a late result reset the selection: cursor = %d, want 1", m.sessionList.Index())
+	}
+}
+
+// TestBrowserCloseCancelsInFlightListing: closing the browser cancels the
+// model-owned listing, the helper stops within the bound, and its late result is
+// ignored while the composer keeps any draft.
+func TestBrowserCloseCancelsInFlightListing(t *testing.T) {
+	m, done := blockingListing(t, newLaidOutModel())
+	m.input.SetValue("draft")
+
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	got := tm.(Model)
+	if got.browserOpen {
+		t.Fatal("Esc must close the browser")
+	}
+	if got.sessionListCancel != nil {
+		t.Error("closing left the listing cancel func set")
+	}
+	if got.sessionListReq != 0 {
+		t.Errorf("closing left identity %d live, want it invalidated", got.sessionListReq)
+	}
+	if got.input.Value() != "draft" {
+		t.Errorf("closing dropped the composer draft: %q", got.input.Value())
+	}
+
+	msg := awaitListing(t, done)
+	tm, _ = got.Update(msg)
+	got = tm.(Model)
+	if got.browserOpen || len(got.sessionList.Items()) != 0 || got.browserErr != "" || got.browserLoading {
+		t.Errorf("a canceled listing touched the closed browser: open=%v loading=%v err=%q items=%d",
+			got.browserOpen, got.browserLoading, got.browserErr, len(got.sessionList.Items()))
+	}
+}
+
+// TestSessionsReopenCancelsPriorListing: starting a replacement listing cancels
+// the request already in flight, so exactly one listing is live.
+func TestSessionsReopenCancelsPriorListing(t *testing.T) {
+	m, done := blockingListing(t, newLaidOutModel())
+	reqA := m.sessionListReq
+
+	tm, _ := m.execCommand(Command{Kind: CmdSessions})
+	m = tm.(Model)
+	if m.sessionListReq == reqA {
+		t.Fatal("reload reused the previous request identity")
+	}
+	if m.sessionListCancel == nil {
+		t.Fatal("reload left no live listing to replace")
+	}
+	// The replaced request's helper must stop within the bound.
+	awaitListing(t, done)
+	// A's late result is superseded and ignored.
+	tm, _ = m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "stale"}}})
+	m = tm.(Model)
+	if !m.browserLoading || len(m.sessionList.Items()) != 0 {
+		t.Errorf("stale result touched the replacement: loading=%v items=%d", m.browserLoading, len(m.sessionList.Items()))
+	}
+	// Leave no listing running.
+	m.closeBrowser()
+}
+
+// TestSessionsExitCancelsInFlightListing: quitting the program cancels the
+// model-owned listing within the bound.
+func TestSessionsExitCancelsInFlightListing(t *testing.T) {
+	m, done := blockingListing(t, newLaidOutModel())
+
+	tm, cmd := m.execCommand(Command{Kind: CmdExit})
+	if cmd == nil {
+		t.Fatal("expected a quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("cmd() = %T, want tea.QuitMsg", cmd())
+	}
+	_ = tm
+	awaitListing(t, done)
+}
+
+// TestPromptUsableAfterClosingBrowser: a draft survives closing the browser and
+// the next submit starts a run instead of being swallowed by browser state.
+func TestPromptUsableAfterClosingBrowser(t *testing.T) {
+	m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
+	m.input.SetValue("hello after closing")
+
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m = tm.(Model)
+	if m.browserOpen {
+		t.Fatal("Esc must close the browser")
+	}
+
+	bin := writeFakeCake(t, `
+echo '{"type":"task_complete","session_id":"`+browserID1+`","task_id":"t-1"}'
+exit 0
+`)
+	m.cfg.CakeBin = bin
+	tm, cmd := m.submit()
+	got := tm.(Model)
+	if !got.running {
+		t.Fatal("submitting after closing the browser did not start a run")
+	}
+	if got.input.Value() != "" {
+		t.Errorf("submit should clear the composer, got %q", got.input.Value())
+	}
+	// Drain the run so the fake process is reaped; the submit cmd itself is not
+	// the one to run here (the spinner tick and stream pump are started by the
+	// program loop).
+	_ = cmd
+	if got.run == nil {
+		t.Fatal("no run to drain")
+	}
+	drainRun(t, got.run)
 }

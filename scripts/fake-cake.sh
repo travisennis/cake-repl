@@ -17,8 +17,10 @@
 # Environment:
 #   FAKE_CAKE_FIXTURE         fixture for a live prompt (default: happy-path)
 #   FAKE_CAKE_REPLAY_FIXTURE  fixture for `replay <uuid>` (default: replay-path)
+#   FAKE_CAKE_SESSIONS        response for `sessions list --json`: `valid`
+#                             (default), `empty`, or `error`
 #   FAKE_CAKE_DELAY           seconds to wait after each line (default: 0), so a
-#                             running state is observable
+#                             running state or a loading listing is observable
 #   FAKE_CAKE_ARGS_FILE       when set, append the argv of every invocation
 #                             (for checking which flags the REPL passed through)
 #   FAKE_CAKE_DEBUG           when set, print the argv to stderr
@@ -37,6 +39,34 @@ if [ -n "${FAKE_CAKE_DEBUG:-}" ]; then
 fi
 if [ -n "${FAKE_CAKE_ARGS_FILE:-}" ]; then
     { printf '%s\n' '--'; printf '%s\n' "$@"; } >> "$FAKE_CAKE_ARGS_FILE"
+fi
+
+# `cake sessions list --json` is a different shape: it answers with the read-only
+# listing envelope (or a failure), not a stream fixture, so a driven session can
+# exercise the /sessions browser's loading, list, empty, and error states.
+if [ "${1:-}" = "sessions" ]; then
+    case "${FAKE_CAKE_SESSIONS:-valid}" in
+        valid)
+            printf '%s\n' '{"schema_version":1,"command":"sessions list","status":"ok","summary":{"count":2},"data":{"sessions":['
+            sleep "$delay"
+            printf '%s\n' '{"session_id":"11111111-2222-3333-4444-555555555555","first_prompt":"fixture session one","timestamp":"2026-10-07T11:20:44Z"},'
+            sleep "$delay"
+            printf '%s\n' '{"session_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","first_prompt":"fixture session two","timestamp":"2026-10-06T09:00:00Z"}]}}'
+            exit 0
+            ;;
+        empty)
+            printf '%s\n' '{"schema_version":1,"data":{"sessions":[]}}'
+            exit 0
+            ;;
+        error)
+            printf 'fake-cake: sessions unavailable\n' >&2
+            exit 1
+            ;;
+        *)
+            printf 'fake-cake: unknown FAKE_CAKE_SESSIONS: %s\n' "$FAKE_CAKE_SESSIONS" >&2
+            exit 2
+            ;;
+    esac
 fi
 
 file="$fixtures_dir/$fixture.ndjson"

@@ -35,7 +35,8 @@ not read.
 | --- | --- | --- |
 | `FAKE_CAKE_FIXTURE` | `happy-path` | fixture for a live prompt: `happy-path`, `error-task`, `minimal`, `unknown-type`, `malformed-midstream` |
 | `FAKE_CAKE_REPLAY_FIXTURE` | `replay-path` | fixture for `replay <uuid>`, used when the REPL starts with `-resume` |
-| `FAKE_CAKE_DELAY` | `0` | seconds between lines, so the running state is observable (`FAKE_CAKE_DELAY=0.4`) |
+| `FAKE_CAKE_SESSIONS` | `valid` | response for `sessions list --json`: `valid` (two sessions), `empty`, or `error` |
+| `FAKE_CAKE_DELAY` | `0` | seconds between lines, so the running state or a loading listing is observable (`FAKE_CAKE_DELAY=0.4`) |
 | `FAKE_CAKE_ARGS_FILE` | unset | append each invocation's argv, to check which flags the REPL passed through |
 | `FAKE_CAKE_DEBUG` | unset | print the argv to stderr |
 
@@ -149,10 +150,13 @@ Other bindings worth driving: `C-c` cancels a running task and quits when idle,
 recalls history, `Tab` completes a command, `Esc` closes the `/sessions`
 browser. Snapshot after each one; a keypress can land in the next view.
 
-The fake answers *every* invocation with a stream fixture, including
-`cake sessions list --json`, so the `/sessions` browser renders its
-"sessions unavailable" state instead of a list. That still exercises the modal
-open and close, but it is not evidence about the listing itself.
+The fake answers `cake sessions list --json` with a two-session listing, so the
+`/sessions` browser renders its loading, list, and empty states; set
+`FAKE_CAKE_SESSIONS=error` for the "sessions unavailable" warning and
+`FAKE_CAKE_DELAY` to keep the loading state on screen long enough to close or
+reopen the browser mid-load. A listing is canceled when the browser closes or is
+replaced, so a capture of that cycle is the evidence for session-listing
+lifecycle changes.
 
 ### 5. Resize
 

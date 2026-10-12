@@ -215,9 +215,11 @@ down. The status line and timeline only show it shortened.
   `cake sessions list --json` command. Arrow keys and `PgUp`/`PgDn` move the
   selection; `Enter` resumes the highlighted session exactly like
   `/resume <uuid>` (it pins the next prompt and does not replay history); `Esc`
-  or `q` closes the list without action. A missing or older cake binary, or
-  malformed output, shows a non-fatal warning. Like `/new` and `/resume`, it
-  requires an idle REPL.
+  or `q` closes the list without action. Closing or reopening the browser stops a
+  listing that is still loading, so a slow helper never keeps running after you
+  are done with it, and a prompt typed after closing is submitted normally. A
+  missing or older cake binary, or malformed output, shows a non-fatal warning.
+  Like `/new` and `/resume`, it requires an idle REPL.
 - `/new` and `/resume` are rejected while a task is running.
   Finish or cancel the task first (Ctrl+C), or use `Ctrl+N` to cancel and start
   a new session in one action.

@@ -80,23 +80,35 @@ func waitForRun(run *cake.Run) tea.Cmd {
 	}
 }
 
-// sessionsLoadedMsg delivers the result of one read-only session listing.
+// sessionsLoadedMsg delivers the result of one read-only session listing. req
+// is the request identity the result belongs to; a result whose identity no
+// longer matches the active request is superseded and dropped.
 type sessionsLoadedMsg struct {
+	req      uint64
 	sessions []cake.SessionSummary
 	err      error
 }
 
-// listSessionsCmd runs `cake sessions list --json` off the Update loop, so a
-// slow or missing cake binary cannot block key handling.
-func (m Model) listSessionsCmd() tea.Cmd {
+// startSessionListLoad cancels any in-flight listing and starts a fresh
+// read-only listing under a new request identity. The model owns the
+// cancellation: closing the browser, replacing the listing, or quitting cancels
+// it, and only the newest request may apply its result. The command runs off the
+// Update loop, so a slow or missing cake binary cannot block key handling.
+func (m *Model) startSessionListLoad() tea.Cmd {
+	m.cancelSessionList()
+	m.sessionListSeq++
+	m.sessionListReq = m.sessionListSeq
+	ctx, cancel := context.WithCancel(context.Background())
+	m.sessionListCancel = cancel
+	req := m.sessionListReq
 	cfg := m.cfg
 	return func() tea.Msg {
-		sessions, err := cake.ListSessions(context.Background(), cake.SessionsOptions{
+		sessions, err := cake.ListSessions(ctx, cake.SessionsOptions{
 			Bin:      cfg.CakeBin,
 			Cwd:      cfg.Cwd,
 			DebugLog: cfg.DebugLog,
 		})
-		return sessionsLoadedMsg{sessions: sessions, err: err}
+		return sessionsLoadedMsg{req: req, sessions: sessions, err: err}
 	}
 }
 
@@ -184,7 +196,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// for the next key or resize to flush.
 			m.syncViewport()
 			if m.exitAfter {
-				return m, tea.Quit
+				return m, m.quit()
 			}
 			return m, nil
 		}
@@ -222,7 +234,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishRun(msg.res)
 
 	case sessionsLoadedMsg:
+		if msg.req != m.sessionListReq {
+			// A superseded or invalidated request: its items, error, selection,
+			// and loading state must not touch the request the browser is on
+			// now.
+			return m, nil
+		}
 		m.browserLoading = false
+		m.sessionListCancel = nil
 		if msg.err != nil {
 			m.browserErr = ui.TruncateOutput(msg.err.Error(), m.cfg.OutputLimit)
 			// The rows on screen are gone, so the list must not keep the previous
@@ -262,6 +281,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// quit cancels any in-flight session listing and then quits, so the
+// model-owned operation stops before the program exits.
+func (m *Model) quit() tea.Cmd {
+	m.cancelSessionList()
+	return tea.Quit
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.browserOpen {
 		return m.handleBrowserKey(msg)
@@ -279,7 +305,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		return m, tea.Quit
+		return m, m.quit()
 
 	case key.Matches(msg, m.keys.Submit):
 		return m.submit()
@@ -345,7 +371,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "ctrl+c":
-		m.browserOpen = false
+		m.closeBrowser()
 		return m, nil
 	case "enter":
 		// Only a row from the current successful listing is selectable: while a
@@ -356,7 +382,7 @@ func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if it, ok := m.sessionList.SelectedItem().(sessionItem); ok {
-			m.browserOpen = false
+			m.closeBrowser()
 			return m.resumeSession(it.summary.SessionID)
 		}
 		return m, nil
@@ -573,7 +599,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling session history load, then exiting…"})
 			return m, nil
 		}
-		return m, tea.Quit
+		return m, m.quit()
 
 	case CmdNew:
 		m.session.Reset()
@@ -590,7 +616,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		// browser shows the loading body, so no stale row may remain selectable.
 		m.resetSessionList()
 		m.sessionList.Title = "sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))
-		return m, m.listSessionsCmd()
+		return m, m.startSessionListLoad()
 
 	case CmdSession:
 		if cmd.Arg == "copy" {
@@ -846,7 +872,7 @@ func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
 	m.replayPending = false
 	if !m.hydrating {
 		if m.exitAfter {
-			return m, tea.Quit
+			return m, m.quit()
 		}
 		return m, nil
 	}
@@ -869,7 +895,7 @@ func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
 	m.finishPendingTools()
 	m.syncViewport()
 	if m.exitAfter {
-		return m, tea.Quit
+		return m, m.quit()
 	}
 	return m, nil
 }
@@ -899,7 +925,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	if m.newSessionPending {
 		m.newSessionPending = false
 		if m.exitAfter {
-			return m, tea.Quit
+			return m, m.quit()
 		}
 		return m, titleCmd
 	}
@@ -930,7 +956,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 
 	m.syncViewport()
 	if m.exitAfter {
-		return m, tea.Quit
+		return m, m.quit()
 	}
 	return m, titleCmd
 }

@@ -80,8 +80,13 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   from `internal/cake`, with the same working directory as a live prompt, to list
   that directory's sessions. It is informational (list and select, never
   mutate), decodes forward-compatibly, and degrades to an empty or warning state
-  on any failure rather than a fatal error. See
-  [`docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md`](docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md).
+  on any failure rather than a fatal error. It is also a model-owned, cancellable
+  operation: closing or replacing the browser and quitting cancel the in-flight
+  listing, a superseded result is dropped by request identity, and `ListSessions`
+  bounds its teardown with `WaitDelay` so a stuck helper cannot hang the REPL. See
+  [`docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md`](docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)
+  and
+  [`docs/adr/019-cancel-and-bound-the-read-only-session-listing.md`](docs/adr/019-cancel-and-bound-the-read-only-session-listing.md).
 - **Pure rendering.** `internal/ui` is side-effect-free and takes data in,
   strings out. The timeline is rendered through a per-item cache; width changes
   and `/clear` trigger a full re-render, while global tool-output mode changes

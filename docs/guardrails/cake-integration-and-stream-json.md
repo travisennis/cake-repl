@@ -44,8 +44,14 @@ consumes cake events. This is the project's core external contract.
   `schema_version` 1). Decode it forward-compatibly: ignore unknown fields and a
   newer `schema_version`. It is informational only — list and select, never
   mutate — and any non-zero exit, malformed JSON, or unsupported envelope
-  degrades to an empty or warning state, never a fatal error. See
-  [ADR 016](../adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md).
+  degrades to an empty or warning state, never a fatal error. The listing is a
+  model-owned operation: closing or replacing the browser and quitting cancel it,
+  a superseded result is dropped by request identity, and `ListSessions` bounds
+  its teardown with `WaitDelay` so a stuck helper, or a descendant holding the
+  inherited stdout pipe, cannot hang the REPL. See
+  [ADR 016](../adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)
+  and
+  [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md).
 
 ## Required checks / test focus
 
@@ -57,7 +63,9 @@ consumes cake events. This is the project's core external contract.
   timeline hydration and continued prompt execution.
 - For session listing, add fake-cake cases for a valid envelope, an empty
   `data.sessions`, malformed JSON, a non-zero exit, and an unknown
-  `schema_version`; none may be fatal.
+  `schema_version`; none may be fatal. Also cover cancellation, the bounded
+  teardown when a descendant holds stdout (short `waitDelay`, finite fake helper
+  with cleanup), and the 8 MiB stdout cap.
 - Verify a real round trip if you have a `cake` binary, but never make a real
   cake binary a test requirement.
 

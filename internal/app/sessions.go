@@ -66,10 +66,38 @@ func (m *Model) resetSessionList() {
 	m.sessionList.ResetSelected()
 }
 
+// closeBrowser hides the /sessions overlay and cancels any in-flight listing.
+// The helper the browser spawned is model-owned, so closing the browser is the
+// point it must be told to stop; a result already on its way is invalidated and
+// dropped when it arrives. The composer and its draft are untouched, so a prompt
+// stays available after closing.
+func (m *Model) closeBrowser() {
+	m.browserOpen = false
+	m.browserLoading = false
+	m.cancelSessionList()
+}
+
+// cancelSessionList stops the in-flight listing, if any, and invalidates its
+// request identity so a result already in flight is ignored. Identities start at
+// 1, so 0 is never live; it is safe to call with no listing active.
+func (m *Model) cancelSessionList() {
+	if m.sessionListCancel != nil {
+		m.sessionListCancel()
+		m.sessionListCancel = nil
+	}
+	m.sessionListReq = 0
+}
+
 // browserSelectable reports whether the browser is showing a list with a row
 // the user can act on. It is the precondition for selection: Enter is a no-op
 // while a load is in flight, after a failed load, or on an empty listing, so it
 // can only ever resume a row visible on the current screen.
+//
+// resetSessionList clears rows both when a load starts and when one fails, so
+// the loading and error clauses are redundant with len(items) > 0 today. They
+// stay so the guard does not silently become "any row on screen" if a future
+// change lets a superseded or failed request leave rows behind: dropping them
+// would then let Enter resume a row the user cannot see.
 func (m *Model) browserSelectable() bool {
 	return !m.browserLoading && m.browserErr == "" && len(m.sessionList.Items()) > 0
 }

@@ -18,6 +18,14 @@ import (
 // a non-fatal warning.
 const sessionsOutputLimit = 8 << 20 // 8 MiB
 
+// sessionsWaitDelay bounds how long ListSessions waits for the listing's
+// stdout/stderr pipes to close after the process exits or the context is
+// canceled. Cancellation kills the read-only helper outright (it holds no state
+// to flush), so the delay only bounds teardown: a helper that ignores
+// termination, or a descendant that inherited the stdout pipe, cannot hang the
+// call. It matches the live-run SIGTERM grace window (see runner.go).
+const sessionsWaitDelay = 3 * time.Second
+
 // SessionSummary is one session returned by `cake sessions list --json`.
 type SessionSummary struct {
 	SessionID   string
@@ -30,6 +38,10 @@ type SessionsOptions struct {
 	Bin      string
 	Cwd      string
 	DebugLog io.Writer
+
+	// waitDelay overrides sessionsWaitDelay so a test can shorten the bound;
+	// zero keeps the production default (see ListSessions).
+	waitDelay time.Duration
 }
 
 // sessionsEnvelope is the part of the `cake sessions list --json` envelope this
@@ -56,6 +68,13 @@ func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, 
 	cmd := exec.CommandContext(ctx, opts.Bin, "sessions", "list", "--json") // #nosec G204 -- opts.Bin intentionally comes from -cake-bin/config.
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
+	}
+	// Bound completion: the exec context kills the helper on cancellation, and
+	// WaitDelay stops Wait from blocking on a process that will not exit or on a
+	// pipe a descendant still holds (sessionsWaitDelay).
+	cmd.WaitDelay = opts.waitDelay
+	if cmd.WaitDelay <= 0 {
+		cmd.WaitDelay = sessionsWaitDelay
 	}
 	stdout := &capWriter{limit: sessionsOutputLimit}
 	stderr := &tailBuffer{limit: stderrLimit}

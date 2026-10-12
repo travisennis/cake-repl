@@ -5,6 +5,7 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,6 +135,16 @@ type Model struct {
 	browserLoading bool
 	browserErr     string
 	sessionList    list.Model
+
+	// Session-listing operation state (ADR 019). The browser owns at most one
+	// in-flight listing: sessionListSeq allocates a request identity that never
+	// repeats, sessionListReq is the identity whose result may still be applied,
+	// and sessionListCancel stops the request's helper. Closing the browser,
+	// starting a replacement listing, and quitting all cancel and invalidate the
+	// active request, so a superseded result cannot touch the browser.
+	sessionListSeq    uint64
+	sessionListReq    uint64
+	sessionListCancel context.CancelFunc
 
 	// clipboard writes text to the system clipboard. It is a field so tests
 	// can stub out the platform helper; New defaults to the OS clipboard.
