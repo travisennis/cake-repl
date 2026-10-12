@@ -239,7 +239,8 @@ func TestHandleTabCompleteBareSlashCycle(t *testing.T) {
 }
 
 // TestHandleTabCompleteResumeCycle verifies cycling through matching known
-// session IDs and restoring the original partial UUID on wrap.
+// session IDs, keeping "/resume" in the textarea, and restoring the original
+// partial UUID on wrap.
 func TestHandleTabCompleteResumeCycle(t *testing.T) {
 	const (
 		first  = "11111111-2222-3333-4444-555555555555"
@@ -254,14 +255,14 @@ func TestHandleTabCompleteResumeCycle(t *testing.T) {
 
 	m1, _ := m.handleTabComplete()
 	got := m1.(Model)
-	if got.input.Value() != first {
-		t.Errorf("input after first Tab = %q, want %q", got.input.Value(), first)
+	if got.input.Value() != "/resume "+first {
+		t.Errorf("input after first Tab = %q, want %q", got.input.Value(), "/resume "+first)
 	}
 
 	m2, _ := got.handleTabComplete()
 	got = m2.(Model)
-	if got.input.Value() != second {
-		t.Errorf("input after second Tab = %q, want %q", got.input.Value(), second)
+	if got.input.Value() != "/resume "+second {
+		t.Errorf("input after second Tab = %q, want %q", got.input.Value(), "/resume "+second)
 	}
 
 	m3, _ := got.handleTabComplete()
@@ -274,5 +275,112 @@ func TestHandleTabCompleteResumeCycle(t *testing.T) {
 	}
 	if got.completionMatches != nil {
 		t.Errorf("completionMatches after wrap = %v, want nil", got.completionMatches)
+	}
+}
+
+// TestHandleTabCompleteBareResume verifies that completing a bare "/resume "
+// (with known sessions) inserts full "/resume <uuid>" commands and cycles,
+// rather than replacing the composer with a bare UUID.
+func TestHandleTabCompleteBareResume(t *testing.T) {
+	const (
+		first  = "11111111-2222-3333-4444-555555555555"
+		second = "22222222-3333-4444-5555-666666666666"
+	)
+
+	m := newLaidOutModel()
+	m.session.SessionID = first
+	m.session.ResumeID = second
+	m.input.SetValue("/resume ")
+
+	m1, _ := m.handleTabComplete()
+	got := m1.(Model)
+	if got.input.Value() != "/resume "+first {
+		t.Errorf("input after first Tab = %q, want %q", got.input.Value(), "/resume "+first)
+	}
+	if got.completionPrefix != "/resume " {
+		t.Errorf("completionPrefix = %q, want %q", got.completionPrefix, "/resume ")
+	}
+	if len(got.completionMatches) != 2 {
+		t.Fatalf("completionMatches = %v, want 2 entries", got.completionMatches)
+	}
+
+	m2, _ := got.handleTabComplete()
+	got = m2.(Model)
+	if got.input.Value() != "/resume "+second {
+		t.Errorf("input after second Tab = %q, want %q", got.input.Value(), "/resume "+second)
+	}
+
+	m3, _ := got.handleTabComplete()
+	got = m3.(Model)
+	if got.input.Value() != "/resume " {
+		t.Errorf("input after wrap = %q, want %q", got.input.Value(), "/resume ")
+	}
+}
+
+// TestHandleTabCompleteResumeNoMatch verifies that a partial UUID with no match
+// is a no-op, leaving the typed text untouched.
+func TestHandleTabCompleteResumeNoMatch(t *testing.T) {
+	m := newLaidOutModel()
+	m.session.SessionID = "11111111-2222-3333-4444-555555555555"
+	m.input.SetValue("/resume zzzz")
+
+	tm, _ := m.handleTabComplete()
+	got := tm.(Model)
+
+	if got.input.Value() != "/resume zzzz" {
+		t.Errorf("input = %q, want %q", got.input.Value(), "/resume zzzz")
+	}
+	if got.completionPrefix != "" {
+		t.Errorf("completionPrefix = %q, want empty", got.completionPrefix)
+	}
+}
+
+// TestHandleTabCompleteResumeDedupesKnownIDs verifies that when SessionID and
+// ResumeID are equal the session is offered once: a single-match completion
+// fills the full command without starting a cycle.
+func TestHandleTabCompleteResumeDedupesKnownIDs(t *testing.T) {
+	const session = "11111111-2222-3333-4444-555555555555"
+
+	m := newLaidOutModel()
+	m.session.SessionID = session
+	m.session.ResumeID = session
+	m.input.SetValue("/resume 1111")
+
+	tm, _ := m.handleTabComplete()
+	got := tm.(Model)
+
+	if got.input.Value() != "/resume "+session {
+		t.Errorf("input = %q, want %q", got.input.Value(), "/resume "+session)
+	}
+	if got.completionPrefix != "" {
+		t.Errorf("completionPrefix = %q, want empty (single match)", got.completionPrefix)
+	}
+	if got.completionMatches != nil {
+		t.Errorf("completionMatches = %v, want nil (single match)", got.completionMatches)
+	}
+}
+
+// TestHandleTabCompleteResumeSubmissionIsCommand drives the completed textarea
+// through ParseCommand to prove submission resumes a session rather than
+// launching a model prompt carrying a bare UUID.
+func TestHandleTabCompleteResumeSubmissionIsCommand(t *testing.T) {
+	const session = "11111111-2222-3333-4444-555555555555"
+
+	m := newLaidOutModel()
+	m.session.SessionID = session
+	m.input.SetValue("/resume 1111")
+
+	tm, _ := m.handleTabComplete()
+	got := tm.(Model)
+
+	cmd, ok, err := ParseCommand(got.input.Value())
+	if !ok {
+		t.Fatalf("ParseCommand(%q) ok=false, want true", got.input.Value())
+	}
+	if err != nil {
+		t.Fatalf("ParseCommand(%q) err=%v, want nil", got.input.Value(), err)
+	}
+	if cmd.Kind != CmdResume || cmd.Arg != session {
+		t.Errorf("parsed %+v, want CmdResume arg %q", cmd, session)
 	}
 }
