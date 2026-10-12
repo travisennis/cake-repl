@@ -94,7 +94,11 @@ type sessionsLoadedMsg struct {
 // cancellation: closing the browser, replacing the listing, or quitting cancels
 // it, and only the newest request may apply its result. The command runs off the
 // Update loop, so a slow or missing cake binary cannot block key handling.
-func (m *Model) startSessionListLoad() tea.Cmd {
+//
+// It returns the updated model and the command as a pair rather than mutating a
+// receiver a caller reads in a sibling return operand: that ordering is
+// unspecified by the language.
+func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 	m.cancelSessionList()
 	m.sessionListSeq++
 	m.sessionListReq = m.sessionListSeq
@@ -102,7 +106,7 @@ func (m *Model) startSessionListLoad() tea.Cmd {
 	m.sessionListCancel = cancel
 	req := m.sessionListReq
 	cfg := m.cfg
-	return func() tea.Msg {
+	return m, func() tea.Msg {
 		sessions, err := cake.ListSessions(ctx, cake.SessionsOptions{
 			Bin:      cfg.CakeBin,
 			Cwd:      cfg.Cwd,
@@ -196,7 +200,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// for the next key or resize to flush.
 			m.syncViewport()
 			if m.exitAfter {
-				return m, m.quit()
+				return m.quit()
 			}
 			return m, nil
 		}
@@ -282,10 +286,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // quit cancels any in-flight session listing and then quits, so the
-// model-owned operation stops before the program exits.
-func (m *Model) quit() tea.Cmd {
+// model-owned operation stops before the program exits. It returns the updated
+// model with the quit command, so no caller reads the model in a sibling return
+// operand whose order relative to this call is unspecified.
+func (m Model) quit() (Model, tea.Cmd) {
 	m.cancelSessionList()
-	return tea.Quit
+	return m, tea.Quit
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -305,7 +311,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		return m, m.quit()
+		return m.quit()
 
 	case key.Matches(msg, m.keys.Submit):
 		return m.submit()
@@ -599,7 +605,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling session history load, then exiting…"})
 			return m, nil
 		}
-		return m, m.quit()
+		return m.quit()
 
 	case CmdNew:
 		m.session.Reset()
@@ -616,7 +622,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		// browser shows the loading body, so no stale row may remain selectable.
 		m.resetSessionList()
 		m.sessionList.Title = "sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))
-		return m, m.startSessionListLoad()
+		return m.startSessionListLoad()
 
 	case CmdSession:
 		if cmd.Arg == "copy" {
@@ -872,7 +878,7 @@ func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
 	m.replayPending = false
 	if !m.hydrating {
 		if m.exitAfter {
-			return m, m.quit()
+			return m.quit()
 		}
 		return m, nil
 	}
@@ -895,7 +901,7 @@ func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
 	m.finishPendingTools()
 	m.syncViewport()
 	if m.exitAfter {
-		return m, m.quit()
+		return m.quit()
 	}
 	return m, nil
 }
@@ -925,7 +931,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	if m.newSessionPending {
 		m.newSessionPending = false
 		if m.exitAfter {
-			return m, m.quit()
+			return m.quit()
 		}
 		return m, titleCmd
 	}
@@ -956,7 +962,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 
 	m.syncViewport()
 	if m.exitAfter {
-		return m, m.quit()
+		return m.quit()
 	}
 	return m, titleCmd
 }
