@@ -76,8 +76,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   timeline or stdout. Do not add logging that leaks raw stream content
   elsewhere. The one exception is an explicit user action: `Ctrl+Y` copies the
   raw (unsanitized) markdown of the most recent assistant response to the
-  system clipboard on request, and never automatically. Pasting it into a
-  terminal can reintroduce escaped content, so the user owns that risk.
+  system clipboard on request, and never automatically. The copy runs as a
+  command, off the single Update loop, with the text snapshotted at the
+  keypress, so a slow or stuck platform helper cannot freeze cancel, quit, the
+  spinner, or stream consumption; `/session copy` shares the same path. Pasting
+  it into a terminal can reintroduce escaped content, so the user owns that
+  risk.
 - **Terminal-injection defense (security boundary).** Stream content is
   attacker-influenceable: tool output is the stdout of arbitrary commands and
   the contents of arbitrary files. `ui.Sanitize` strips ANSI escape sequences,

@@ -56,6 +56,17 @@ type eventsMsg struct{ evs []cake.Event }
 // runDoneMsg delivers the terminal state of a cake subprocess.
 type runDoneMsg struct{ res cake.Result }
 
+// clipboardResultMsg delivers the outcome of one off-loop clipboard write. It
+// deliberately carries no payload text: a result can only become the existing
+// info/error feedback, so clipboard content has no new path into a log or the
+// timeline. sessionID marks the /session copy wording (the fixed id notice)
+// versus the assistant copy, which reports the snapshotted rune count.
+type clipboardResultMsg struct {
+	sessionID bool
+	chars     int
+	err       error
+}
+
 // waitForRun pulls the next batch of events from a run, or its final result
 // once the event stream is closed. It is re-issued after every batch.
 func waitForRun(run *cake.Run) tea.Cmd {
@@ -241,6 +252,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runDoneMsg:
 		return m.finishRun(msg.res)
+
+	case clipboardResultMsg:
+		if msg.err != nil {
+			m.appendItem(ui.Item{Kind: ui.KindError, Text: "copy failed: " + msg.err.Error()})
+			m.syncViewport()
+			return m, nil
+		}
+		var text string
+		if msg.sessionID {
+			text = "copied session id to clipboard"
+		} else {
+			text = fmt.Sprintf("copied %d chars to clipboard", msg.chars)
+		}
+		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: text})
+		m.syncViewport()
+		return m, nil
 
 	case sessionsLoadedMsg:
 		if msg.req != m.sessionListReq {
@@ -440,43 +467,50 @@ func (m Model) toggleToolOutput() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// copyLastAssistant copies the raw markdown of the most recent assistant
-// message to the system clipboard and reports the outcome on the timeline so
-// the action always has visible feedback. Copying is a one-shot best-effort
-// write, like persistHistory: a failure appends an error item instead of
-// interrupting the REPL.
+// clipboardCmd runs one clipboard write off the Update loop. The caller
+// snapshots text and the writer at request time, so the copy target is exactly
+// what the user asked for — never text from a later timeline or session — and a
+// slow or stuck platform helper (atotto/clipboard waits on the helper with no
+// timeout) cannot freeze the single Update loop: cancel, quit, the spinner, and
+// stream consumption all keep flowing while the write is pending.
+func (m Model) clipboardCmd(text string, sessionID bool) tea.Cmd {
+	write := m.clipboard
+	chars := utf8.RuneCountInString(text)
+	return func() tea.Msg {
+		return clipboardResultMsg{sessionID: sessionID, chars: chars, err: write(text)}
+	}
+}
+
+// copyLastAssistant snapshots the raw markdown of the most recent assistant
+// message and copies it on a command, reporting the outcome on the timeline so
+// the action always has visible feedback. The write runs off the Update loop so
+// a stuck helper cannot block the REPL. Like persistHistory it is a one-shot
+// best-effort write: a failure appends an error item instead of interrupting
+// the REPL. Finding no assistant response warns immediately and never invokes
+// the helper.
 func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 	text, ok := m.lastAssistantMarkdown()
 	if !ok {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "no assistant response to copy"})
 		return m, nil
 	}
-	if err := m.clipboard(text); err != nil {
-		m.appendItem(ui.Item{Kind: ui.KindError, Text: "copy failed: " + err.Error()})
-		return m, nil
-	}
-	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: fmt.Sprintf("copied %d chars to clipboard", utf8.RuneCountInString(text))})
-	return m, nil
+	return m, m.clipboardCmd(text, false)
 }
 
 // copySessionID copies the full cake session UUID to the system clipboard so
 // the id can be reused for -resume or -fork without leaving the REPL. The
 // status line and timeline only show it shortened; this is the on-demand way
 // to get the whole value. The id comes from SessionData, so it honors the
-// resume pin before the first task reports one. Like copyLastAssistant it is a
-// one-shot best-effort write with visible feedback.
+// resume pin before the first task reports one. Like copyLastAssistant the
+// write runs as a command, one-shot and best-effort, with visible feedback; an
+// unknown id warns immediately and never invokes the helper.
 func (m Model) copySessionID() (tea.Model, tea.Cmd) {
 	id, _ := m.SessionData()
 	if id == "" {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "no session id to copy"})
 		return m, nil
 	}
-	if err := m.clipboard(id); err != nil {
-		m.appendItem(ui.Item{Kind: ui.KindError, Text: "copy failed: " + err.Error()})
-		return m, nil
-	}
-	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "copied session id to clipboard"})
-	return m, nil
+	return m, m.clipboardCmd(id, true)
 }
 
 // handleTabComplete implements Tab key completion with cycling.

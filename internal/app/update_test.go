@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -335,9 +336,20 @@ func TestHandleKeyCopyLastAssistantCopiesLatestMarkdown(t *testing.T) {
 	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
 	got := tm.(Model)
 
-	if cmd != nil {
-		t.Errorf("cmd = %v, want nil", cmd)
+	if cmd == nil {
+		t.Fatal("ctrl+y must return a copy command")
 	}
+	// The write runs as a command, so the handler returns before the helper is
+	// touched and the feedback lands only with the result message.
+	if copied != "" {
+		t.Errorf("clipboard written inside the handler: %q", copied)
+	}
+	if last := lastItem(t, got); strings.Contains(last.Text, "copied") {
+		t.Errorf("copy feedback landed before the command ran: %+v", last)
+	}
+
+	tm, _ = got.Update(cmd())
+	got = tm.(Model)
 	if copied != "# latest\n\nwith `code`" {
 		t.Errorf("copied = %q, want the most recent assistant markdown", copied)
 	}
@@ -358,7 +370,12 @@ func TestCopyLastAssistantSkipsNonAssistantTrailingItems(t *testing.T) {
 
 	var copied string
 	m.clipboard = func(s string) error { copied = s; return nil }
-	tm, _ := m.copyLastAssistant()
+	tm, cmd := m.copyLastAssistant()
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("copyLastAssistant must return a copy command")
+	}
+	tm, _ = m.Update(cmd())
 	m = tm.(Model)
 
 	if copied != "the markdown" {
@@ -375,9 +392,12 @@ func TestCopyLastAssistantWithoutAssistantMessageWarns(t *testing.T) {
 
 	var called bool
 	m.clipboard = func(s string) error { called = true; return nil }
-	tm, _ := m.copyLastAssistant()
+	tm, cmd := m.copyLastAssistant()
 	got := tm.(Model)
 
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil: the warning is immediate and needs no helper", cmd)
+	}
 	if called {
 		t.Error("clipboard was written with no assistant response to copy")
 	}
@@ -392,12 +412,21 @@ func TestCopyLastAssistantReportsClipboardFailure(t *testing.T) {
 	m.applyEvent(cake.Message{Role: "assistant", Content: "some markdown"})
 
 	m.clipboard = func(string) error { return fmt.Errorf("xclip not found") }
-	tm, _ := m.copyLastAssistant()
+	tm, cmd := m.copyLastAssistant()
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("copyLastAssistant must return a copy command")
+	}
+	tm, _ = m.Update(cmd())
 	got := tm.(Model)
 
 	last := lastItem(t, got)
 	if last.Kind != ui.KindError || !strings.Contains(last.Text, "copy failed: xclip not found") {
 		t.Errorf("last item = %+v, want copy-failure error item", last)
+	}
+	// The failure notice reports the helper error, never the copied payload.
+	if strings.Contains(last.Text, "some markdown") {
+		t.Errorf("failure notice leaked the clipboard payload: %q", last.Text)
 	}
 }
 
@@ -411,9 +440,15 @@ func TestSessionCopyCopiesFullSessionID(t *testing.T) {
 	tm, cmd := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
 	got := tm.(Model)
 
-	if cmd != nil {
-		t.Errorf("cmd = %v, want nil", cmd)
+	if cmd == nil {
+		t.Fatal("/session copy must return a copy command")
 	}
+	if copied != "" {
+		t.Errorf("clipboard written inside the handler: %q", copied)
+	}
+
+	tm, _ = got.Update(cmd())
+	got = tm.(Model)
 	if copied != id {
 		t.Errorf("copied = %q, want the full session id", copied)
 	}
@@ -430,7 +465,12 @@ func TestSessionCopyFallsBackToResumePin(t *testing.T) {
 
 	var copied string
 	m.clipboard = func(s string) error { copied = s; return nil }
-	tm, _ := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	tm, cmd := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("/session copy must return a copy command")
+	}
+	tm, _ = m.Update(cmd())
 	got := tm.(Model)
 
 	if copied != id {
@@ -446,9 +486,12 @@ func TestSessionCopyWithoutSessionIDWarns(t *testing.T) {
 
 	var called bool
 	m.clipboard = func(string) error { called = true; return nil }
-	tm, _ := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	tm, cmd := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
 	got := tm.(Model)
 
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil: the warning is immediate and needs no helper", cmd)
+	}
 	if called {
 		t.Error("clipboard was written with no session id to copy")
 	}
@@ -463,7 +506,12 @@ func TestSessionCopyReportsClipboardFailure(t *testing.T) {
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "s-1", TaskID: "t-1"})
 
 	m.clipboard = func(string) error { return fmt.Errorf("pbcopy not found") }
-	tm, _ := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	tm, cmd := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("/session copy must return a copy command")
+	}
+	tm, _ = m.Update(cmd())
 	got := tm.(Model)
 
 	last := lastItem(t, got)
@@ -485,13 +533,262 @@ func TestSessionCopyAfterRetargetCopiesNewTarget(t *testing.T) {
 
 	var copied string
 	m.clipboard = func(s string) error { copied = s; return nil }
-	tm, _ = m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	tm, cmd := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("/session copy must return a copy command")
+	}
+	tm, _ = m.Update(cmd())
 
 	if copied != newTarget {
 		t.Errorf("copied = %q, want the new target %q", copied, newTarget)
 	}
 	if last := lastItem(t, tm.(Model)); last.Kind != ui.KindInfo {
 		t.Errorf("last item = %+v, want copy confirmation", last)
+	}
+}
+
+// copyHandlerBound bounds how long a test waits for a copy handler or its
+// command to make progress. Both run off the Update loop, so in the passing
+// case these resolve immediately; exceeding the bound means the handler ran the
+// helper inline or the command never returned.
+const copyHandlerBound = 5 * time.Second
+
+// TestCopyDoesNotBlockUpdateLoop holds a clipboard helper: the ctrl+y handler
+// must return immediately, Update must keep processing messages and quit keys
+// while the helper is stuck, and the helper is released only afterwards.
+// Copying used to run inline in Update, so a slow or stuck platform helper
+// froze the single loop — cancel, quit, the spinner, and stream consumption.
+func TestCopyDoesNotBlockUpdateLoop(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: "held"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{}, 1)
+	copied := make(chan string, 1)
+	m.clipboard = func(s string) error {
+		entered <- struct{}{}
+		<-ctx.Done()
+		copied <- s
+		return nil
+	}
+
+	type handled struct {
+		m   Model
+		cmd tea.Cmd
+	}
+	handlerDone := make(chan handled, 1)
+	go func() {
+		tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+		handlerDone <- handled{m: tm.(Model), cmd: cmd}
+	}()
+
+	var h handled
+	select {
+	case h = <-handlerDone:
+	case <-time.After(copyHandlerBound):
+		t.Fatal("ctrl+y blocked on the clipboard helper")
+	}
+	if h.cmd == nil {
+		t.Fatal("ctrl+y must return a copy command")
+	}
+	m = h.m
+
+	result := make(chan tea.Msg, 1)
+	go func() { result <- h.cmd() }()
+
+	// The command reaches the helper, which is now stuck.
+	select {
+	case <-entered:
+	case <-time.After(copyHandlerBound):
+		t.Fatal("the copy command never reached the clipboard helper")
+	}
+
+	// The loop still handles messages while the helper is held.
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 90, Height: 30})
+	m = tm.(Model)
+	// Cancel/quit still works: ctrl+c must return a quit command.
+	_, quitCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if quitCmd == nil {
+		t.Fatal("ctrl+c returned no command while a copy was pending")
+	}
+	if msg := quitCmd(); msg != nil {
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Fatalf("ctrl+c returned %T, want tea.QuitMsg", msg)
+		}
+	}
+
+	// Nothing was copied yet: the write is still waiting on the helper.
+	select {
+	case s := <-copied:
+		t.Fatalf("copy completed before the helper was released: %q", s)
+	default:
+	}
+
+	cancel()
+	select {
+	case msg := <-result:
+		tm, _ = m.Update(msg)
+		m = tm.(Model)
+	case <-time.After(copyHandlerBound):
+		t.Fatal("the copy command did not return after release")
+	}
+
+	if last := lastItem(t, m); last.Kind != ui.KindInfo || !strings.Contains(last.Text, "copied") {
+		t.Errorf("last item = %+v, want copy confirmation", last)
+	}
+}
+
+// TestSessionCopyDoesNotBlockUpdateLoop covers the command path: /session copy
+// also returns its write as a command, so a held helper cannot freeze Update.
+func TestSessionCopyDoesNotBlockUpdateLoop(t *testing.T) {
+	m := newLaidOutModel()
+	m.session.OnTaskStart(cake.TaskStart{SessionID: "s-1", TaskID: "t-1"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{}, 1)
+	m.clipboard = func(string) error {
+		entered <- struct{}{}
+		<-ctx.Done()
+		return nil
+	}
+
+	type handled struct {
+		m   Model
+		cmd tea.Cmd
+	}
+	handlerDone := make(chan handled, 1)
+	go func() {
+		tm, cmd := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+		handlerDone <- handled{m: tm.(Model), cmd: cmd}
+	}()
+
+	var h handled
+	select {
+	case h = <-handlerDone:
+	case <-time.After(copyHandlerBound):
+		t.Fatal("/session copy blocked on the clipboard helper")
+	}
+	if h.cmd == nil {
+		t.Fatal("/session copy must return a copy command")
+	}
+	m = h.m
+
+	done := make(chan tea.Msg, 1)
+	go func() { done <- h.cmd() }()
+	select {
+	case <-entered:
+	case <-time.After(copyHandlerBound):
+		t.Fatal("the /session copy command never reached the helper")
+	}
+
+	// Update is free while the helper is stuck.
+	if _, quitCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); quitCmd == nil {
+		t.Fatal("ctrl+c returned no command while a copy was pending")
+	}
+
+	cancel()
+	select {
+	case msg := <-done:
+		tm, _ := m.Update(msg)
+		m = tm.(Model)
+	case <-time.After(copyHandlerBound):
+		t.Fatal("the /session copy command did not return after release")
+	}
+
+	if last := lastItem(t, m); last.Kind != ui.KindInfo || last.Text != "copied session id to clipboard" {
+		t.Errorf("last item = %+v, want the session-id copy confirmation", last)
+	}
+}
+
+// The copied text is frozen when the action is taken: the command runs later,
+// so it must not read whatever assistant text is newest when it actually runs.
+// A later message and a session reset between the request and the write leave
+// the write targeting the original snapshot.
+func TestCopyLastAssistantSnapshotsTextAtRequest(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: "first snapshot"})
+
+	var copied string
+	m.clipboard = func(s string) error { copied = s; return nil }
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("ctrl+y must return a copy command")
+	}
+
+	// The timeline moves on, then the session is reset, before the write runs.
+	m.applyEvent(cake.Message{Role: "assistant", Content: "a later response"})
+	tm, _ = m.startNewSession()
+	m = tm.(Model)
+
+	tm, _ = m.Update(cmd())
+	m = tm.(Model)
+	if copied != "first snapshot" {
+		t.Errorf("copied = %q, want the text snapshotted at the keypress", copied)
+	}
+	last := lastItem(t, m)
+	if last.Kind != ui.KindInfo || last.Text != "copied 14 chars to clipboard" {
+		t.Errorf("last item = %+v, want the snapshotted count", last)
+	}
+}
+
+// Repeated copy requests each run exactly their own command, and no transition
+// copies on its own: only an explicit keypress or command produces helper work.
+func TestCopyRequestsAreExplicitAndIndependent(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.Message{Role: "assistant", Content: "payload"})
+
+	var calls int
+	var copied []string
+	m.clipboard = func(s string) error { calls++; copied = append(copied, s); return nil }
+
+	tm, first := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = tm.(Model)
+	tm, second := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = tm.(Model)
+	if first == nil || second == nil {
+		t.Fatal("each ctrl+y must return its own copy command")
+	}
+	if calls != 0 {
+		t.Fatalf("the helper ran %d times before a command was driven", calls)
+	}
+
+	// A new session must not copy anything on its own...
+	tm, _ = m.startNewSession()
+	m = tm.(Model)
+	if calls != 0 {
+		t.Fatalf("a session reset triggered a copy: %d helper calls", calls)
+	}
+	// ...nor may quitting.
+	tm, quitCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = tm.(Model)
+	if quitCmd == nil {
+		t.Fatal("ctrl+c returned no quit command")
+	}
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatal("ctrl+c did not quit")
+	}
+	if calls != 0 {
+		t.Fatalf("quit triggered a copy: %d helper calls", calls)
+	}
+
+	// Driving both queued commands copies the same snapshot once each and
+	// appends one notice per request.
+	for _, cmd := range []tea.Cmd{first, second} {
+		tm, _ = m.Update(cmd())
+		m = tm.(Model)
+	}
+	if calls != 2 {
+		t.Fatalf("helper calls = %d, want 2", calls)
+	}
+	if len(copied) != 2 || copied[0] != "payload" || copied[1] != "payload" {
+		t.Errorf("copied = %q, want the snapshot once per request", copied)
+	}
+	if last := lastItem(t, m); last.Kind != ui.KindInfo || last.Text != "copied 7 chars to clipboard" {
+		t.Errorf("last item = %+v, want the second copy confirmation", last)
 	}
 }
 
