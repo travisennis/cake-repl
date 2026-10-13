@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/travisennis/cake-repl/internal/cake"
@@ -2187,5 +2188,153 @@ func TestToolOutputIngestDoesNotPinOversizedResult(t *testing.T) {
 	}
 	if len(tool.Output) > maxRetainedToolOutputBytes+128 {
 		t.Errorf("timeline retained %d bytes, want <= ceiling %d plus marker", len(tool.Output), maxRetainedToolOutputBytes)
+	}
+}
+
+// settleRepaintOf drives one settle sweep and returns the swept model plus the
+// repaint command the sweep issued, or a nil command when it issued none. The
+// sweep answers with a batch holding the repaint first and the next sweep tick
+// second (the tick sleeps, so tests must not execute it); that order is part of
+// the sweep's contract.
+func settleRepaintOf(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	tm, cmd := m.Update(settleSweepMsg{})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("settle sweep did not re-arm itself")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		return m, nil
+	}
+	if len(batch) == 0 {
+		t.Fatal("settle sweep batch is empty")
+	}
+	return m, batch[0]
+}
+
+// TestSettleSweepRepaintsAfterContentChanges pins the task 110 heal: new
+// timeline content — the full-width rows a terminal may measure wider than
+// charmbracelet/x/ansi does — arms one full-frame repaint at the next sweep.
+// The repaint is the current window size reported back to the program, which
+// makes the renderer drop the line cache it diffs against, so the next flush
+// rewrites every row instead of only the rows whose text changed. That is how a
+// screen the terminal scrolled under the renderer stops showing a stale
+// composer border or status line (ADR 020).
+func TestSettleSweepRepaintsAfterContentChanges(t *testing.T) {
+	m := newLaidOutModel()
+	if m.contentChanged {
+		t.Fatal("a fresh model already asked for a repaint")
+	}
+
+	tm, _ := m.Update(eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "hello"}}})
+	m = tm.(Model)
+	if !m.contentChanged {
+		t.Fatal("a viewport push did not arm the settle repaint")
+	}
+
+	var repaint tea.Cmd
+	if m, repaint = settleRepaintOf(t, m); repaint == nil {
+		t.Fatal("an armed sweep issued no repaint")
+	}
+	msg, ok := repaint().(tea.WindowSizeMsg)
+	if !ok {
+		t.Fatalf("sweep repaint = %#v, want tea.WindowSizeMsg", repaint())
+	}
+	if msg.Width != 80 || msg.Height != 24 {
+		t.Errorf("repaint size = %dx%d, want the current 80x24", msg.Width, msg.Height)
+	}
+	if m.contentChanged {
+		t.Error("the sweep left the repaint armed; the same change would repaint twice")
+	}
+
+	// A composer key moves the frame too, so it arms the repaint like a push.
+	tm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = tm.(Model)
+	if !m.contentChanged {
+		t.Error("a composer key did not arm the settle repaint")
+	}
+}
+
+// TestSettleSweepWritesNothingWhenIdle: an idle sweep only re-arms itself, so
+// an idle REPL repaints nothing and the sweep costs no frames.
+func TestSettleSweepWritesNothingWhenIdle(t *testing.T) {
+	m := newLaidOutModel()
+	tm, _ := m.Update(eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "hello"}}})
+	m = tm.(Model)
+
+	// The first sweep after the push is the scheduled repaint.
+	var repaint tea.Cmd
+	if m, repaint = settleRepaintOf(t, m); repaint == nil {
+		t.Fatal("the sweep after a push issued no repaint")
+	}
+	// With the frame repaired, an idle sweep must not repaint again...
+	if m, repaint = settleRepaintOf(t, m); repaint != nil {
+		t.Errorf("an idle sweep repainted: %#v", repaint())
+	}
+
+	// ...and neither must the blink the textarea schedules on its own: only
+	// content that reshapes the frame arms the repaint.
+	tm, _ = m.Update(cursor.BlinkMsg{})
+	m = tm.(Model)
+	if _, repaint = settleRepaintOf(t, m); repaint != nil {
+		t.Errorf("a cursor blink repainted the frame: %#v", repaint())
+	}
+}
+
+// TestSettleSweepWaitsForTheFirstLayout: before the first WindowSizeMsg there
+// is no size to report and no frame to rewrite, so the sweep must hold the
+// request until a frame exists rather than send a 0x0 size.
+func TestSettleSweepWaitsForTheFirstLayout(t *testing.T) {
+	m := New(Config{})
+	// Nothing arms the sweep before the first layout in the real flow (a push
+	// only happens once the timeline renders), so set the flag directly to
+	// exercise the guard.
+	m.contentChanged = true
+	var repaint tea.Cmd
+	if m, repaint = settleRepaintOf(t, m); repaint != nil {
+		t.Fatalf("an unlaid-out model repainted: %#v", repaint())
+	}
+	if !m.contentChanged {
+		t.Fatal("the unlaid-out sweep dropped the pending repaint")
+	}
+
+	m.width, m.height = 80, 24
+	m.layout()
+	if _, repaint = settleRepaintOf(t, m); repaint == nil {
+		t.Fatal("the sweep after the first layout issued no repaint")
+	}
+}
+
+// TestRepaintMessageOnlyRewritesTheFrame: the repaint travels as a
+// WindowSizeMsg at the same size. Its model handler must be a pure relayout —
+// same sizes, no new items, same viewport window, same render cache — because
+// its only job is to make the renderer rewrite rows it would otherwise skip.
+func TestRepaintMessageOnlyRewritesTheFrame(t *testing.T) {
+	m := newLaidOutModel()
+	for i := range 40 {
+		m.applyEvent(cake.Message{Role: "assistant", Content: fmt.Sprintf("line %d", i)})
+	}
+	m.syncViewport()
+
+	m.rendered[0] = "sentinel"
+	beforeOffset := m.timeline.YOffset
+	beforeItems := len(m.items)
+	tm, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Errorf("the repaint message returned a command: %v", cmd)
+	}
+	if m.rendered[0] != "sentinel" {
+		t.Error("the repaint message re-rendered the timeline cache")
+	}
+	if len(m.items) != beforeItems {
+		t.Errorf("the repaint message added timeline items: %d -> %d", beforeItems, len(m.items))
+	}
+	if m.timeline.YOffset != beforeOffset {
+		t.Errorf("the repaint message moved the viewport: %d -> %d", beforeOffset, m.timeline.YOffset)
+	}
+	if m.width != 80 || m.height != 24 {
+		t.Errorf("repaint size = %dx%d, want 80x24", m.width, m.height)
 	}
 }

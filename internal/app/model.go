@@ -124,6 +124,11 @@ type Model struct {
 	renderedWidth int
 	timelineDirty bool
 
+	// contentChanged is set by the updates that reshape the live region's
+	// visible content (a viewport push, a composer key) and read by the settle
+	// sweep, which repaints the whole frame after it; see ADR 020.
+	contentChanged bool
+
 	// completion state for Tab cycling; zero values mean no active cycle.
 	completionPrefix  string
 	completionMatches []string
@@ -345,6 +350,10 @@ func (m Model) SessionData() (sessionID, cwd string) {
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		textarea.Blink,
+		// The settle sweep starts here and each sweep arms the next, so the
+		// frame can heal from a terminal-side scroll for the program's life.
+		// See ADR 020.
+		settleSweepAtStartupCmd(),
 		m.titleCmd(),
 	}
 	if m.hydrating {
@@ -568,11 +577,17 @@ func (m *Model) rebuildTimelineContent() string {
 // the previous scroll offset so a single item re-render does not move the view.
 // It is a no-op unless a mutation marked the cache dirty, so one Update with a
 // burst of events costs one SetContent instead of one per event.
+//
+// A push changes the live region's visible content, so it also arms the settle
+// repaint: new timeline rows are padded to the full width, which is exactly the
+// content a terminal that measures a glyph wider than charmbracelet/x/ansi can
+// wrap, scrolling the screen under the renderer. See ADR 020.
 func (m *Model) syncViewport() {
 	if !m.timelineDirty {
 		return
 	}
 	m.timelineDirty = false
+	m.contentChanged = true
 	atBottom := m.timeline.AtBottom()
 	yOffset := m.timeline.YOffset
 	m.timeline.SetContent(m.rebuildTimelineContent())

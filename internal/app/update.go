@@ -21,6 +21,11 @@ import (
 // fast cake stream cannot starve the event loop (spinner, key handling).
 const maxEventsPerBatch = 10
 
+// settleDelay is the sweep interval for the settle repaint: at most one full
+// frame rewrite per interval, however many content changes land in it. See
+// ADR 020.
+const settleDelay = 300 * time.Millisecond
+
 // maxRetainedToolOutputBytes is the hard ceiling on how much of one tool
 // result the timeline keeps in memory. It is deliberately far above the
 // render-time output-limit (default 2000 bytes): the limit decides what is
@@ -184,9 +189,76 @@ func waitForReplay(run *cake.Run) tea.Cmd {
 	}
 }
 
+// settleSweepMsg is the periodic tick that decides whether the frame needs a
+// settle repaint; see ADR 020.
+type settleSweepMsg struct{}
+
+// settleSweepCmd schedules the next settle sweep. Every sweep arms the one
+// after it, so the sweep runs for the life of the program at settleDelay.
+func settleSweepCmd() tea.Cmd {
+	return tea.Tick(settleDelay, func(time.Time) tea.Msg { return settleSweepMsg{} })
+}
+
+// settleSweepAtStartupCmd returns the first settle sweep without waiting, so
+// startup pays no timer and a test that runs Init's commands does not block.
+// That first sweep arms the delayed chain from its handler.
+func settleSweepAtStartupCmd() tea.Cmd {
+	return func() tea.Msg { return settleSweepMsg{} }
+}
+
+// settleSweep handles one sweep: when content has changed since the last
+// sweep, ask the program to rewrite the whole frame, and always arm the next
+// sweep.
+//
+// Bubble Tea's renderer rewrites only the lines whose text changed since the
+// previous frame (standard_renderer.flush compares lastRenderedLines). A
+// terminal that measures a glyph wider than charmbracelet/x/ansi does — a
+// text-default emoji such as U+261D is one cell to x/ansi and two to
+// utf8proc-based terminals — wraps the full-width row that contains it, which
+// makes the frame one physical row taller than the screen and scrolls the whole
+// frame up by one. The renderer cannot see that scroll, so the lines it skips
+// keep whatever the scrolled screen moved into their place: that is how a run
+// left a stale composer border and a previous status line on screen in the task
+// 110 report.
+//
+// The repair is the one a resize already performs: report the current size to
+// the program, which makes the renderer drop the line cache it diffs against
+// (repaint) so the next flush rewrites every row in order. Doing that per
+// change would rewrite the frame per event, so the sweep coalesces: whatever
+// changed inside the interval is covered by one repaint, and an idle interval
+// writes nothing at all.
+func (m Model) settleSweep() (Model, tea.Cmd) {
+	next := settleSweepCmd()
+	if !m.ready || !m.contentChanged {
+		return m, next
+	}
+	m.contentChanged = false
+	if repaint := m.repaintCmd(); repaint != nil {
+		return m, tea.Batch(repaint, next)
+	}
+	return m, next
+}
+
+// repaintCmd reports the model's current size to the program. The renderer
+// treats any WindowSizeMsg as a repaint — it drops the line cache it diffs
+// against — and the model's own handler for the same message re-lays out at the
+// same size, which is a no-op apart from flushing a dirty viewport. Nothing on
+// screen changes: the message only makes the next flush rewrite every row of
+// the frame instead of the rows whose text changed.
+func (m Model) repaintCmd() tea.Cmd {
+	if m.width <= 0 || m.height <= 0 {
+		return nil
+	}
+	w, h := m.width, m.height
+	return func() tea.Msg { return tea.WindowSizeMsg{Width: w, Height: h} }
+}
+
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case settleSweepMsg:
+		return m.settleSweep()
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
@@ -309,6 +381,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm, cmd := m.handleKey(msg)
 		m = mm.(Model)
 		m.syncViewport()
+		// A key can change the composer's visible text — and with it the frame's
+		// shape — so it arms the settle repaint like a viewport push does. Cursor
+		// blinks and mouse clicks do not come through here and leave it alone.
+		m.contentChanged = true
 		return m, cmd
 	}
 

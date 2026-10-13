@@ -5,7 +5,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -565,4 +567,105 @@ func TestMaxTimelineItemsTrimReleasesTrimmedPayloads(t *testing.T) {
 		t.Errorf("items cap=%d > len=%d; trimmed item payloads stay pinned", cap(m.items), len(m.items))
 	}
 	assertCacheMatchesFullRender(t, &m, "after capped trim")
+}
+
+// TestViewHeightFitsTheTerminal pins the frame-height contract the live region
+// depends on: at any size where the layout can fit its own chrome, the composed
+// frame is exactly the terminal height, never taller. A frame taller than the
+// screen is what lets a terminal scroll the frame under Bubble Tea's renderer,
+// whose line-skip then leaves stale rows behind (task 110, ADR 020). Sizes too
+// short for the minimum chrome (the composer textarea, its borders, the status
+// row, and one timeline row) are skipped: nothing can shrink below that floor.
+func TestViewHeightFitsTheTerminal(t *testing.T) {
+	build := map[string]func(Model) Model{
+		"idle": func(m Model) Model { return m },
+		"with items": func(m Model) Model {
+			m.applyEvent(cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t1"})
+			m.applyEvent(cake.Message{Role: "user", Content: "hello there"})
+			m.applyEvent(cake.Reasoning{Summary: cake.ReasoningSummary{"thinking"}})
+			m.applyEvent(cake.Message{Role: "assistant", Content: "hi\n\n```go\nfunc main() {}\n```\n"})
+			m.applyEvent(cake.FunctionCall{CallID: "c1", Name: "bash", Arguments: `{"command":"ls -la"}`})
+			m.applyEvent(cake.FunctionCallOutput{CallID: "c1", Output: "a\nb\nc"})
+			m.applyEvent(cake.TaskComplete{SessionID: "11111111-2222-3333-4444-555555555555", DurationMS: 1200})
+			m.syncViewport()
+			return m
+		},
+		"running": func(m Model) Model {
+			m.running = true
+			m.run = &cake.Run{}
+			m.session.OnTaskStart(cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t1"})
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "run"})
+			m.syncViewport()
+			return m
+		},
+		"hydrating": func(m Model) Model {
+			m.hydrating = true
+			m.applyReplayEvent(cake.Message{Role: "assistant", Content: "replayed"})
+			m.syncViewport()
+			return m
+		},
+		"browser loading": func(m Model) Model {
+			m.browserOpen = true
+			m.browserLoading = true
+			return m
+		},
+		"browser error": func(m Model) Model {
+			m.browserOpen = true
+			m.browserErr = strings.Repeat("boom ", 40)
+			return m
+		},
+		"browser empty": func(m Model) Model {
+			m.browserOpen = true
+			return m
+		},
+		"browser list": func(m Model) Model {
+			m.browserOpen = true
+			now := time.Now()
+			m.sessionList.SetItems([]list.Item{
+				newSessionItem(cake.SessionSummary{SessionID: "aaaaaaaa-1111-2222-3333-444444444444", FirstPrompt: "one", Timestamp: time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)}, now),
+				newSessionItem(cake.SessionSummary{SessionID: "bbbbbbbb-1111-2222-3333-444444444444", FirstPrompt: "two", Timestamp: time.Date(2026, 10, 11, 8, 0, 0, 0, time.UTC)}, now),
+			})
+			return m
+		},
+		"long single-line input": func(m Model) Model {
+			m.input.SetValue(strings.Repeat("x", 400))
+			m.layout()
+			return m
+		},
+		"multi-line input at cap": func(m Model) Model {
+			m.input.SetValue(strings.Repeat("line\n", maxInputHeight+5))
+			m.layout()
+			return m
+		},
+		"wide glyph input": func(m Model) Model {
+			m.input.SetValue("日本語のテキストと🌊の絵文字")
+			m.layout()
+			return m
+		},
+		"huge assistant block": func(m Model) Model {
+			m.applyEvent(cake.Message{Role: "assistant", Content: strings.Repeat("word ", 4000)})
+			m.syncViewport()
+			return m
+		},
+	}
+	sizes := []struct{ w, h int }{
+		{80, 24}, {100, 40}, {60, 12}, {40, 12}, {30, 12}, {20, 12}, {12, 12}, {8, 12},
+	}
+	for _, size := range sizes {
+		for name, build := range build {
+			m := laidOut(size.w, size.h)
+			m = build(m)
+
+			// The floor is the smallest frame this state can lay out: the
+			// composer's textarea, its two borders, the status row, and one
+			// timeline row.
+			floor := inputHeightFor(m.input.LineCount()) + composerVerticalChrome + statusHeight + 1
+			if m.height < floor {
+				continue
+			}
+			if got := len(strings.Split(m.View(), "\n")); got != m.height {
+				t.Errorf("%s/%dx%d: view height = %d lines, want the terminal height %d", name, size.w, size.h, got, m.height)
+			}
+		}
+	}
 }
