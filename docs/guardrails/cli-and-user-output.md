@@ -154,6 +154,17 @@ in plain text like every other surface.
   UUID instead, so the id can be reused for `-resume`/`-fork` while the status
   line and timeline keep the shortened form (a warning when the REPL knows
   neither a reported session id nor a resume pin yet).
+- **Live-region repaint.** A change to the live region's visible content — a
+  timeline push, or a key that can reshape the composer — arms a whole-frame
+  repaint, scheduled at most once per 300 ms, so a screen the terminal scrolled
+  under the renderer cannot keep showing a previous frame's composer or status
+  rows. Nothing is written while the app is idle. The terminal's own width
+  measure is not knowable from the app, so a row a terminal measures wider than
+  `charmbracelet/x/ansi` (a text-default emoji such as U+261D is one cell to
+  x/ansi and two cells to utf8proc-based terminals) can still wrap a frame taller
+  than the screen for up to one sweep; the next repaint rewrites every row in
+  order, which is also the repair a resize performs. See
+  [ADR 020](../adr/020-repaint-the-frame-after-content-changes-to-heal-terminal-side-scrolls.md).
 - **Inline rendering.** `-inline` (ADR 015) omits the alternate screen and
   renders the live region below the terminal height, so recent terminal
   history stays visible above the REPL. The timeline viewport is capped
