@@ -149,6 +149,63 @@ func TestTruncateOutputDoesNotSplitRunes(t *testing.T) {
 	}
 }
 
+// TestWrapToolArgsLongTokenAssembly covers the final assembly of a long,
+// oversized single token: the text is chunked at the content width, the first
+// chunk is unindented, and every later line carries the continuation indent.
+// The expected value is built independently of wrapToolArgs, so the builder
+// assembly introduced for task 099 is pinned byte-for-byte against the shape
+// the repeated-concatenation loop produced.
+func TestWrapToolArgsLongTokenAssembly(t *testing.T) {
+	const (
+		width  = 80
+		indent = 10
+		size   = 1000
+	)
+	token := strings.Repeat("q", size)
+	got := wrapToolArgs(token, width, indent)
+
+	var chunks []string
+	for i := 0; i < size; i += width {
+		end := i + width
+		if end > size {
+			end = size
+		}
+		chunks = append(chunks, token[i:end])
+	}
+	want := chunks[0]
+	for _, c := range chunks[1:] {
+		want += "\n" + strings.Repeat(" ", indent) + c
+	}
+	if got != want {
+		t.Fatalf("assembled text differs from chunked expectation:\ngot  %q\nwant %q", got, want)
+	}
+
+	lines := strings.Split(got, "\n")
+	if len(lines) != len(chunks) {
+		t.Fatalf("got %d lines, want %d", len(lines), len(chunks))
+	}
+	for i, line := range lines[1:] {
+		if !strings.HasPrefix(line, strings.Repeat(" ", indent)) {
+			t.Errorf("continuation line %d missing indent: %q", i+1, line)
+		}
+	}
+}
+
+// TestWrapToolArgsMultilineContinuation pins the exact assembled text for a
+// summary that wraps over several lines around a hard-wrapped oversized token,
+// covering word wrapping, hard wrapping, and the continuation indent of the
+// final assembly together.
+func TestWrapToolArgsMultilineContinuation(t *testing.T) {
+	got := wrapToolArgs("alpha "+strings.Repeat("y", 20)+" omega", 10, 2)
+	want := "alpha\n" +
+		"  yyyyyyyyyy\n" +
+		"  yyyyyyyyyy\n" +
+		"  omega"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestTruncateOutputPrefersLineBoundary(t *testing.T) {
 	var b strings.Builder
 	for range 100 {

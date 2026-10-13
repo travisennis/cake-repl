@@ -278,12 +278,23 @@ func wrapToolArgs(s string, contentWidth, indent int) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	out := lines[0]
+	// Assemble the final text with one builder sized for the whole result.
+	// Concatenating onto an immutable string copies the growing prefix on every
+	// line, which is quadratic in the number of wrapped lines.
 	pad := strings.Repeat(" ", indent)
+	size := len(lines[0]) + (len(lines)-1)*(1+len(pad))
 	for _, line := range lines[1:] {
-		out += "\n" + pad + line
+		size += len(line)
 	}
-	return out
+	var out strings.Builder
+	out.Grow(size)
+	out.WriteString(lines[0])
+	for _, line := range lines[1:] {
+		out.WriteByte('\n')
+		out.WriteString(pad)
+		out.WriteString(line)
+	}
+	return out.String()
 }
 
 // renderToolHeader renders the tool-name prefix plus the first line of the
