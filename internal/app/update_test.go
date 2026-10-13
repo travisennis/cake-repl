@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -1748,5 +1749,110 @@ func TestNewSessionClearsReportedModel(t *testing.T) {
 
 	if got := m.displayModel(); got != "cli-model" {
 		t.Fatalf("display model after new session = %q, want CLI fallback", got)
+	}
+}
+
+// tailPreview returns a short, log-safe view of a possibly huge string, keeping
+// the tail where the retention marker lives.
+func tailPreview(s string) string {
+	const n = 60
+	if len(s) <= n {
+		return s
+	}
+	return "…" + s[len(s)-n:]
+}
+
+// TestCapRetainedToolOutputNewlineHeavyResultOwnsBoundedCopy is the task 098
+// regression: a short prefix followed by >1 MiB of trailing newlines. Trimming
+// before the size check used to return the few-byte prefix as a substring still
+// backed by the whole original allocation, with no marker. The fix bases the
+// cap on the raw length and returns an owned, bounded copy.
+func TestCapRetainedToolOutputNewlineHeavyResultOwnsBoundedCopy(t *testing.T) {
+	original := "short prefix" + strings.Repeat("\n", 2<<20)
+	got := capRetainedToolOutput(original)
+
+	if backingAliases(got, original) {
+		t.Fatalf("retained %d bytes alias the %d-byte original; the whole allocation stays pinned", len(got), len(original))
+	}
+	if want := fmt.Sprintf("… truncated (%d bytes total)", len(original)); !strings.Contains(got, want) {
+		t.Errorf("missing original-size marker %q: %q", want, tailPreview(got))
+	}
+	if len(got) > maxRetainedToolOutputBytes+128 {
+		t.Errorf("retained %d bytes, want <= ceiling %d plus marker", len(got), maxRetainedToolOutputBytes)
+	}
+}
+
+// TestCapRetainedToolOutputBoundsOversizedAndPreservesBelow covers the shapes
+// the ingestion cap must handle: ASCII, all-newline, ordinary oversized,
+// a multibyte-rune boundary, and the exact/one-past ceiling. At or below the
+// ceiling the input must come back byte-identical; above it the retained value
+// must not alias the input, must carry the raw-size marker, and must stay
+// bounded by the ceiling plus marker.
+func TestCapRetainedToolOutputBoundsOversizedAndPreservesBelow(t *testing.T) {
+	const ceiling = maxRetainedToolOutputBytes
+	tests := []struct {
+		name         string
+		input        string
+		wantVerbatim bool
+	}{
+		{"ascii-prefix-newlines", "short prefix" + strings.Repeat("\n", 2<<20), false},
+		{"all-newlines", strings.Repeat("\n", 3<<20), false},
+		{"ordinary-oversized", strings.Repeat("x", 2<<20), false},
+		// U+20AC is 3 bytes; the ceiling is not a multiple of 3, so the cut lands
+		// mid-rune and must back up to a rune boundary.
+		{"multibyte-boundary", strings.Repeat("€", ceiling/3+10), false},
+		{"boundary-exact", strings.Repeat("x", ceiling), true},
+		{"boundary-plus-one", strings.Repeat("x", ceiling+1), false},
+		{"below-ceiling-newlines", "done\n\n\n", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := capRetainedToolOutput(tc.input)
+			if tc.wantVerbatim {
+				if got != tc.input {
+					t.Fatalf("at/below ceiling: got %d bytes, want the %d-byte input verbatim", len(got), len(tc.input))
+				}
+				return
+			}
+			if backingAliases(got, tc.input) {
+				t.Fatalf("oversized result aliases the %d-byte original; allocation stays pinned", len(tc.input))
+			}
+			if want := fmt.Sprintf("… truncated (%d bytes total)", len(tc.input)); !strings.Contains(got, want) {
+				t.Errorf("missing raw-size marker %q: %q", want, tailPreview(got))
+			}
+			if len(got) > ceiling+128 {
+				t.Errorf("retained %d bytes, want <= ceiling %d plus marker", len(got), ceiling)
+			}
+			content := strings.SplitN(got, "\n… truncated", 2)[0]
+			if !utf8.ValidString(content) {
+				t.Errorf("cut split a rune: %q", tailPreview(content))
+			}
+			if !strings.HasPrefix(tc.input, content) {
+				t.Errorf("retained content is not a prefix of the input")
+			}
+			if len(content) > ceiling {
+				t.Errorf("retained content %d bytes, want <= ceiling %d", len(content), ceiling)
+			}
+		})
+	}
+}
+
+// TestToolOutputIngestDoesNotPinOversizedResult exercises the same defect
+// through applyEvent, so the timeline itself stores the owned copy.
+func TestToolOutputIngestDoesNotPinOversizedResult(t *testing.T) {
+	m := newLaidOutModel()
+	original := "short prefix" + strings.Repeat("\n", 2<<20)
+	m.applyEvent(cake.FunctionCall{CallID: "c-nl", Name: "bash", Arguments: `{}`})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-nl", Output: original})
+
+	tool := m.items[len(m.items)-1].Tool
+	if backingAliases(tool.Output, original) {
+		t.Fatalf("timeline retained a substring of the %d-byte original", len(original))
+	}
+	if !strings.Contains(tool.Output, "truncated") {
+		t.Errorf("oversized ingest kept no truncation marker: %q", tailPreview(tool.Output))
+	}
+	if len(tool.Output) > maxRetainedToolOutputBytes+128 {
+		t.Errorf("timeline retained %d bytes, want <= ceiling %d plus marker", len(tool.Output), maxRetainedToolOutputBytes)
 	}
 }

@@ -32,16 +32,23 @@ const maxRetainedToolOutputBytes = 1 << 20 // 1 MiB
 
 // capRetainedToolOutput applies the retention ceiling to one tool result at
 // ingest. Output at or below the ceiling passes through byte-identical, so
-// Ctrl+O full mode is unchanged for realistic results. Larger output is cut
-// via [ui.TruncateOutput], which is rune-safe and appends the standard
-// "… truncated (N bytes total)" marker users already see in truncated mode;
-// in Ctrl+O full mode that marker is what tells the user bytes were dropped
-// for memory.
+// Ctrl+O full mode is unchanged for realistic results. Larger output is cut to
+// the ceiling on a rune boundary and appended with the standard
+// "… truncated (N bytes total)" marker, where N is the ORIGINAL raw byte count.
+//
+// The oversized decision and the marker use the result's raw bytes, and the
+// oversized branch returns a fresh, bounded copy — never a substring of the
+// original. It must not delegate to [ui.TruncateOutput], which trims trailing
+// newlines before its size check and then returns the shortened string
+// directly: for a short prefix followed by megabytes of newlines that trimmed
+// result is a few-byte substring still backed by the entire original
+// allocation, so the timeline silently pinned tens of MB with no marker (task
+// 098). [ui.CapOutputBytes] keeps the newline trimming at display time.
 func capRetainedToolOutput(output string) string {
 	if len(output) <= maxRetainedToolOutputBytes {
 		return output
 	}
-	return ui.TruncateOutput(output, maxRetainedToolOutputBytes)
+	return ui.CapOutputBytes(output, maxRetainedToolOutputBytes)
 }
 
 // eventsMsg delivers a batch of decoded cake stream events, applied in order

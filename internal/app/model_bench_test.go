@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -69,6 +70,13 @@ var benchToolOutput = strings.Repeat("internal/app/model.go:301: appendTimelineC
 const benchHugeOutputSize = 50 << 20 // 50 MiB
 
 var benchHugeOutput = strings.Repeat("x", benchHugeOutputSize)
+
+// benchHugeNewlineOutput reproduces the retention defect (task 098): a short
+// prefix followed by more than 1 MiB of trailing newlines. Trimming the
+// newlines before the size check left a few-byte substring still backed by the
+// whole ~1 MiB allocation, so the model pinned the full result while a
+// length-sum metric reported only the prefix.
+var benchHugeNewlineOutput = "short prefix" + strings.Repeat("\n", 2<<20)
 
 // benchWorkload builds the timeline items for one traffic pattern.
 type benchWorkload struct {
@@ -330,29 +338,72 @@ func retainedPayloadBytes(m *Model) int64 {
 	return n
 }
 
+// pinnedPayloadBytes is [retainedPayloadBytes] corrected for retained strings
+// that are substrings of a larger, still-reachable allocation. A length sum
+// cannot see that: a few-byte retained prefix of a multi-MiB result reports a
+// tiny retained-B while actually pinning the whole result. This is the metric
+// task 098 exists for — the newline-heavy oversized case recovers the ~1 MiB
+// (or the pre-fix ~2 MiB) the substring was backing.
+func pinnedPayloadBytes(m *Model, input string) int64 {
+	n := retainedPayloadBytes(m)
+	if input == "" {
+		return n
+	}
+	for i := range m.items {
+		if m.items[i].Tool == nil {
+			continue
+		}
+		if o := m.items[i].Tool.Output; backingAliases(o, input) {
+			n += int64(len(input) - len(o))
+		}
+	}
+	return n
+}
+
+// backingAliases reports whether s points into base's backing array, so s keeps
+// base's whole allocation reachable. It is the backing-storage check a length
+// sum cannot make: a trimmed few-byte prefix of a multi-MiB result has a tiny
+// len but still pins the entire original allocation.
+func backingAliases(s, base string) bool {
+	if len(s) == 0 || len(base) == 0 {
+		return false
+	}
+	sp := uintptr(unsafe.Pointer(unsafe.StringData(s)))
+	bp := uintptr(unsafe.Pointer(unsafe.StringData(base)))
+	return sp >= bp && sp < bp+uintptr(len(base))
+}
+
 // BenchmarkTimelineRetainedMemory reports the bytes one representative
 // tool-call session pins, with and without an oversized tool result. It is the
-// task 065 before/after instrument: the oversized-result case used to retain
-// the full output for the life of the session, and now retains only the
-// ingest ceiling plus its marker. Run with -count=6 and read the retained-B
-// column; the -benchmem allocs are secondary.
+// task 065 and task 098 before/after instrument: the oversized-result case used
+// to retain the full output for the life of the session, and now retains only
+// the ingest ceiling plus its marker.
+//
+// It reports two columns. retained-B is the length sum ([retainedPayloadBytes]);
+// pinned-B additionally counts a still-reachable larger allocation when the
+// retained output is a substring of it ([pinnedPayloadBytes]). The newline-heavy
+// case is why both exist: before task 098, trimming made the retained substring
+// tiny, so retained-B under-reported the pinned ~2 MiB original while pinned-B
+// saw it. Run with -count=6 and read the byte columns; the -benchmem allocs are
+// secondary.
 func BenchmarkTimelineRetainedMemory(b *testing.B) {
 	forceColorProfile(b)
 
-	run := func(name string, huge bool) {
+	run := func(name, output string) {
 		b.Run(name, func(b *testing.B) {
 			m := newBenchModel(benchWorkloads[1], 200)
-			if huge {
+			if output != "" {
 				idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
 					Name:      "bash",
 					Arguments: `{"command":"cat huge.bin"}`,
 				}})
 				m.pendingCalls["c-huge"] = idx
-				m.applyEvent(cake.FunctionCallOutput{CallID: "c-huge", Output: benchHugeOutput})
+				m.applyEvent(cake.FunctionCallOutput{CallID: "c-huge", Output: output})
 				m.syncViewport()
 			}
 			b.StopTimer()
 			b.ReportMetric(float64(retainedPayloadBytes(&m)), "retained-B")
+			b.ReportMetric(float64(pinnedPayloadBytes(&m, output)), "pinned-B")
 			b.StartTimer()
 			for range b.N {
 				runtime.KeepAlive(m)
@@ -360,6 +411,7 @@ func BenchmarkTimelineRetainedMemory(b *testing.B) {
 		})
 	}
 
-	run("normal-tools", false)
-	run("oversized-output", true)
+	run("normal-tools", "")
+	run("oversized-output", benchHugeOutput)
+	run("oversized-newlines", benchHugeNewlineOutput)
 }

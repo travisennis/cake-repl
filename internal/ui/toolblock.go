@@ -10,8 +10,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// DefaultOutputLimit is how many characters of tool output are shown before
-// truncation.
+// DefaultOutputLimit is how many bytes of tool output are shown before
+// truncation. It is a rune-safe byte budget: a cut never splits a rune, so a
+// value of 2000 may show slightly fewer than 2000 characters.
 const DefaultOutputLimit = 2000
 
 // unknownArgsLimit caps the JSON summary shown for unrecognized tools.
@@ -133,6 +134,9 @@ func summarizeWrite(argsJSON string) string {
 // characters the user can actually see. A cut that lands inside a kept SGR
 // sequence (possible only when tool color is enabled) has its dangling prefix
 // dropped, so the marker that follows is never swallowed by an open sequence.
+//
+// It trims trailing newlines before measuring, which is a display concern; see
+// [CapOutputBytes] for the ingestion variant that must not trim.
 func TruncateOutput(s string, limit int) string {
 	s = strings.TrimRight(s, "\n")
 	if limit <= 0 {
@@ -141,6 +145,35 @@ func TruncateOutput(s string, limit int) string {
 	if len(s) <= limit {
 		return s
 	}
+	return cutAndMark(s, limit)
+}
+
+// CapOutputBytes returns a bounded, owned copy of s: at most limit bytes of a
+// rune-safe prefix plus the standard "… truncated (N bytes total)" marker,
+// where N is the raw byte length of s. At or below limit, s is returned
+// unchanged (byte-identical). A limit of 0 or less uses [DefaultOutputLimit].
+//
+// Unlike [TruncateOutput] it does not trim trailing newlines first, so the
+// oversized decision and the marker use s's raw bytes. That matters at
+// ingestion: a short prefix followed by megabytes of newlines is oversized by
+// its raw length, but trimming would leave a few-byte prefix. The oversized
+// branch therefore always returns a fresh allocation — a plain substring would
+// keep the entire original result reachable for the life of the session.
+func CapOutputBytes(s string, limit int) string {
+	if limit <= 0 {
+		limit = DefaultOutputLimit
+	}
+	if len(s) <= limit {
+		return s
+	}
+	return cutAndMark(s, limit)
+}
+
+// cutAndMark returns a fresh, rune-safe prefix of s of at most limit bytes —
+// cut at a line boundary when one lands in the back half — with any partial
+// trailing escape sequence dropped and the standard marker appended. The
+// marker's N is len(s); the result never shares storage with s.
+func cutAndMark(s string, limit int) string {
 	original := len(s)
 	cut := cutRuneSafe(s, limit)
 	// Prefer a line boundary if one exists in the back half of the cut.

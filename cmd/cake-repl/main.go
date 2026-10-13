@@ -213,7 +213,7 @@ func bindFlags(fs *flag.FlagSet) *startupFlags {
 	f.showVersion = fs.Bool("version", false, "print version and exit")
 	f.configPath = fs.String("config", "", "path to config file (overrides default XDG and project-local config)")
 	f.noConfig = fs.Bool("no-config", false, "skip loading config file")
-	f.outputLimit = fs.Int("output-limit", 0, "truncate tool output after this many characters (0 = use internal default 2000)")
+	f.outputLimit = fs.Int("output-limit", 0, "truncate tool output after this many bytes, cut on rune boundaries (0 = use internal default 2000)")
 	f.maxTimelineItems = fs.Int("max-timeline-items", 0, "limit timeline to this many entries (0 = no limit)")
 	f.toolColor = fs.Bool("tool-color", false, "keep ANSI color in tool output (default: strip it)")
 	return f

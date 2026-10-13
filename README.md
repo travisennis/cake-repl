@@ -114,7 +114,7 @@ Flags:
 | `-history-file <path>` | persist prompt history across restarts into this file |
 | `-config <path>` | path to config file (overrides default paths) |
 | `-no-config` | skip loading config file |
-| `-output-limit <n>` | truncate tool output after `<n>` characters (default: 2000) |
+| `-output-limit <n>` | truncate tool output after `<n>` bytes, cut on rune boundaries (default: 2000) |
 | `-max-timeline-items <n>` | limit timeline to `<n>` entries (default: no limit) |
 | `-tool-color` | keep ANSI color in tool output instead of stripping it (default: strip) |
 | `-version` | print version and exit |
@@ -272,7 +272,8 @@ model = "gpt-4"
 # Behavior profile passed through to cake
 profile = "fast"
 
-# Truncate tool output after this many characters (default: 2000)
+# Truncate tool output after this many bytes, cut on rune boundaries
+# (default: 2000)
 output-limit = 5000
 
 # Maximum number of timeline entries to keep (default: no limit)
@@ -332,17 +333,23 @@ validation is available with `just release-check`.
   `replay`; if replay is unavailable, cake-repl shows a warning and still lets
   you continue the session. `/sessions` likewise needs a cake binary that
   supports `sessions list --json`.
-- Tool output is truncated at 2,000 characters by default (configurable via
-  `-output-limit` or config file). Independently of that limit, the REPL
-  retains at most the first 1 MiB of any single tool result for the life of
-  the session: a larger result is cut at ingest with a "… truncated (N bytes
-  total)" line appended, so it cannot pin tens of MB of memory. `Ctrl+O`
-  full mode shows everything that was retained (including that marker);
-  output up to 1 MiB is retained verbatim.
+- Tool output is truncated at 2,000 bytes by default, cut on rune boundaries
+  (configurable via `-output-limit` or config file). Independently of that
+  display limit, the REPL bounds what one tool *result* pins: it retains at
+  most the first 1 MiB (1,048,576 bytes) of the result's raw bytes, and a larger
+  result is replaced at ingest with an owned copy of that prefix plus a
+  "… truncated (N bytes total)" line, so it cannot pin tens of MB of memory —
+  including a short prefix followed by megabytes of newlines. `Ctrl+O` full
+  mode shows everything that was retained (including that marker); a result of
+  1 MiB or less is retained verbatim. This bound applies to tool-result output
+  only: assistant and user message text, tool arguments, and reasoning payloads
+  are retained in full per entry and are not capped.
 - The timeline keeps every entry by default (`-max-timeline-items` defaults to
-  no limit). This is deliberate: each entry's memory is bounded (see the tool
-  output ceiling above; rendered forms are capped by `-output-limit`), and
-  trimming by default would silently drop scroll-back history. Set
+  no limit). This is deliberate: tool-result retention above bounds the one
+  payload that can grow without limit per call, and rendered forms are capped
+  by `-output-limit`, while trimming entries by default would silently drop
+  scroll-back history. Message text and tool arguments remain unbounded per
+  entry, so a session that streams very large messages still grows; set
   `-max-timeline-items` to bound how many entries are kept.
 - `-history-file` stores one JSONL record per submission, capped at 1 MiB per
   record. A larger submission — for example a huge paste that begins with `/` —

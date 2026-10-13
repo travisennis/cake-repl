@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -226,5 +227,51 @@ func TestTruncateOutputPrefersLineBoundary(t *testing.T) {
 		if len(line) != 39 {
 			t.Errorf("line %d not cut at boundary: %q", i, line)
 		}
+	}
+}
+
+func TestCapOutputBytesKeepsShortInputVerbatim(t *testing.T) {
+	// Trailing newlines are part of the raw bytes; ingestion must not trim
+	// them, so the input stays byte-identical below the limit.
+	in := "done\n\n\n"
+	if got := CapOutputBytes(in, 100); got != in {
+		t.Errorf("got %q, want %q", got, in)
+	}
+	if got := CapOutputBytes(in, len(in)); got != in {
+		t.Errorf("at the limit: got %q, want %q", got, in)
+	}
+}
+
+func TestCapOutputBytesCutsOnRawLengthNotTrimmed(t *testing.T) {
+	// A prefix plus megabytes of newlines is oversized by raw length. Trimming
+	// first (the display path) would leave a tiny string; ingestion must cut and
+	// report the original raw size instead.
+	in := "prefix" + strings.Repeat("\n", 3<<10)
+	got := CapOutputBytes(in, 1<<10)
+
+	if !strings.Contains(got, "truncated ("+strconv.Itoa(len(in))+" bytes total)") {
+		t.Errorf("marker should report the raw %d-byte original: %q", len(in), got[len(got)-60:])
+	}
+	if n := len(got) - len("\n… truncated ("+strconv.Itoa(len(in))+" bytes total)"); n > 1<<10 {
+		t.Errorf("retained %d content bytes, want <= limit %d", n, 1<<10)
+	}
+}
+
+func TestCapOutputBytesDoesNotSplitRunes(t *testing.T) {
+	in := strings.Repeat("€", 1000) // 3 bytes each; a 100-byte cut lands mid-rune
+	got := CapOutputBytes(in, 100)
+
+	content := strings.SplitN(got, "\n… truncated", 2)[0]
+	if !utf8.ValidString(content) {
+		t.Fatalf("cut split a rune: %q", content)
+	}
+	if !strings.HasPrefix(in, content) {
+		t.Errorf("cut is not a prefix of the input: %q", content)
+	}
+	if len(content) > 100 {
+		t.Errorf("content %d bytes, want <= 100", len(content))
+	}
+	if !strings.Contains(got, "3000 bytes total") {
+		t.Errorf("marker should report the raw original size: %q", got[len(got)-60:])
 	}
 }
