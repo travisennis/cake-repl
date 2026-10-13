@@ -31,9 +31,10 @@ const maxEventsPerBatch = 10
 const maxRetainedToolOutputBytes = 1 << 20 // 1 MiB
 
 // capRetainedToolOutput applies the retention ceiling to one tool result at
-// ingest. Output at or below the ceiling passes through byte-identical, so
-// Ctrl+O full mode is unchanged for realistic results. Larger output is cut to
-// the ceiling on a rune boundary and appended with the standard
+// ingest by delegating to [ui.CapOutputBytes], which owns both branches: at or
+// below the ceiling the output passes through byte-identical (so Ctrl+O full
+// mode is unchanged for realistic results), and above it the output is cut on a
+// rune boundary and appended with the standard
 // "… truncated (N bytes total)" marker, where N is the ORIGINAL raw byte count.
 //
 // The oversized decision and the marker use the result's raw bytes, and the
@@ -45,9 +46,6 @@ const maxRetainedToolOutputBytes = 1 << 20 // 1 MiB
 // allocation, so the timeline silently pinned tens of MB with no marker (task
 // 098). [ui.CapOutputBytes] keeps the newline trimming at display time.
 func capRetainedToolOutput(output string) string {
-	if len(output) <= maxRetainedToolOutputBytes {
-		return output
-	}
 	return ui.CapOutputBytes(output, maxRetainedToolOutputBytes)
 }
 
