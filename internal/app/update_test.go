@@ -548,6 +548,42 @@ func TestSessionCopyAfterRetargetCopiesNewTarget(t *testing.T) {
 	}
 }
 
+// The copied id is frozen when /session copy is requested: the command runs
+// later, so a retarget and a session reset in between must not change what is
+// written. This is the session-id counterpart of
+// TestCopyLastAssistantSnapshotsTextAtRequest.
+func TestSessionCopySnapshotsIDAtRequest(t *testing.T) {
+	const oldID = "aaaaaaaa-1111-2222-3333-444444444444"
+	const newTarget = "bbbbbbbb-1111-2222-3333-444444444444"
+	m := newLaidOutModel()
+	m.session.OnTaskStart(cake.TaskStart{SessionID: oldID, TaskID: "t-a"})
+
+	var copied string
+	m.clipboard = func(s string) error { copied = s; return nil }
+	tm, cmd := m.execCommand(Command{Kind: CmdSession, Arg: "copy"})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("/session copy must return a copy command")
+	}
+
+	// The REPL retargets the next prompt and then resets the session before the
+	// write runs; neither may reach the pending command.
+	tm, _ = m.resumeSession(newTarget)
+	m = tm.(Model)
+	tm, _ = m.startNewSession()
+	m = tm.(Model)
+
+	tm, _ = m.Update(cmd())
+	m = tm.(Model)
+	if copied != oldID {
+		t.Errorf("copied = %q, want the id snapshotted at the request %q", copied, oldID)
+	}
+	last := lastItem(t, m)
+	if last.Kind != ui.KindInfo || last.Text != "copied session id to clipboard" {
+		t.Errorf("last item = %+v, want copy confirmation", last)
+	}
+}
+
 // copyHandlerBound bounds how long a test waits for a copy handler or its
 // command to make progress. Both run off the Update loop, so in the passing
 // case these resolve immediately; exceeding the bound means the handler ran the
