@@ -58,7 +58,9 @@ flag wins over the recipe's own default, so `just bench -count=6` produces a
 `benchstat`-ready run, `just bench -benchtime=10x` is a quick check, and
 `just bench -bench Timeline` narrows to one family. It runs with a 30-minute
 timeout because repeated runs of the timeline benchmarks exceed Go's
-10-minute default.
+10-minute default. Arguments are forwarded verbatim, so pass a value containing
+spaces or shell metacharacters as one quoted argument, for example
+`just bench -bench 'Timeline(Append|Viewport)$'`.
 
 Without `just`, run the underlying `go` commands:
 

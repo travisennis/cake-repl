@@ -1,3 +1,12 @@
+# Recipe arguments reach the shell as positional parameters ($1, $2, ...) instead
+# of being interpolated into shell source. Interpolating a variadic list re-joins
+# it with spaces and discards quoting, so `just run -cwd 'a b'` would split the
+# path and `just bench -bench 'a(b|c)$'` would break the shell. Recipes that
+# forward a variadic argument list read "$@"; `{{param}}` interpolation is
+# unaffected. The setting is global because just has no per-recipe form; the only
+# recipes that forward arguments are `bench` and `run`.
+set positional-arguments
+
 deadcode_version := "v0.50.0"
 golangci_lint_version := "v2.13.1"
 goreleaser_version := "v2.17.1"
@@ -83,7 +92,7 @@ test-real-cake:
 
 # Benchmarks only, with allocations; extra flags pass through. Never in `ci`.
 bench *args:
-    go test -run '^$' -bench . -benchmem -timeout=30m {{ args }} ./...
+    go test -run '^$' -bench . -benchmem -timeout=30m "$@" ./...
 
 fmt:
     go fmt ./...
@@ -154,4 +163,4 @@ release:
     go build -trimpath -ldflags="-s -w" -o cake-repl ./cmd/cake-repl
 
 run *args:
-    go run ./cmd/cake-repl {{args}}
+    go run ./cmd/cake-repl "$@"
