@@ -81,6 +81,145 @@ exit 0
 	}
 }
 
+// startupListing runs the commands Init issued and applies the session-listing
+// result among them, so a test observes the startup picker the way the program
+// loop does: New creates the listing and the state it depends on, and Init
+// issues it.
+func startupListing(t *testing.T, m Model) Model {
+	t.Helper()
+	msg := m.Init()()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("Init message type = %T, want tea.BatchMsg", msg)
+	}
+	for _, cmd := range batch {
+		if cmd == nil {
+			continue
+		}
+		if res, ok := cmd().(sessionsLoadedMsg); ok {
+			tm, _ := m.Update(res)
+			return tm.(Model)
+		}
+	}
+	t.Fatal("Init issued no session listing for the startup picker")
+	return m
+}
+
+// TestStartupPickerOpensBrowserAndLoads: a bare -resume asks for a session
+// instead of naming one, so startup opens the browser, hydrates nothing, and
+// lists this directory through the same command /sessions runs (ADR 021).
+func TestStartupPickerOpensBrowserAndLoads(t *testing.T) {
+	cwd := t.TempDir()
+	bin := writeFakeCake(t, `
+cat <<'EOF'
+{"schema_version":1,"data":{"sessions":[
+  {"session_id":"`+browserID1+`","first_prompt":"first task","timestamp":"2026-10-07T11:20:44Z"}
+]}}
+EOF
+exit 0
+`)
+	m := New(Config{CakeBin: bin, Cwd: cwd, StartupPicker: true})
+	m.width, m.height = 80, 24
+	m.layout()
+
+	if !m.browserOpen || !m.browserLoading {
+		t.Fatalf("startup picker not open: open=%v loading=%v", m.browserOpen, m.browserLoading)
+	}
+	// No session was named, so nothing is hydrated and nothing is pinned.
+	if m.hydrating || m.replayPending || m.replayRun != nil {
+		t.Errorf("startup picker hydrated: hydrating=%v pending=%v run=%v", m.hydrating, m.replayPending, m.replayRun)
+	}
+	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Errorf("run options = (%v, %q), want (fresh, no id)", mode, id)
+	}
+	if want := "sessions in " + filepath.Base(cwd); m.sessionList.Title != want {
+		t.Errorf("title = %q, want %q", m.sessionList.Title, want)
+	}
+	if view := m.View(); !strings.Contains(view, "loading sessions") {
+		t.Errorf("first frame should show the loading body:\n%s", view)
+	}
+
+	m = startupListing(t, m)
+	if m.browserLoading {
+		t.Error("browser still loading after the listing arrived")
+	}
+	if len(m.sessionList.Items()) != 1 {
+		t.Fatalf("got %d items, want 1", len(m.sessionList.Items()))
+	}
+	if view := m.View(); !strings.Contains(view, "11111111") || !strings.Contains(view, "first task") {
+		t.Errorf("list view missing the loaded session:\n%s", view)
+	}
+}
+
+// TestStartupPickerOnlyOpensWhenRequested: an ordinary start stays on the
+// timeline, issues no listing, and starts fresh.
+func TestStartupPickerOnlyOpensWhenRequested(t *testing.T) {
+	m := New(Config{Cwd: t.TempDir()})
+	if m.browserOpen || m.browserLoading || m.startupCmd != nil {
+		t.Fatalf("plain startup opened the picker: open=%v loading=%v cmd=%v",
+			m.browserOpen, m.browserLoading, m.startupCmd)
+	}
+	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Errorf("run options = (%v, %q), want (fresh, no id)", mode, id)
+	}
+}
+
+// TestStartupPickerEnterPinsTheNextPrompt: picking a row in the startup picker
+// is the /resume <uuid> transition, so the next prompt continues the picked
+// session rather than starting a fresh one.
+func TestStartupPickerEnterPinsTheNextPrompt(t *testing.T) {
+	argsPath := filepath.Join(t.TempDir(), "args")
+	t.Setenv("ARGS_FILE", argsPath)
+	bin := writeFakeCake(t, `
+if [ "$1" = "sessions" ]; then
+cat <<'EOF'
+{"schema_version":1,"data":{"sessions":[
+  {"session_id":"`+browserID1+`","first_prompt":"one","timestamp":"2026-10-07T11:20:44Z"},
+  {"session_id":"`+browserID2+`","first_prompt":"two","timestamp":"2026-10-06T09:00:00Z"}
+]}}
+EOF
+exit 0
+fi
+printf '%s\n' "$@" >> "$ARGS_FILE"
+echo '{"type":"task_complete","session_id":"`+browserID2+`","task_id":"t-2"}'
+exit 0
+`)
+	m := New(Config{CakeBin: bin, Cwd: t.TempDir(), StartupPicker: true})
+	m.width, m.height = 80, 24
+	m.layout()
+	m = startupListing(t, m)
+
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyDown}) // select the second row
+	m = tm.(Model)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := tm.(Model)
+	if got.browserOpen {
+		t.Error("Enter should close the startup picker")
+	}
+	if mode, id := got.session.RunOptions(); mode != cake.RunResume || id != browserID2 {
+		t.Errorf("run options = (%v, %q), want (resume, %q)", mode, id, browserID2)
+	}
+	if it := lastItem(t, got); it.Kind != ui.KindInfo || !strings.Contains(it.Text, browserID2) {
+		t.Errorf("notice = %+v, want an info item naming %s", it, browserID2)
+	}
+
+	// The first prompt after the pick continues the picked session.
+	got.input.SetValue("continue")
+	tm, _ = got.submit()
+	got = tm.(Model)
+	if !got.running {
+		t.Fatal("submitting after the pick did not start a run")
+	}
+	drainRun(t, got.run)
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("reading captured args: %v", err)
+	}
+	if !strings.Contains(string(args), "--resume\n"+browserID2+"\n--\ncontinue\n") {
+		t.Errorf("first prompt after the pick did not resume %s: %q", browserID2, string(args))
+	}
+}
+
 func TestSessionsLoadedErrorKeepsBrowserOpen(t *testing.T) {
 	m := browserModel(t, nil)
 	m.browserLoading = true
@@ -664,6 +803,24 @@ func TestSessionsExitCancelsInFlightListing(t *testing.T) {
 	}
 	_ = tm
 	awaitListing(t, done)
+}
+
+// TestCancelRunningCancelsInFlightListing: the teardown main drives after the
+// program returns stops a listing the model never saw a key for — the case the
+// startup picker makes reachable, since its listing is in flight before the
+// first frame. A listing whose helper is never stopped would outlive the REPL.
+func TestCancelRunningCancelsInFlightListing(t *testing.T) {
+	m, done := blockingListing(t, newLaidOutModel())
+
+	m.CancelRunning()
+
+	msg, ok := awaitListing(t, done).(sessionsLoadedMsg)
+	if !ok {
+		t.Fatalf("listing returned %T, want sessionsLoadedMsg", msg)
+	}
+	if msg.err == nil {
+		t.Error("a canceled listing reported success, want the cancellation error")
+	}
 }
 
 // TestPromptUsableAfterClosingBrowser: a draft survives closing the browser and

@@ -16,18 +16,20 @@ import (
 
 func TestValidateFlagsVersionShortCircuits(t *testing.T) {
 	// --version should return nil even when other flags are invalid.
-	if err := validateFlags(true, "not-a-uuid", true, "not-a-uuid", []string{"surprise!"}, "/path", true); err != nil {
+	resume := optionalString{set: true, value: "not-a-uuid"}
+	fork := optionalString{set: true, value: "not-a-uuid"}
+	if err := validateFlags(true, resume, fork, []string{"surprise!"}, "/path", true); err != nil {
 		t.Errorf("validateFlags(true, …) = %v, want nil", err)
 	}
 }
 
 func TestValidateFlags(t *testing.T) {
+	const uuid = "11111111-2222-3333-4444-555555555555"
 	tests := []struct {
 		name        string
 		showVersion bool
-		resume      string
-		fork        bool
-		forkID      string
+		resume      optionalString
+		fork        optionalString
 		args        []string
 		configPath  string
 		noConfig    bool
@@ -39,35 +41,50 @@ func TestValidateFlags(t *testing.T) {
 		},
 		{
 			name:    "--resume with valid uuid",
-			resume:  "11111111-2222-3333-4444-555555555555",
+			resume:  optionalString{set: true, value: uuid},
+			wantErr: false,
+		},
+		{
+			name:    "bare --resume picks a session at startup",
+			resume:  optionalString{set: true},
 			wantErr: false,
 		},
 		{
 			name:    "--fork latest",
-			fork:    true,
+			fork:    optionalString{set: true},
 			wantErr: false,
 		},
 		{
 			name:    "--fork with valid uuid",
-			fork:    true,
-			forkID:  "11111111-2222-3333-4444-555555555555",
+			fork:    optionalString{set: true, value: uuid},
 			wantErr: false,
 		},
 		{
 			name:    "--resume with invalid uuid",
-			resume:  "not-a-uuid",
+			resume:  optionalString{set: true, value: "not-a-uuid"},
 			wantErr: true,
 		},
 		{
 			name:    "--fork and --resume both set",
-			fork:    true,
-			resume:  "11111111-2222-3333-4444-555555555555",
+			fork:    optionalString{set: true},
+			resume:  optionalString{set: true, value: uuid},
+			wantErr: true,
+		},
+		{
+			name:    "bare --fork and bare --resume are mutually exclusive",
+			fork:    optionalString{set: true},
+			resume:  optionalString{set: true},
+			wantErr: true,
+		},
+		{
+			name:    "bare --fork and --resume with a uuid are mutually exclusive",
+			fork:    optionalString{set: true},
+			resume:  optionalString{set: true, value: uuid},
 			wantErr: true,
 		},
 		{
 			name:    "--fork with invalid uuid",
-			fork:    true,
-			forkID:  "not-a-uuid",
+			fork:    optionalString{set: true, value: "not-a-uuid"},
 			wantErr: true,
 		},
 		{
@@ -77,7 +94,7 @@ func TestValidateFlags(t *testing.T) {
 		},
 		{
 			name:    "--resume with malformed uuid",
-			resume:  "11111111-2222-3333-4444-55555555555Z", // bad char at end
+			resume:  optionalString{set: true, value: "11111111-2222-3333-4444-55555555555Z"}, // bad char at end
 			wantErr: true,
 		},
 		{
@@ -89,10 +106,10 @@ func TestValidateFlags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateFlags(tt.showVersion, tt.resume, tt.fork, tt.forkID, tt.args, tt.configPath, tt.noConfig)
+			err := validateFlags(tt.showVersion, tt.resume, tt.fork, tt.args, tt.configPath, tt.noConfig)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateFlags(%v, %q, %v, %q, %v, %q, %v) = %v, wantErr=%v",
-					tt.showVersion, tt.resume, tt.fork, tt.forkID, tt.args, tt.configPath, tt.noConfig, err, tt.wantErr)
+				t.Errorf("validateFlags(%v, %+v, %+v, %v, %q, %v) = %v, wantErr=%v",
+					tt.showVersion, tt.resume, tt.fork, tt.args, tt.configPath, tt.noConfig, err, tt.wantErr)
 			}
 		})
 	}
@@ -100,7 +117,7 @@ func TestValidateFlags(t *testing.T) {
 
 func TestValidateFlagsVersionShortCircuitSkipsArgCheck(t *testing.T) {
 	// showVersion=true must not fail even with positional arguments.
-	if err := validateFlags(true, "", false, "", []string{"oops"}, "", false); err != nil {
+	if err := validateFlags(true, optionalString{}, optionalString{}, []string{"oops"}, "", false); err != nil {
 		t.Errorf("validateFlags(true, …) with args = %v, want nil", err)
 	}
 }
@@ -176,26 +193,32 @@ func TestInlineComposerCleanup(t *testing.T) {
 	}
 }
 
-func TestNormalizeForkArgs(t *testing.T) {
+func TestNormalizeOptionalArgs(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 		want []string
 	}{
-		{name: "latest", args: []string{"-fork"}, want: []string{"-fork="}},
+		{name: "latest fork", args: []string{"-fork"}, want: []string{"-fork="}},
 		{name: "uuid with separate value", args: []string{"--fork", "11111111-2222-3333-4444-555555555555"}, want: []string{"--fork=11111111-2222-3333-4444-555555555555"}},
 		{name: "next flag means latest", args: []string{"--fork", "--no-session"}, want: []string{"--fork=", "--no-session"}},
-		{name: "after terminator is prompt text", args: []string{"--", "--fork", "uuid"}, want: []string{"--", "--fork", "uuid"}},
+		{name: "bare resume picks a session", args: []string{"-resume"}, want: []string{"-resume="}},
+		{name: "bare double-dash resume", args: []string{"--resume"}, want: []string{"--resume="}},
+		{name: "resume uuid with separate value", args: []string{"-resume", "11111111-2222-3333-4444-555555555555"}, want: []string{"-resume=11111111-2222-3333-4444-555555555555"}},
+		{name: "resume next flag means picker", args: []string{"-resume", "-cwd", "/tmp"}, want: []string{"-resume=", "-cwd", "/tmp"}},
+		{name: "inline values pass through", args: []string{"-resume=11111111-2222-3333-4444-555555555555", "--fork="}, want: []string{"-resume=11111111-2222-3333-4444-555555555555", "--fork="}},
+		{name: "unrelated flags pass through", args: []string{"-model", "gpt-x"}, want: []string{"-model", "gpt-x"}},
+		{name: "after terminator is prompt text", args: []string{"--", "--fork", "uuid", "-resume"}, want: []string{"--", "--fork", "uuid", "-resume"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeForkArgs(tt.args)
+			got := normalizeOptionalArgs(tt.args)
 			if len(got) != len(tt.want) {
-				t.Fatalf("normalizeForkArgs(%v) = %v, want %v", tt.args, got, tt.want)
+				t.Fatalf("normalizeOptionalArgs(%v) = %v, want %v", tt.args, got, tt.want)
 			}
 			for i := range tt.want {
 				if got[i] != tt.want[i] {
-					t.Errorf("normalizeForkArgs(%v)[%d] = %q, want %q", tt.args, i, got[i], tt.want[i])
+					t.Errorf("normalizeOptionalArgs(%v)[%d] = %q, want %q", tt.args, i, got[i], tt.want[i])
 				}
 			}
 		})
@@ -450,7 +473,7 @@ func parseStartupArgs(t *testing.T, argv []string) parsedStartup {
 	t.Helper()
 	fs := flag.NewFlagSet("cake-repl", flag.ContinueOnError)
 	f := bindFlags(fs)
-	if err := fs.Parse(normalizeForkArgs(argv)); err != nil {
+	if err := fs.Parse(normalizeOptionalArgs(argv)); err != nil {
 		t.Fatalf("parsing %v: %v", argv, err)
 	}
 	explicit := explicitFlags(fs)
@@ -459,6 +482,40 @@ func parseStartupArgs(t *testing.T, argv []string) parsedStartup {
 		t.Fatalf("effective config for %v: %v", argv, err)
 	}
 	return parsedStartup{cfg: cfg, explicit: explicit, configPath: *f.configPath, noConfig: *f.noConfig}
+}
+
+// TestStartupResumePicksOrPins drives -resume through the shared flag surface,
+// the real flag parse, and the config merge: a UUID selects replay hydration
+// plus the explicit pin, while a bare -resume asks for the startup session
+// picker and hydrates nothing (ADR 021). Config files are absent, so only the
+// flag decides.
+func TestStartupResumePicksOrPins(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	tests := []struct {
+		name     string
+		args     []string
+		wantMode cake.RunMode
+		wantID   string
+		wantPick bool
+	}{
+		{name: "no resume flag starts fresh", wantMode: cake.RunFresh},
+		{name: "resume with a uuid hydrates and pins", args: []string{"-resume", id}, wantMode: cake.RunResume, wantID: id},
+		{name: "resume with an inline uuid hydrates and pins", args: []string{"-resume=" + id}, wantMode: cake.RunResume, wantID: id},
+		{name: "bare resume opens the picker", args: []string{"-resume"}, wantMode: cake.RunFresh, wantPick: true},
+		{name: "bare resume before another flag opens the picker", args: []string{"-resume", "-no-color"}, wantMode: cake.RunFresh, wantPick: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			start := parseStartupArgs(t, tt.args)
+			cfg := start.cfg
+			if cfg.InitialMode != tt.wantMode || cfg.ResumeID != tt.wantID || cfg.StartupPicker != tt.wantPick {
+				t.Errorf("startup cfg = (mode %v, resume %q, picker %v), want (%v, %q, %v)",
+					cfg.InitialMode, cfg.ResumeID, cfg.StartupPicker, tt.wantMode, tt.wantID, tt.wantPick)
+			}
+		})
+	}
 }
 
 // TestResumeCommandRoundTrip drives the exit hint through the whole startup path:

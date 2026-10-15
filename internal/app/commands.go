@@ -97,7 +97,8 @@ const HelpText = `commands
   /exit /quit /q   exit (cancels a running task first)
   /new             start a fresh cake session on the next prompt
   /resume <uuid>   resume a specific cake session on the next prompt
-                   (startup -resume also reloads visible history)
+                   (startup -resume <uuid> also reloads visible history;
+                   startup -resume with no uuid picks a session instead)
   /session         show session id, task id, cwd, run mode, last result
   /session copy    copy the full session id to the clipboard
   /sessions        browse past sessions in this directory and pick one to resume

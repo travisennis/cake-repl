@@ -26,23 +26,28 @@ import (
 
 // Config is everything main passes in from CLI flags and config files.
 type Config struct {
-	CakeBin          string
-	Cwd              string
-	Model            string
-	Profile          string
-	Tools            string
-	NoTools          bool
-	AddDirs          []string
-	ToolboxDirs      []string
-	Sandbox          string
-	NoSkills         bool
-	Skills           string
-	SystemPrompt     string
-	Fork             bool
-	ForkID           string
-	NoSession        bool
-	InitialMode      cake.RunMode
-	ResumeID         string
+	CakeBin      string
+	Cwd          string
+	Model        string
+	Profile      string
+	Tools        string
+	NoTools      bool
+	AddDirs      []string
+	ToolboxDirs  []string
+	Sandbox      string
+	NoSkills     bool
+	Skills       string
+	SystemPrompt string
+	Fork         bool
+	ForkID       string
+	NoSession    bool
+	InitialMode  cake.RunMode
+	ResumeID     string
+	// StartupPicker opens the /sessions browser as soon as the program starts,
+	// for a bare `-resume`. It asks the user to choose a session instead of
+	// naming one: nothing is hydrated and no session is pinned until a row is
+	// picked. See ADR 021.
+	StartupPicker    bool
 	DebugLog         io.Writer
 	HistoryFile      string
 	OutputLimit      int
@@ -134,12 +139,20 @@ type Model struct {
 	completionMatches []string
 	completionIdx     int
 
-	// Session browser overlay state, driven by the /sessions command. The
-	// browser is idle-only and replaces the timeline while open.
+	// Session browser overlay state, driven by the /sessions command or, at
+	// startup, by the picker a bare `-resume` requests. The browser is idle-only
+	// and replaces the timeline while open.
 	browserOpen    bool
 	browserLoading bool
 	browserErr     string
 	sessionList    list.Model
+
+	// startupCmd is a command New built rather than Init. Init cannot mutate the
+	// model, and the startup session listing needs the request identity and
+	// cancel function startSessionListLoad records on the model, so the picker's
+	// construction returns the pair to New and the command is issued here. Nil
+	// when startup has no command of its own.
+	startupCmd tea.Cmd
 
 	// Session-listing operation state (ADR 019). The browser owns at most one
 	// in-flight listing: sessionListSeq allocates a request identity that never
@@ -195,6 +208,13 @@ func New(cfg Config) Model {
 		},
 	}
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "cake-repl — /help for commands"})
+
+	if cfg.StartupPicker {
+		// A bare `-resume` asks for a session instead of naming one, so the picker
+		// opens in place of hydration; the picked row pins the next prompt through
+		// the same transition as /resume. See ADR 021.
+		m, m.startupCmd = m.openSessionBrowser()
+	}
 
 	if cfg.HistoryFile != "" {
 		m.loadHistory(cfg.HistoryFile)
@@ -328,6 +348,11 @@ func (m Model) CancelRunning() {
 	if m.replayRun != nil {
 		m.replayRun.Cancel()
 	}
+	// A session listing can be in flight without the model ever seeing a key:
+	// the startup picker starts one before the first frame, and main calls this
+	// for an exit the Update loop never observed (SIGINT, SIGTERM, a recovered
+	// panic), which is exactly the path where quit() cannot cancel it.
+	m.cancelSessionList()
 }
 
 // SessionData returns the id of the session the REPL is continuing and the
@@ -355,6 +380,9 @@ func (m Model) Init() tea.Cmd {
 		// See ADR 020.
 		settleSweepAtStartupCmd(),
 		m.titleCmd(),
+	}
+	if m.startupCmd != nil {
+		cmds = append(cmds, m.startupCmd)
 	}
 	if m.hydrating {
 		cmds = append(cmds, startReplayCmd(m.cfg))

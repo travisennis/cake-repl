@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -730,14 +729,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		return m.resumeSession(cmd.Arg)
 
 	case CmdSessions:
-		m.browserOpen = true
-		m.browserLoading = true
-		m.browserErr = ""
-		// Drop the previous listing before the reload starts: while it loads the
-		// browser shows the loading body, so no stale row may remain selectable.
-		m.resetSessionList()
-		m.sessionList.Title = "sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))
-		return m.startSessionListLoad()
+		return m.openSessionBrowser()
 
 	case CmdSession:
 		if cmd.Arg == "copy" {

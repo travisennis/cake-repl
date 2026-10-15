@@ -2,10 +2,12 @@ package app
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/ui"
 )
@@ -64,6 +66,22 @@ func (m *Model) resizeSessionList(viewportHeight int) {
 func (m *Model) resetSessionList() {
 	m.sessionList.SetItems(nil)
 	m.sessionList.ResetSelected()
+}
+
+// openSessionBrowser shows the idle session browser and starts loading this
+// directory's sessions. `/sessions` and the startup picker a bare `-resume`
+// requests both come through here, so the two openings present the same title,
+// loading state, and reload: the previous listing is dropped before the reload
+// starts, so no stale row is ever selectable behind the loading body (ADR 019).
+// It returns the updated model and the listing command as a pair, so a caller
+// never reads a receiver mutated in a sibling return operand.
+func (m Model) openSessionBrowser() (Model, tea.Cmd) {
+	m.browserOpen = true
+	m.browserLoading = true
+	m.browserErr = ""
+	m.resetSessionList()
+	m.sessionList.Title = "sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))
+	return m.startSessionListLoad()
 }
 
 // closeBrowser hides the /sessions overlay and cancels any in-flight listing.

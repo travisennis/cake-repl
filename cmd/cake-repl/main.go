@@ -56,8 +56,8 @@ func (s *stringList) Set(v string) error {
 }
 
 // optionalString accepts an optional value after normalization. It tracks
-// whether the flag was supplied so -fork can distinguish "fork latest" from
-// the flag being absent.
+// whether the flag was supplied so -fork and -resume can distinguish a bare
+// flag from the flag being absent.
 type optionalString struct {
 	set   bool
 	value string
@@ -71,13 +71,38 @@ func (s *optionalString) Set(v string) error {
 	return nil
 }
 
-// IsBoolFlag lets the standard flag package accept a bare -fork. A separate
-// normalization step still supports the optional UUID value.
+// IsBoolFlag lets the standard flag package accept a bare optional-value flag.
+// A separate normalization step still supports the optional UUID value.
 func (s *optionalString) IsBoolFlag() bool { return true }
 
-// normalizeForkArgs turns cake's optional --fork [<uuid>] syntax into the
-// standard flag package's --fork=<uuid> form. A bare --fork becomes --fork=.
-func normalizeForkArgs(args []string) []string {
+// optionalValueFlags names the startup flags whose value may be omitted: the
+// flag package has no optional-value form, so normalizeOptionalArgs rewrites
+// these before Parse.
+var optionalValueFlags = []string{"fork", "resume"}
+
+// isOptionalValueFlag reports whether arg names one of the optional-value flags
+// in bare form ("-fork", "--resume", and so on). Every other spelling — the
+// -flag=value form the flag package already accepts, another flag, or a
+// positional argument — is left for Parse.
+func isOptionalValueFlag(arg string) bool {
+	name, ok := strings.CutPrefix(arg, "-")
+	if !ok {
+		return false
+	}
+	name, _ = strings.CutPrefix(name, "-")
+	for _, candidate := range optionalValueFlags {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeOptionalArgs turns an optional-value flag's `--flag [<uuid>]` syntax
+// into the standard flag package's `--flag=<uuid>` form. A bare --fork or
+// --resume becomes --flag=, which the bound optionalString records as supplied
+// with no value.
+func normalizeOptionalArgs(args []string) []string {
 	normalized := make([]string, 0, len(args))
 	parsingFlags := true
 	for i := 0; i < len(args); i++ {
@@ -87,7 +112,7 @@ func normalizeForkArgs(args []string) []string {
 			normalized = append(normalized, arg)
 			continue
 		}
-		if parsingFlags && (arg == "-fork" || arg == "--fork") {
+		if parsingFlags && isOptionalValueFlag(arg) {
 			if i+1 < len(args) && args[i+1] != "--" && !strings.HasPrefix(args[i+1], "-") {
 				normalized = append(normalized, arg+"="+args[i+1])
 				i++
@@ -104,21 +129,26 @@ func normalizeForkArgs(args []string) []string {
 // validateFlags checks the mutually exclusive / incompatible flag combinations
 // and returns an error when validation fails. When showVersion is true it
 // short-circuits and returns nil so the caller handles --version separately.
-func validateFlags(showVersion bool, resume string, fork bool, forkID string, args []string, configPath string, noConfig bool) error {
+//
+// Both optional-value flags are mutually exclusive in every form, so a bare
+// -resume and a bare -fork are rejected together exactly like their
+// UUID-bearing forms; only a value that was supplied must be a UUID, because a
+// bare -resume opens the session picker instead of naming a session (ADR 021).
+func validateFlags(showVersion bool, resume, fork optionalString, args []string, configPath string, noConfig bool) error {
 	if showVersion {
 		return nil
 	}
 	if len(args) > 0 {
 		return fmt.Errorf("unexpected argument %q (prompts are entered inside the REPL)", args[0])
 	}
-	if fork && resume != "" {
+	if fork.set && resume.set {
 		return fmt.Errorf("-fork and -resume are mutually exclusive")
 	}
-	if resume != "" && !app.IsSessionID(resume) {
-		return fmt.Errorf("invalid -resume uuid: %s", resume)
+	if resume.value != "" && !app.IsSessionID(resume.value) {
+		return fmt.Errorf("invalid -resume uuid: %s", resume.value)
 	}
-	if forkID != "" && !app.IsSessionID(forkID) {
-		return fmt.Errorf("invalid -fork uuid: %s", forkID)
+	if fork.value != "" && !app.IsSessionID(fork.value) {
+		return fmt.Errorf("invalid -fork uuid: %s", fork.value)
 	}
 	if configPath != "" && noConfig {
 		return fmt.Errorf("-config and -no-config are mutually exclusive")
@@ -160,7 +190,7 @@ func main() {
 // exit-hint round-trip tests parse one shared flag surface.
 type startupFlags struct {
 	cakeBin          *string
-	resume           *string
+	resume           optionalString
 	fork             optionalString
 	noSession        *bool
 	model            *string
@@ -192,7 +222,7 @@ type startupFlags struct {
 func bindFlags(fs *flag.FlagSet) *startupFlags {
 	f := &startupFlags{}
 	f.cakeBin = fs.String("cake-bin", "cake", "cake executable to run")
-	f.resume = fs.String("resume", "", "resume a specific cake session and reload its visible history")
+	fs.Var(&f.resume, "resume", "resume a specific cake session and reload its visible history, or pick one at startup when no UUID is given")
 	fs.Var(&f.fork, "fork", "fork the latest cake session, or the specified session UUID")
 	f.noSession = fs.Bool("no-session", false, "do not save the cake session to disk")
 	f.model = fs.String("model", "", "model name passed through to cake")
@@ -265,20 +295,27 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		Inline:           *f.inline,
 	}
 	applyConfigFile(&cfg, cfgFile, explicit)
-	if *f.resume != "" {
-		cfg.InitialMode = cake.RunResume
-		cfg.ResumeID = *f.resume
+	if f.resume.set {
+		// A bare -resume names no session, so nothing is hydrated and nothing is
+		// pinned: the REPL opens the session picker and the picked row pins the
+		// next prompt through the /resume transition. See ADR 021.
+		if f.resume.value == "" {
+			cfg.StartupPicker = true
+		} else {
+			cfg.InitialMode = cake.RunResume
+			cfg.ResumeID = f.resume.value
+		}
 	}
 	return cfg, nil
 }
 
 func run() (err error) {
 	f := bindFlags(flag.CommandLine)
-	if err = flag.CommandLine.Parse(normalizeForkArgs(os.Args[1:])); err != nil {
+	if err = flag.CommandLine.Parse(normalizeOptionalArgs(os.Args[1:])); err != nil {
 		return err
 	}
 
-	if err = validateFlags(*f.showVersion, *f.resume, f.fork.set, f.fork.value, flag.Args(), *f.configPath, *f.noConfig); err != nil {
+	if err = validateFlags(*f.showVersion, f.resume, f.fork, flag.Args(), *f.configPath, *f.noConfig); err != nil {
 		return err
 	}
 	if *f.showVersion {
