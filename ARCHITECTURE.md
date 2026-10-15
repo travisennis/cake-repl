@@ -4,7 +4,9 @@
 external [`cake`](https://github.com/travisennis/cake) CLI as an engine. Each
 submitted prompt spawns one `cake --output-format stream-json` subprocess and
 renders its NDJSON event stream live. When startup receives `-resume <uuid>`, a
-read-only replay stream hydrates the local timeline before the first prompt.
+read-only replay stream hydrates the local timeline before the first prompt; a
+bare `-resume` opens a picker of this directory's sessions instead, and hydrates
+nothing until one is chosen.
 
 ## System boundary: cake is an external process
 
@@ -24,7 +26,8 @@ It communicates only through:
 - `cake sessions list --json` for read-only session listing (versioned JSON
   envelope; see
   [`docs/adr/016`](docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)),
-- `--resume <uuid>` session selection, with initial `--fork [<uuid>]` support,
+- `--resume <uuid>` session selection, with initial `--fork [<uuid>]` support and
+  a bare `--resume` selecting the session interactively at startup,
 - `--no-session`, `--model` / `--profile` pass-through flags,
 - `--add-dir <dir>` read-only sandbox directories (repeatable),
 - `--toolbox <dir>` user-defined tool directories (repeatable),
@@ -74,7 +77,9 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
 - **Replay stays read-only.** Startup `-resume <uuid>` hydrates the timeline from
   cake's supported replay stream before accepting a new prompt. Replay runs in a
   separate hydration state, so it does not appear as a live task; failures warn
-  and preserve the explicit `--resume <uuid>` next-run pin. See
+  and preserve the explicit `--resume <uuid>` next-run pin. A bare `-resume`
+  never reaches this path: it opens the session picker, which runs only the
+  read-only session listing, so no replay runs before the first prompt. See
   [`docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md`](docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md).
 - **Session listing is read-only.** `cake sessions list --json` is invoked only
   from `internal/cake`, with the same working directory as a live prompt, to list
@@ -87,6 +92,10 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   [`docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md`](docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)
   and
   [`docs/adr/019-cancel-and-bound-the-read-only-session-listing.md`](docs/adr/019-cancel-and-bound-the-read-only-session-listing.md).
+  The browser opens from `/sessions` and from the startup picker a bare
+  `-resume` requests, which lists through this same operation and pins the
+  chosen session through the `/resume <uuid>` transition. See
+  [`docs/adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md`](docs/adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
 - **Pure rendering.** `internal/ui` is side-effect-free and takes data in,
   strings out. The timeline is rendered through a per-item cache; width changes
   and `/clear` trigger a full re-render, while global tool-output mode changes

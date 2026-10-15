@@ -7,7 +7,7 @@ commands or help text (`internal/app/commands.go`), key bindings
 
 ## Compatibility surfaces
 
-- **CLI flags.** `-cake-bin`, `-fork [<uuid>]`, `-resume <uuid>`,
+- **CLI flags.** `-cake-bin`, `-fork [<uuid>]`, `-resume [<uuid>]`,
   `-no-session`, `-model`, `-profile`, `-tools <names>`, `-no-tools`,
   `-add-dir <dir>` (repeatable), `-toolbox <dir>` (repeatable),
   `-sandbox <policy>`, `-no-skills`, `-skills <names>`,
@@ -18,7 +18,11 @@ commands or help text (`internal/app/commands.go`), key bindings
   `-config`/`-no-config`, uuid shape, positional args rejected) are
   user-facing. The cake pass-through flags must stay aligned with the cake
   contract. `-fork` applies to the initial fresh prompt; later prompts use
-  the pinned session when one is reported. `-sandbox` defaults to
+  the pinned session when one is reported. A bare `-resume` names no session:
+  it opens the startup session picker (see below) instead of hydrating or
+  pinning, so the two optional-value flags share one parse path. See
+  [ADR 021](../adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
+  `-sandbox` defaults to
   `workspace-write-interactive`, not cake's own `workspace-write`, because a
   REPL is interactive; an explicit empty value omits `--sandbox` so cake
   resolves its own policy. See
@@ -48,6 +52,12 @@ commands or help text (`internal/app/commands.go`), key bindings
 timeline: a navigable list of this directory's past sessions from the read-only
 `cake sessions list --json` command (see
 [`cake-integration-and-stream-json.md`](cake-integration-and-stream-json.md)).
+A bare `-resume` opens the same browser at startup, before the first prompt and
+with no hydration: the picker is the startup form of the browser, sharing its
+listing, keys, and selection transition. It is idle by construction (a startup
+prompt submitted while it is open is consumed by the browser keys, never run),
+and the startup listing is model-owned and cancellable exactly like the one
+`/sessions` starts (ADR 019).
 Each row shows a shortened session id, a relative age, and the sanitized first
 prompt; `Enter` pins the next prompt to the selected session through the same
 path as `/resume <uuid>`, and `Esc` or `q` closes the list without action. The
@@ -59,11 +69,13 @@ in plain text like every other surface.
 - **Startup resume.** `-resume <uuid>` first invokes the read-only
   `cake --output-format stream-json replay <uuid>` command. It hydrates the
   visible timeline before the first prompt; failures show a warning and keep
-  the explicit resume pin usable. The command `main` prints on exit reuses the
-  effective startup run controls (`-cwd`, `-config <path>` or `-no-config`,
-  plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`, `-toolbox`,
-  `-tools`, `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`, and
-  `-cake-bin` when it was set explicitly or is non-default) after `-resume
+  the explicit resume pin usable. A bare `-resume` hydrates nothing: it opens
+  the startup session picker, pins nothing until a row is picked, and leaves the
+  REPL fresh when the picker is closed. The command `main` prints on exit
+  reuses the effective startup run controls (`-cwd`, `-config <path>` or
+  `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
+  `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`,
+  and `-cake-bin` when it was set explicitly or is non-default) after `-resume
   <id>`, so a pasted resume does not silently drop the sandbox policy or model
   the original run was started with. An explicit override that clears or
   defaults a value (`-sandbox ""`, `-model ""`, `-profile ""`, or `-cake-bin

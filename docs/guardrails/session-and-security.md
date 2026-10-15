@@ -48,11 +48,20 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   Hydration is not a live task, so the running state remains idle. A replay
   failure or unsupported cake binary produces a warning and leaves the explicit
   `--resume <uuid>` pin unchanged so the user can continue.
+- **Startup session picker.** A bare `-resume` names no session, so it hydrates
+  nothing: no replay is started and no pin is set. It opens the same idle
+  browser `/sessions` opens, and the pick takes the `/resume <uuid>` transition,
+  so a pin appears only after the user selects a row. Closing the picker leaves
+  the REPL at `RunFresh`. The startup listing is the same model-owned,
+  cancellable, `WaitDelay`-bounded operation as a `/sessions` listing (ADR 019),
+  and a failed listing is a non-fatal warning that leaves the prompt usable. See
+  [ADR 021](../adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
   resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
   drains an active run without letting its late events or cancellation restore
-  the old session pin; `/resume` sets the next mode explicitly. An initial
+  the old session pin; `/resume` sets the next mode explicitly. A bare `-resume`
+  starts at `RunFresh` and only the picked row moves it to `RunResume`. An initial
   `--fork` is consumed by its first fresh prompt, then the resulting session
   is pinned with `--resume`. **Retargeting drops the identity of the session
   left behind.** `/resume <uuid>` and the `/sessions` browser's `Enter` are one
@@ -110,7 +119,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   hydration is active. Cancel = SIGTERM then SIGKILL after `WaitDelay` (kill
   outright on Windows). stderr retained as a bounded tail for error display. The
   read-only session listing is model-owned too: it is canceled when the browser
-  closes, when it is replaced, and on quit, and `ListSessions` bounds its teardown
+  closes, when it is replaced, on quit, and by `main`'s teardown for an exit the
+  Update loop never observed, and `ListSessions` bounds its teardown
   with `WaitDelay` (a hard kill — the listing has no state to flush) so a stuck
   helper, or a descendant holding the inherited stdout pipe, cannot hang the REPL.
   See [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md).

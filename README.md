@@ -6,8 +6,10 @@ A standalone terminal REPL for the [`cake`](https://github.com/travisennis/cake)
 `cake --output-format stream-json` process and renders its event stream live —
 assistant messages in REPL-themed markdown, thinking indicators, tool calls
 grouped with their outputs, hook denials, and completion stats. When `-resume`
-is supplied, cake-repl first replays that session through
-`cake --output-format stream-json replay <uuid>` to hydrate the visible timeline.
+is given a UUID, cake-repl first replays that session through
+`cake --output-format stream-json replay <uuid>` to hydrate the visible timeline;
+given on its own, `-resume` opens a picker of this directory's past sessions
+instead.
 Labeled user and assistant sections anchor the conversation. Assistant response
 bodies have no decorative prefix, so multiline terminal selections can be copied
 cleanly; operational events remain compact and visually distinct.
@@ -28,7 +30,7 @@ documented session, model, profile, tools, and add-dir flags.
 
 - Go 1.26.6 or newer to build.
 - `cake` installed and on `PATH`, or point at a binary with `-cake-bin`.
-  Startup `-resume` history hydration requires cake 0.1.0 or a newer build
+  Startup `-resume <uuid>` history hydration requires cake 0.1.0 or a newer build
   that supports `cake --output-format stream-json replay <uuid>`.
 
 ## Build
@@ -58,7 +60,8 @@ Make sure that directory is on your `PATH`.
 cake-repl                                     # fresh session on first prompt
 cake-repl -fork                               # fork the latest session on the first prompt
 cake-repl -fork <uuid>                        # fork a specific session on the first prompt
-cake-repl -resume <uuid>                     # replay history, then resume a specific session
+cake-repl -resume                             # pick a past session to resume at startup
+cake-repl -resume <uuid>                      # replay history, then resume a specific session
 cake-repl -cake-bin ../cake/target/debug/cake
 ```
 
@@ -95,7 +98,7 @@ Flags:
 |---|---|
 | `-cake-bin <path>` | cake executable to run (default `cake`) |
 | `-fork [<uuid>]` | fork the latest session, or a specific session UUID, on the first prompt |
-| `-resume <uuid>` | replay visible history when supported, then resume a specific cake session on the first prompt |
+| `-resume [<uuid>]` | with a UUID: replay visible history when supported, then resume that cake session on the first prompt; without one: pick this directory's past sessions at startup |
 | `-no-session` | do not save the cake session to disk |
 | `-model <name>` | passed through to cake |
 | `-profile <name>` | passed through to cake |
@@ -220,6 +223,12 @@ down. The status line and timeline only show it shortened.
   are done with it, and a prompt typed after closing is submitted normally. A
   missing or older cake binary, or malformed output, shows a non-fatal warning.
   Like `/new` and `/resume`, it requires an idle REPL.
+- A bare `-resume` opens that same picker at startup, before the first prompt and
+  with no hydration: nothing is replayed and no session is pinned until you pick
+  a row. `Enter` pins the next prompt to the highlighted session exactly like
+  `/resume <uuid>`, and `Esc` or `q` leaves the REPL idle and fresh so the next
+  prompt starts a new session. `-resume <uuid>` keeps the replay-and-pin startup
+  path above, and `-fork` stays mutually exclusive with `-resume` in both forms.
 - `/new` and `/resume` are rejected while a task is running.
   Finish or cancel the task first (Ctrl+C), or use `Ctrl+N` to cancel and start
   a new session in one action.
@@ -329,10 +338,12 @@ validation is available with `just release-check`.
 
 ## Known limitations
 
-- Startup `-resume` history hydration requires a cake binary that supports
-  `replay`; if replay is unavailable, cake-repl shows a warning and still lets
-  you continue the session. `/sessions` likewise needs a cake binary that
-  supports `sessions list --json`.
+- Startup `-resume <uuid>` history hydration requires a cake binary that
+  supports `replay`; if replay is unavailable, cake-repl shows a warning and
+  still lets you continue the session. The session picker — `/sessions`, and a
+  bare `-resume` at startup — needs a cake binary that supports
+  `sessions list --json`; without it the picker shows a non-fatal warning and
+  the prompt stays available.
 - Tool output is truncated at 2,000 bytes by default, cut on rune boundaries
   (configurable via `-output-limit` or config file). Independently of that
   display limit, the REPL bounds what one tool *result* pins: it retains at

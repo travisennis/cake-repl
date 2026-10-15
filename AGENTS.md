@@ -5,8 +5,9 @@
 `cake-repl` is a single-binary Go terminal REPL (Bubble Tea TUI) that drives the
 external [`cake`](https://github.com/travisennis/cake) CLI as an engine: each
 prompt spawns one `cake --output-format stream-json` process and renders its
-NDJSON event stream live. A startup `-resume` also uses cake's read-only
-`replay <uuid>` stream to hydrate the visible timeline.
+NDJSON event stream live. A startup `-resume <uuid>` also uses cake's read-only
+`replay <uuid>` stream to hydrate the visible timeline; a bare `-resume` opens a
+picker of this directory's sessions instead.
 
 Compatibility surfaces — preserve unless the task explicitly changes them:
 
