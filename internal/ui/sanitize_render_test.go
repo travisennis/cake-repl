@@ -18,26 +18,13 @@ const injectionPayload = "hello\x1b[2Jworld\x1b]52;c;aGF4\x07 \r\n"
 const hyperlinkPayload = "\x1b]8;;https://evil.example\x07trusted link\x1b]8;;\x07"
 
 // assertNoInjection fails when a rendered string still carries any sequence
-// the terminal would act on beyond the theme's own styling.
+// the terminal would act on beyond the theme's own styling and the explicitly
+// generated OSC 8 links (ADR 022). Generated links are validated by
+// assertNoTerminalControls: their destination is http(s) and their visible
+// text must be a substring of it.
 func assertNoInjection(t *testing.T, got string) {
 	t.Helper()
-	for _, bad := range []struct {
-		name string
-		seq  string
-	}{
-		{"erase display (CSI 2J)", "\x1b[2J"},
-		{"clipboard write (OSC 52)", "\x1b]52"},
-		{"hyperlink (OSC 8)", "\x1b]8;"},
-		{"carriage return", "\r"},
-		{"backspace", "\b"},
-		{"bel", "\x07"},
-		{"nul", "\x00"},
-		{"del", "\x7f"},
-	} {
-		if strings.Contains(got, bad.seq) {
-			t.Errorf("%s survived rendering: %q", bad.name, got)
-		}
-	}
+	assertNoTerminalControls(t, got)
 }
 
 // sgrSequence matches a reviewed SGR (CSI ... m) sequence: the one escape
@@ -49,8 +36,8 @@ var sgrSequence = regexp.MustCompile("^\x1b\\[[0-9;]*m")
 // of how it was produced: it must be valid UTF-8, it may carry no control rune
 // the terminal would act on (any C0 or C1 control or DEL; newline is the only
 // permitted one), and every escape byte in it must begin a reviewed SGR
-// sequence. The Ascii profile is stricter still — callers assert it carries no
-// escape byte at all.
+// sequence or a validated generated OSC 8 hyperlink (ADR 022). The Ascii
+// profile is stricter still — callers assert it carries no escape byte at all.
 func assertNoTerminalControls(t *testing.T, got string) {
 	t.Helper()
 	if !utf8.ValidString(got) {
@@ -71,6 +58,10 @@ func assertNoTerminalControls(t *testing.T, got string) {
 		}
 		if m := sgrSequence.FindString(got[i:]); m != "" {
 			i += len(m)
+			continue
+		}
+		if end, ok := generatedHyperlinkAt(got, i); ok {
+			i = end
 			continue
 		}
 		t.Errorf("escape sequence outside the reviewed SGR family survived at offset %d: %q", i, got)

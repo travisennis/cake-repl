@@ -107,9 +107,15 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   HTML character references while rendering (`&#7;`, `&#27;[2J`), so the
   decoded output is scrubbed again before it leaves the boundary — Ascii keeps
   no sequences, and a color profile keeps only the reviewed, rendition-only SGR
-  that carries the theme's styling. Sanitization works on a copy; `internal/app`
-  and the debug log keep the raw bytes. See
-  [`docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md`](docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
+  that carries the theme's styling. After that scrub, `ui.RenderMarkdown` adds
+  generated OSC 8 hyperlinks around visible `http(s)` URLs, one per wrapped
+  line segment, so a link glamour hard-wraps remains openable; the link text is
+  always the URL's own rendered characters and stream content still cannot
+  supply an escape. Sanitization works on a copy; `internal/app` and the debug
+  log keep the raw bytes. See
+  [`docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md`](docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
+  and
+  [`docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md`](docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
 - **Session state is a pure state machine.** `sessionState` (in `session.go`)
   decides the next run mode with no I/O, which is what makes the
   hijack-prevention behavior testable. Once a run announces a session id it

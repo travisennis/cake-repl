@@ -101,9 +101,13 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   character. There is no implicit opt-out: the only exception is the explicit
   `-tool-color` flag, which lets `ui.SanitizeToolOutput` keep reviewed SGR
   (graphics-only) sequences in tool output blocks and nothing else, and is
-  forced off under the Ascii profile. See
-  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
-  and [ADR 009](../adr/009-opt-in-sgr-passthrough-for-tool-output.md).
+  forced off under the Ascii profile. Separately, `ui.RenderMarkdown` generates
+  its own OSC 8 hyperlinks for visible `http(s)` URLs in assistant messages,
+  after the scrub and only in the narrow form ADR 022 defines; stream content
+  still cannot supply one. See
+  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md),
+  [ADR 009](../adr/009-opt-in-sgr-passthrough-for-tool-output.md), and
+  [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
 - **Assistant markdown is decoded after sanitization (security boundary).**
   Glamour unescapes HTML character references while rendering, so numeric
   references such as `&#7;`, `&#13;`, or `&#27;[2J` introduce C0 controls and
@@ -113,8 +117,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   profile keeps only the reviewed, rendition-only SGR that carries the theme's
   styling, through the same policy as `-tool-color`. Never rewrite the markdown
   source to close this hole — glamour does not decode inside fenced code blocks
-  or link destinations, so a source pass would corrupt code samples. See
-  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md).
+  or link destinations, so a source pass would corrupt code samples. Generated
+  OSC 8 links are added after this scrub, so they cannot be confused with a
+  decoded stream sequence. See
+  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
+  and
+  [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
 - **Process lifecycle.** One cake process at a time, including while replay
   hydration is active. Cancel = SIGTERM then SIGKILL after `WaitDelay` (kill
   outright on Windows). stderr retained as a bounded tail for error display. The

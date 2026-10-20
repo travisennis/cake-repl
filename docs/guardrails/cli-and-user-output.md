@@ -117,7 +117,13 @@ in plain text like every other surface.
   `-no-color` /
   `DefaultTheme` must keep producing usable ASCII output. Markdown renders via
   glamour with compact REPL-themed headings, quotes, links, code, and emphasis;
-  the ASCII profile uses text markers and strips all ANSI. Tool-block headers
+  the ASCII profile uses text markers and strips all ANSI. Under a color profile,
+  each visible `http(s)` URL in assistant markdown is wrapped in a generated
+  OSC 8 hyperlink naming that same URL, so a URL glamour hard-wraps across lines
+  is openable from every visible fragment and the terminal's link preview shows
+  the full destination. The Ascii profile emits no hyperlinks. See
+  [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
+  Tool-block headers
   (tool name plus argument summary) wrap to the terminal width instead of
   truncating, with continuation lines indented under the argument column; long
   single tokens (e.g. paths and bash commands) hard-wrap so the full content
@@ -131,7 +137,9 @@ in plain text like every other surface.
   glamour renders it, because decoding unescapes HTML character references
   (`&#7;`, `&#27;[2J`) into exactly those controls; the rendered markdown keeps
   only the reviewed SGR that carries the theme's styling, and `-no-color`
-  strips it all. This is the default and cannot be turned off
+  strips it all. Generated OSC 8 hyperlinks are added only after that scrub, in
+  the narrow form ADR 022 defines: http(s) destinations, and link text made of
+  the URL's own visible characters. This is the default and cannot be turned off
   implicitly. The one exception is the opt-in `-tool-color` (config
   `tool-color`, default false): tool *output* blocks then keep SGR (`CSI ... m`)
   sequences whose parameters are in a reviewed set, with embedded resets

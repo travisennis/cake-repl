@@ -95,6 +95,12 @@ available for re-rendering on resize.
 
 ## More Information
 
+- Partially superseded by
+  [ADR 022](022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md):
+  `ui.RenderMarkdown` now generates its own OSC 8 hyperlinks around visible
+  `http(s)` URLs in assistant markdown, after this ADR's scrub. Stream content
+  still cannot supply an escape sequence, and the generated link's destination
+  is the URL text it covers.
 - [`docs/guardrails/session-and-security.md`](../guardrails/session-and-security.md)
   — what may be written to disk and to the terminal.
 - [`docs/guardrails/cli-and-user-output.md`](../guardrails/cli-and-user-output.md)

@@ -319,11 +319,13 @@ func TestRenderMarkdown_ScrubsDecodedControls(t *testing.T) {
 	}
 }
 
-// TestRenderMarkdown_PreservesCleanStyledOutput pins that the decode scrub is
-// invisible for clean markdown: the rendered output is exactly what the glamour
+// TestRenderMarkdown_PreservesCleanStyledOutput pins that the decode scrub and
+// generated hyperlinks are invisible for clean markdown: once the generated
+// OSC 8 wrappers are removed, the rendered output is exactly what the glamour
 // renderer produced, so no theme styling is lost. Glamour emits only reviewed,
 // rendition-only SGR for this theme, which is what makes keeping it compatible
-// with the decode scrub (ADR 009).
+// with the decode scrub (ADR 009). The link stage only adds sequences, which
+// is why removing those sequences restores the raw render (ADR 022).
 func TestRenderMarkdown_PreservesCleanStyledOutput(t *testing.T) {
 	orig := lipgloss.ColorProfile()
 	defer lipgloss.SetColorProfile(orig)
@@ -349,8 +351,8 @@ func TestRenderMarkdown_PreservesCleanStyledOutput(t *testing.T) {
 		t.Fatal("expected the theme to emit SGR under TrueColor")
 	}
 
-	if got := RenderMarkdown(input, width); got != raw {
-		t.Errorf("decode scrub changed clean styled output:\ngot  %q\nwant %q", got, raw)
+	if got := stripGeneratedHyperlinks(RenderMarkdown(input, width)); got != raw {
+		t.Errorf("decode scrub or hyperlink stage changed clean styled output:\ngot  %q\nwant %q", got, raw)
 	}
 }
 

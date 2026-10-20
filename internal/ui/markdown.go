@@ -31,6 +31,13 @@ var (
 // all, and a color profile keeps only the reviewed, rendition-only SGR that
 // carries the theme's styling (ADR 005, ADR 009).
 //
+// Under a color profile, visible http(s) URLs are then wrapped in generated
+// OSC 8 hyperlinks (ADR 022). Glamour hard-wraps long URLs, and a terminal can
+// only open the fragment on one line; the generated link names the full URL on
+// every wrapped segment. The sequences are added after the scrub, from text
+// already visible in the rendered output, so untrusted bytes still cannot
+// determine a link. The Ascii profile stays byte-plain and emits none.
+//
 // A private memoization cache avoids constructing a new glamour renderer on
 // every call: the renderer is rebuilt only when width or color profile change.
 //
@@ -80,7 +87,7 @@ func RenderMarkdown(text string, width int) string {
 		return lipgloss.NewStyle().Width(width).Render(out)
 	}
 
-	return scrubKeepingSGR(out, "")
+	return addHyperlinks(scrubKeepingSGR(out, ""), text)
 }
 
 // getRendererLocked returns a cached or newly built glamour renderer for the given

@@ -86,6 +86,8 @@ Consult:
   flag, slash-command, key-binding, and rendering expectations.
 - [ADR 003](docs/adr/003-tool-output-expansion-key-binding.md), for the
   tool-output expansion binding.
+- [ADR 022](docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md),
+  for the generated hyperlinks that keep wrapped assistant URLs clickable.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md), for the commands that verify the change.
 
 Keep `-no-color` usable.

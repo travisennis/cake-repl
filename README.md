@@ -382,7 +382,15 @@ validation is available with `just release-check`.
   other than tool output, stays stripped. `-no-color` still forces plain output.
   Only tools that force color emit SGR here, because cake runs them with piped
   stdout: `git diff --color` and `rg --color=always` do, a bare `rg` or `eza`
-  does not. The raw bytes are still recorded when `-debug-log` is set.
+  does not. Assistant markdown is the one place the REPL writes a non-SGR
+  escape of its own: under a color profile, each visible `http(s)` URL is
+  wrapped in a generated OSC 8 hyperlink naming that same URL, so a link
+  glamour wraps across lines can still be opened from any fragment, and the
+  terminal's link preview shows the full destination. The sequence is generated
+  after sanitization from the URL text itself, never passed through from the
+  stream, and `-no-color` emits none. See
+  [ADR 022](docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
+  The raw bytes are still recorded when `-debug-log` is set.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
