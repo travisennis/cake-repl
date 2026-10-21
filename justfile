@@ -8,7 +8,7 @@
 set positional-arguments
 
 deadcode_version := "v0.50.0"
-golangci_lint_version := "v2.13.1"
+golangci_lint_version := "v2.15.0"
 goreleaser_version := "v2.17.1"
 govulncheck_version := "v1.7.0"
 
