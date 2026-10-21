@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -178,6 +179,87 @@ func TestRenderMarkdown_WrappedURLInBlockquoteIsLinked(t *testing.T) {
 	}
 	if joined.String() != url {
 		t.Errorf("linked fragments join to %q, want %q", joined.String(), url)
+	}
+}
+
+// TestRenderMarkdown_WrappedBlockquoteURLNeverLinksATruncatedTarget covers the
+// layout glamour produces when it wraps a blockquoted URL at a dot in the
+// hostname: the continuation lands on an unprefixed line after a blank "│"
+// decoration line. Every generated link must name the full URL; a prefix such
+// as "https://www.example" is a wrong destination (ADR 022).
+func TestRenderMarkdown_WrappedBlockquoteURLNeverLinksATruncatedTarget(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	const url = "https://www.example.com/a/very/long/path/that/keeps/going/and/going/until/it/wraps"
+	for _, width := range []int{30, 40, 50, 60, 70, 80} {
+		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
+			got := RenderMarkdown("> "+url, width)
+			links := renderedLinks(t, got)
+			if len(links) == 0 {
+				t.Fatalf("blockquoted URL produced no links:\n%q", got)
+			}
+			var joined strings.Builder
+			for _, link := range links {
+				if link.target != url {
+					t.Errorf("link target = %q, want the full URL", link.target)
+				}
+				joined.WriteString(link.text)
+			}
+			if joined.String() != url {
+				t.Errorf("linked fragments join to %q, want %q", joined.String(), url)
+			}
+		})
+	}
+}
+
+// TestRenderMarkdown_DoesNotJoinAcrossParagraphToALaterURL pins the guard on
+// the decoration-line skip: when the visible URL is already complete in the
+// source, a later URL that extends its text is a different URL, and neither it
+// nor the prose between them may become a link fragment of the first.
+func TestRenderMarkdown_DoesNotJoinAcrossParagraphToALaterURL(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	for _, tt := range []struct {
+		name string
+		text string
+	}{
+		{
+			name: "blockquote",
+			text: "> https://example.com/a\n>\n> bcd is the next paragraph.\n\nSee also https://example.com/abcd",
+		},
+		{
+			name: "paragraph",
+			text: "https://example.com/a\n\nbcd is the next paragraph.\n\nSee also https://example.com/abcd",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderMarkdown(tt.text, 60)
+			links := renderedLinks(t, got)
+			if len(links) != 2 {
+				t.Fatalf("got %d links, want 2:\n%q", len(links), got)
+			}
+			for _, link := range links {
+				if link.target != link.text {
+					t.Errorf("link text %q targets %q, want only its own URL", link.text, link.target)
+				}
+			}
+		})
+	}
+}
+
+// TestAddHyperlinks_DoesNotLinkAPrefixOfALongerSourceURL pins the source guard
+// that backs up the blockquote continuation join: when the rendered text shows
+// only a prefix such as "https://example." and the source continues ".com/...",
+// no link may be generated for the prefix.
+func TestAddHyperlinks_DoesNotLinkAPrefixOfALongerSourceURL(t *testing.T) {
+	const source = "> > https://example.com/a/b"
+	const rendered = "https://example."
+	if links := renderedLinks(t, addHyperlinks(rendered, source)); len(links) != 0 {
+		t.Fatalf("truncated prefix was linked: %+v", links)
 	}
 }
 

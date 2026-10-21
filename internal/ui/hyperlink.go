@@ -131,6 +131,30 @@ func linkSpans(plain string, start int, source string) ([]hyperlinkSpan, int) {
 			next++
 		}
 		chunkStart, chunkEnd, long := continuationRun(plain, next, joined, source)
+		// A blockquote can put decoration-only lines between a wrapped URL's
+		// segments. They carry no URL text, so look past them; continuationRun
+		// still decides from the source whether the next run continues the URL.
+		for chunkEnd == 0 && !long && next < len(plain) && !lineHasURLRun(plain, next) {
+			// Look past decoration only while the visible prefix is itself cut
+			// short in the source. Otherwise the prefix is already a complete
+			// URL, and a later line that happens to extend it (a different URL
+			// elsewhere in the message) is not its continuation.
+			if completeURLInSource(source, joined) {
+				break
+			}
+			lineEnd := strings.IndexByte(plain[next:], '\n')
+			if lineEnd < 0 {
+				break
+			}
+			next += lineEnd + 1
+			for next < len(plain) && (plain[next] == ' ' || plain[next] == '\t') {
+				next++
+			}
+			if next >= len(plain) {
+				break
+			}
+			chunkStart, chunkEnd, long = continuationRun(plain, next, joined, source)
+		}
 		if chunkEnd == 0 {
 			tooLong = long
 			break
@@ -200,6 +224,21 @@ func continuationRun(plain string, lineStart int, joined, source string) (start,
 	return 0, 0, false
 }
 
+// lineHasURLRun reports whether the line starting at start contains a run of
+// URL characters. A decoration-only line (a blockquote's "│" or padding) does
+// not, so linkSpans can look past one for a wrapped continuation.
+func lineHasURLRun(plain string, start int) bool {
+	for p := start; p < len(plain) && plain[p] != '\n'; p++ {
+		if p > start && urlByte(plain[p-1]) {
+			continue
+		}
+		if scanURLRun(plain, p) > p {
+			return true
+		}
+	}
+	return false
+}
+
 // asciiLower lowercases ASCII letters without changing the byte length, so
 // offsets into the result remain offsets into the original string. Unicode
 // case folding can change length and would break that mapping.
@@ -238,10 +277,13 @@ func completeURLInSource(source, url string) bool {
 }
 
 // urlContinuesInSource reports whether the text after url in the markdown
-// source means the match is only a prefix of a longer URL. It deliberately
-// treats sentence punctuation (.,;!?) as a terminator: trimURLTail already
-// removed it from the visible URL, so seeing it in the source is not evidence
-// that the visible URL was cut short.
+// source means the match is only a prefix of a longer URL. Sentence
+// punctuation (.,;!?'") terminates the URL only when the source does not resume
+// a URL after it: trimURLTail already removed a trailing sentence mark from the
+// visible URL, but the mark can also be an interior dot in a hostname
+// ("https://example.com") whose visible prefix a blockquote decoration splits
+// away from the rest. Looking past the marks keeps such a prefix unlinked
+// instead of generating a truncated target.
 //
 // A non-ASCII rune is ambiguous: it is either prose punctuation that follows
 // the URL without a space (CJK full stops, an em dash), or a prose word or an
@@ -249,18 +291,24 @@ func completeURLInSource(source, url string) bool {
 // Unicode punctuation and space end the URL; anything else keeps the match
 // incomplete, so a truncated target is never generated.
 func urlContinuesInSource(rest string) bool {
-	if rest == "" {
-		return false
+	for len(rest) > 0 {
+		r, size := utf8.DecodeRuneInString(rest)
+		if r >= utf8.RuneSelf {
+			return !unicode.IsPunct(r) && !unicode.IsSpace(r)
+		}
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return true
+		}
+		if strings.ContainsRune("-_:~/?@$&*+=%[]", r) {
+			return true
+		}
+		if !strings.ContainsRune(".,;!?'\"", r) {
+			return false
+		}
+		rest = rest[size:]
 	}
-	r, _ := utf8.DecodeRuneInString(rest)
-	if r >= utf8.RuneSelf {
-		return !unicode.IsPunct(r) && !unicode.IsSpace(r)
-	}
-	switch {
-	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		return true
-	}
-	return strings.ContainsRune("-_:~/?@$&*+=%[]", r)
+	return false
 }
 
 // hasHTTPScheme reports whether s begins a linkable absolute URL.
