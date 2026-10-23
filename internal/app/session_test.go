@@ -272,3 +272,109 @@ func TestOnModelClearsOnNewSessionAndResumeSwitch(t *testing.T) {
 		t.Errorf("resume switch left stale model = %q", s.Model)
 	}
 }
+
+func completeTurn(input int, window int) cake.TurnUsage {
+	return cake.TurnUsage{
+		Turn:          1,
+		Usage:         cake.Usage{InputTokens: input},
+		UsagePresence: usagePresenceComplete,
+		ContextWindow: window,
+	}
+}
+
+// The newest complete record wins; earlier measurements are replaced even when
+// the later one is smaller (a compaction or a shorter prompt).
+func TestOnTurnUsageKeepsLatestCompleteMeasurement(t *testing.T) {
+	var s sessionState
+	s.OnTurnUsage(completeTurn(132_000, 1_000_000))
+	if s.Context == nil || s.Context.Tokens != 132_000 || s.Context.Window != 1_000_000 {
+		t.Fatalf("first measurement = %+v", s.Context)
+	}
+
+	s.OnTurnUsage(completeTurn(140_000, 1_000_000))
+	if s.Context == nil || s.Context.Tokens != 140_000 {
+		t.Errorf("latest measurement = %+v, want 140000", s.Context)
+	}
+}
+
+// Partial usage is not a context measurement and must not replace the last
+// complete one, nor create a segment on its own.
+func TestOnTurnUsageIgnoresPartialRecords(t *testing.T) {
+	var s sessionState
+	partial := completeTurn(9_000, 1_000_000)
+	partial.UsagePresence = "partial"
+	s.OnTurnUsage(partial)
+	if s.Context != nil {
+		t.Fatalf("partial-only measurement = %+v, want none", s.Context)
+	}
+
+	s.OnTurnUsage(completeTurn(8_000, 1_000_000))
+	partial.Usage.InputTokens = 9_500
+	s.OnTurnUsage(partial)
+	if s.Context == nil || s.Context.Tokens != 8_000 {
+		t.Errorf("partial record replaced the complete one: %+v", s.Context)
+	}
+}
+
+// Older records omit usage_presence; an absent value is complete, not partial.
+func TestOnTurnUsageTreatsMissingPresenceAsComplete(t *testing.T) {
+	var s sessionState
+	s.OnTurnUsage(cake.TurnUsage{Usage: cake.Usage{InputTokens: 42_000}})
+	if s.Context == nil || s.Context.Tokens != 42_000 || s.Context.Window != 0 {
+		t.Errorf("legacy measurement = %+v", s.Context)
+	}
+}
+
+// A record without a positive input count is not a measurement: it cannot
+// describe the context, and showing 0 would be worse than omitting the segment.
+func TestOnTurnUsageIgnoresEmptyUsage(t *testing.T) {
+	var s sessionState
+	s.OnTurnUsage(cake.TurnUsage{UsagePresence: usagePresenceComplete, ContextWindow: 1_000_000})
+	if s.Context != nil {
+		t.Errorf("empty usage recorded as %+v", s.Context)
+	}
+}
+
+// The window belongs to the measurement that carried it. A later complete
+// record without a window means the model configures none, so the display
+// degrades to a bare token count instead of pairing new tokens with an old
+// model's window.
+func TestOnTurnUsageLatestRecordDropsAbsentWindow(t *testing.T) {
+	var s sessionState
+	s.OnTurnUsage(completeTurn(10_000, 1_000_000))
+	s.OnTurnUsage(completeTurn(11_000, 0))
+	if s.Context == nil || s.Context.Tokens != 11_000 || s.Context.Window != 0 {
+		t.Errorf("measurement = %+v, want 11000 with no window", s.Context)
+	}
+}
+
+func TestContextUsageClearsOnNewSessionAndResumeSwitch(t *testing.T) {
+	var s sessionState
+	s.OnTurnUsage(completeTurn(10_000, 1_000_000))
+	s.Reset()
+	if s.Context != nil {
+		t.Fatalf("reset left context = %+v", s.Context)
+	}
+
+	s.OnTurnUsage(completeTurn(10_000, 1_000_000))
+	s.UseResume("11111111-2222-3333-4444-555555555555")
+	if s.Context != nil {
+		t.Errorf("resume switch left stale context = %+v", s.Context)
+	}
+}
+
+// Re-selecting the current target keeps the session's own measurement, just
+// as it keeps the reported identity.
+func TestUseResumeSameTargetKeepsContextUsage(t *testing.T) {
+	id := "aaaaaaaa-1111-2222-3333-444444444444"
+	var s sessionState
+	s.UseResume(id)
+	s.OnTaskStart(cake.TaskStart{SessionID: id})
+	s.OnTurnUsage(completeTurn(10_000, 1_000_000))
+
+	s.UseResume(id)
+
+	if s.Context == nil || s.Context.Tokens != 10_000 {
+		t.Errorf("same-target resume dropped context: %+v", s.Context)
+	}
+}

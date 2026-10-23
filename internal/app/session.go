@@ -21,7 +21,24 @@ type sessionState struct {
 	// earlier session must never retarget the run. It is cleared whenever the
 	// session target changes, so it always belongs to the invocation being run.
 	AnnouncedID string
+	// Context is the latest complete context measurement cake reported for the
+	// current session. Nil means none is available yet, or the target changed,
+	// so the status line omits the segment rather than showing a stale figure.
+	Context *ContextUsage
 }
+
+// ContextUsage is one context measurement: Tokens is the prompt size the model
+// saw on the newest complete main-agent attempt, and Window is the model's
+// configured context window (a non-positive value means none).
+type ContextUsage struct {
+	Tokens int
+	Window int
+}
+
+// usagePresenceComplete is the only usage_presence value that marks a turn
+// usage record as a full measurement. An absent value is a legacy complete
+// record; any other value is a partial record, which is not a measurement.
+const usagePresenceComplete = "complete"
 
 // RunOptions returns the mode and resume id for the next cake invocation.
 func (s *sessionState) RunOptions() (cake.RunMode, string) {
@@ -48,6 +65,23 @@ func (s *sessionState) OnTaskStart(e cake.TaskStart) {
 	s.SessionID = e.SessionID
 	s.TaskID = e.TaskID
 	s.AnnouncedID = e.SessionID
+}
+
+// OnTurnUsage records the newest complete context measurement from a
+// main-agent turn_usage record. Partial records are ignored because their
+// token counts do not describe the whole context, and a record without a
+// positive input count is not a measurement at all. The newest complete record
+// wins, including its window: a later record that carries no context_window
+// clears the window rather than pairing a new measurement with a window from
+// another model.
+func (s *sessionState) OnTurnUsage(e cake.TurnUsage) {
+	if e.UsagePresence != "" && e.UsagePresence != usagePresenceComplete {
+		return
+	}
+	if e.Usage.InputTokens <= 0 {
+		return
+	}
+	s.Context = &ContextUsage{Tokens: e.Usage.InputTokens, Window: e.ContextWindow}
 }
 
 // OnTaskComplete records the outcome. Once a session id is known, future
@@ -113,6 +147,9 @@ func (s *sessionState) UseResume(id string) {
 		// The displayed model belongs to the previous session; drop it so the
 		// status line does not show a stale identity for the newly targeted one.
 		s.Model = ""
+		// The context measurement belongs to the previous session too, so the
+		// status line shows nothing until the new target measures its own.
+		s.Context = nil
 	}
 	s.NextMode = cake.RunResume
 	s.ResumeID = id

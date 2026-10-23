@@ -879,6 +879,40 @@ func TestStatusLineAfterRetargetDropsPreviousSession(t *testing.T) {
 	}
 }
 
+// A live turn_usage record updates the status line's context segment, and a
+// partial record does not replace a complete one.
+func TestLiveTurnUsageUpdatesStatusContext(t *testing.T) {
+	m := laidOut(160, 24)
+	m.running = true
+	m.run = &cake.Run{} // re-issued waitForRun is never executed here.
+
+	tm, _ := m.Update(eventsMsg{evs: []cake.Event{
+		cake.TurnUsage{
+			Turn:          1,
+			Usage:         cake.Usage{InputTokens: 14_383},
+			UsagePresence: "complete",
+			ContextWindow: 1_000_000,
+		},
+	}})
+	m = tm.(Model)
+	if line := m.statusLine(); !strings.Contains(line, "context: 14k/1M") {
+		t.Fatalf("status line missing live context: %q", line)
+	}
+
+	tm, _ = m.Update(eventsMsg{evs: []cake.Event{
+		cake.TurnUsage{
+			Turn:          2,
+			Usage:         cake.Usage{InputTokens: 99_999},
+			UsagePresence: "partial",
+			ContextWindow: 1_000_000,
+		},
+	}})
+	m = tm.(Model)
+	if line := m.statusLine(); !strings.Contains(line, "context: 14k/1M") {
+		t.Errorf("partial record replaced the live measurement: %q", line)
+	}
+}
+
 func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Model = "gpt-x"

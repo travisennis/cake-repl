@@ -934,6 +934,12 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 			m.logDebug("hook " + line)
 		}
 
+	case cake.TurnUsage:
+		// A live task and a replay both report the session's context here. The
+		// status line reads the newest complete measurement; the record has no
+		// timeline representation of its own.
+		m.session.OnTurnUsage(e)
+
 	case cake.TaskComplete:
 		m.session.OnTaskComplete(e)
 		m.session.OnModel(e.ModelConfig, e.Model)

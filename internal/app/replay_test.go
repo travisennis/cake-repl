@@ -159,6 +159,51 @@ fi
 	}
 }
 
+// Replay hydration carries the session's context measurement into the status
+// line. The newest complete turn_usage record wins, and a partial record after
+// it is ignored.
+func TestResumeHydrationUsesLatestCompleteContextUsage(t *testing.T) {
+	bin := writeFakeCake(t, `
+if [ "$3" = "replay" ]; then
+cat <<'EOF'
+{"type":"session_meta","session_id":"11111111-2222-3333-4444-555555555555"}
+{"type":"turn_usage","session_id":"11111111-2222-3333-4444-555555555555","turn":1,"usage":{"input_tokens":9000,"output_tokens":10,"total_tokens":9010},"usage_presence":"complete","context_window":1000000,"remaining_context_tokens":991000}
+{"type":"turn_usage","session_id":"11111111-2222-3333-4444-555555555555","turn":2,"usage":{"input_tokens":14383,"output_tokens":195,"total_tokens":14578},"usage_presence":"complete","context_window":1000000,"remaining_context_tokens":985617}
+{"type":"turn_usage","session_id":"11111111-2222-3333-4444-555555555555","turn":3,"usage":{"input_tokens":50000,"output_tokens":1,"total_tokens":50001},"usage_presence":"partial","context_window":1000000}
+{"type":"task_complete","subtype":"success","is_error":false,"session_id":"11111111-2222-3333-4444-555555555555"}
+EOF
+fi
+`)
+
+	m := New(Config{
+		CakeBin:     bin,
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 160, 24
+	m.layout()
+	m = hydrateTestModel(t, m)
+
+	if m.session.Context == nil || m.session.Context.Tokens != 14_383 || m.session.Context.Window != 1_000_000 {
+		t.Fatalf("replayed context = %+v, want 14383/1000000", m.session.Context)
+	}
+	if line := m.statusLine(); !strings.Contains(line, "context: 14k/1M") {
+		t.Errorf("status line missing replayed context: %q", line)
+	}
+
+	// The measurement belongs to the replayed session; retargeting must not
+	// carry it into a different session's status line.
+	tm, _ := m.resumeSession("bbbbbbbb-1111-2222-3333-444444444444")
+	m = tm.(Model)
+	if m.session.Context != nil {
+		t.Errorf("retarget kept replayed context: %+v", m.session.Context)
+	}
+	if line := m.statusLine(); strings.Contains(line, "context:") {
+		t.Errorf("status line still shows a context segment after retarget: %q", line)
+	}
+}
+
 func TestResumeReplayFailureWarnsAndKeepsSessionUsable(t *testing.T) {
 	argsPath := filepath.Join(t.TempDir(), "args")
 	t.Setenv("ARGS_FILE", argsPath)

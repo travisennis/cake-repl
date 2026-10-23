@@ -137,3 +137,69 @@ func TestStatusLine_AsciiNoANSI(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactTokens(t *testing.T) {
+	tests := []struct {
+		in   int
+		want string
+	}{
+		{0, "0"},
+		{-5, "0"},
+		{999, "999"},
+		{1_000, "1k"},
+		{14_383, "14k"},
+		{132_000, "132k"},
+		{999_499, "999k"},
+		{999_999, "1M"},
+		{1_000_000, "1M"},
+		{1_048_576, "1M"},
+		{1_500_000, "1.5M"},
+	}
+	for _, tt := range tests {
+		if got := CompactTokens(tt.in); got != tt.want {
+			t.Errorf("CompactTokens(%d) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestContextValue(t *testing.T) {
+	tests := []struct {
+		name   string
+		used   int
+		window int
+		want   string
+	}{
+		{"known window", 132_000, 1_000_000, "132k/1M"},
+		{"unknown window", 132_000, 0, "132k"},
+		{"no measurement", 0, 0, ""},
+		{"no measurement with window", 0, 1_000_000, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ContextValue(tt.used, tt.window); got != tt.want {
+				t.Errorf("ContextValue(%d, %d) = %q, want %q", tt.used, tt.window, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusLine_ContextSegment(t *testing.T) {
+	th := DefaultTheme()
+	got := StatusLine(th, 100, Status{State: "idle", Session: "abc12345", Context: ContextValue(132_000, 1_000_000), Cwd: "project"})
+	if !strings.Contains(got, "context: 132k/1M") {
+		t.Errorf("status line missing context segment: %q", got)
+	}
+	if w := lipgloss.Width(got); w != 100 {
+		t.Errorf("width = %d, want 100: %q", w, got)
+	}
+	if h := lipgloss.Height(got); h != 1 {
+		t.Errorf("height = %d, want 1: %q", h, got)
+	}
+}
+
+func TestStatusLine_OmitsContextWhenUnmeasured(t *testing.T) {
+	got := StatusLine(DefaultTheme(), 100, Status{State: "idle", Session: "abc12345", Context: "", Cwd: "project"})
+	if strings.Contains(got, "context:") {
+		t.Errorf("unmeasured context rendered a segment: %q", got)
+	}
+}

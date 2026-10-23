@@ -82,11 +82,17 @@ func (m Model) statusLine() string {
 		next += " " + ui.ShortID(resumeID)
 	}
 
+	context := ""
+	if c := m.session.Context; c != nil {
+		context = ui.ContextValue(c.Tokens, c.Window)
+	}
+
 	return ui.StatusLine(m.theme, m.width, ui.Status{
 		State:   state,
 		Session: session,
 		Next:    next,
 		Model:   m.displayModel(),
+		Context: context,
 		Cwd:     filepath.Base(m.cfg.Cwd),
 	})
 }
