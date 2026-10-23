@@ -153,6 +153,39 @@ func TestParseStreamReplayPath(t *testing.T) {
 	}
 }
 
+func TestParseStreamTurnUsage(t *testing.T) {
+	events := parseFixture(t, "turn-usage")
+	wantTypes(t, events, "task_start", "message", "turn_usage", "turn_usage", "task_complete")
+
+	first, ok := events[2].(TurnUsage)
+	if !ok {
+		t.Fatalf("event 2 is %T, want TurnUsage", events[2])
+	}
+	if first.Turn != 1 || first.Usage.InputTokens != 14383 || first.ContextWindow != 1000000 {
+		t.Errorf("unexpected first turn_usage: %+v", first)
+	}
+	if first.Usage.InputTokensDetails.CachedTokens != 4096 || first.UsagePresence != "complete" {
+		t.Errorf("first turn_usage details = %+v", first)
+	}
+
+	last, ok := events[3].(TurnUsage)
+	if !ok {
+		t.Fatalf("event 3 is %T, want TurnUsage", events[3])
+	}
+	if last.Turn != 2 || last.Usage.InputTokens != 132000 || last.RemainingContextTokens != 868000 {
+		t.Errorf("unexpected last turn_usage: %+v", last)
+	}
+
+	// The completion's usage is the task aggregate, not the last turn.
+	done, ok := events[4].(TaskComplete)
+	if !ok {
+		t.Fatalf("event 4 is %T, want TaskComplete", events[4])
+	}
+	if done.Usage.InputTokens == last.Usage.InputTokens {
+		t.Errorf("task aggregate (%d) matches the last turn; fixture should distinguish them", done.Usage.InputTokens)
+	}
+}
+
 func TestParseStreamUnknownTypeKeepsStreaming(t *testing.T) {
 	events := parseFixture(t, "unknown-type")
 	wantTypes(t, events, "task_start", "future_feature", "task_complete")
