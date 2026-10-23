@@ -203,11 +203,53 @@ type TaskComplete struct {
 
 func (e TaskComplete) EventType() string { return "task_complete" }
 
-// Usage is the token accounting attached to a task completion.
+// TurnUsage is the per-attempt token accounting cake reports for one
+// main-agent provider attempt, in live and replayed streams. It is not part of
+// the task aggregate: Usage describes that attempt only, so InputTokens is the
+// prompt size the model saw for the turn and the basis for the context display.
+// Attempt and TerminalClass are omitted for a first successful attempt.
+// UsagePresence distinguishes a complete measurement from a partial one; older
+// records omit it and carry complete usage. ContextWindow and
+// RemainingContextTokens are optional: cake reports them only when the model
+// configures a window and the usage is complete. Summary and compaction
+// attempts are never streamed as context measurements.
+type TurnUsage struct {
+	Type                   string `json:"type"`
+	SessionID              string `json:"session_id,omitempty"`
+	TaskID                 string `json:"task_id,omitempty"`
+	Turn                   int    `json:"turn"`
+	Usage                  Usage  `json:"usage"`
+	Attempt                int    `json:"attempt,omitempty"`
+	TerminalClass          string `json:"terminal_class,omitempty"`
+	UsagePresence          string `json:"usage_presence,omitempty"`
+	Model                  string `json:"model,omitempty"`
+	ResponseModel          string `json:"response_model,omitempty"`
+	ProviderRequestID      string `json:"provider_request_id,omitempty"`
+	ContextWindow          int    `json:"context_window,omitempty"`
+	RemainingContextTokens int    `json:"remaining_context_tokens,omitempty"`
+	Timestamp              string `json:"timestamp,omitempty"`
+}
+
+func (e TurnUsage) EventType() string { return "turn_usage" }
+
+// Usage is cake's token accounting for one task or one provider attempt.
+// The detail blocks are provider-specific and optional; unknown keys inside
+// them are ignored like every other unknown field.
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens         int          `json:"input_tokens"`
+	OutputTokens        int          `json:"output_tokens"`
+	TotalTokens         int          `json:"total_tokens"`
+	InputTokensDetails  UsageDetails `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails UsageDetails `json:"output_tokens_details,omitempty"`
+}
+
+// UsageDetails carries the optional breakdown cake attaches to a usage block.
+// Which counters are populated depends on the provider, so a zero value means
+// the provider did not report that counter.
+type UsageDetails struct {
+	CachedTokens     int `json:"cached_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
 }
 
 // Unknown preserves a record whose type is not recognized. Only the type

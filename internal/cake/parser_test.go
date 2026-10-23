@@ -294,6 +294,77 @@ func TestParseLineUnknownReasoningSummaryShapeKeepsEvent(t *testing.T) {
 	}
 }
 
+func TestParseLineTurnUsage(t *testing.T) {
+	line := `{"type":"turn_usage","session_id":"s-1","task_id":"t-1","turn":3,"usage":{"input_tokens":14383,"input_tokens_details":{"cached_tokens":4096,"cache_write_tokens":0},"output_tokens":195,"output_tokens_details":{"reasoning_tokens":13},"total_tokens":14578},"attempt":2,"terminal_class":"retryable","timestamp":"2026-10-23T14:14:06Z","usage_presence":"complete","model":"deepseek-v4.1-flash","response_model":"deepseek-v4.1-flash","provider_request_id":"req-1","context_window":1000000,"remaining_context_tokens":985617}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	u, ok := ev.(TurnUsage)
+	if !ok {
+		t.Fatalf("got %T, want TurnUsage", ev)
+	}
+	if u.SessionID != "s-1" || u.TaskID != "t-1" || u.Turn != 3 {
+		t.Errorf("identity/turn = %+v", u)
+	}
+	if u.Usage.InputTokens != 14383 || u.Usage.OutputTokens != 195 || u.Usage.TotalTokens != 14578 {
+		t.Errorf("usage = %+v", u.Usage)
+	}
+	if u.Usage.InputTokensDetails.CachedTokens != 4096 || u.Usage.OutputTokensDetails.ReasoningTokens != 13 {
+		t.Errorf("usage details = %+v/%+v", u.Usage.InputTokensDetails, u.Usage.OutputTokensDetails)
+	}
+	if u.Attempt != 2 || u.TerminalClass != "retryable" || u.UsagePresence != "complete" {
+		t.Errorf("attempt metadata = %+v", u)
+	}
+	if u.Model != "deepseek-v4.1-flash" || u.ResponseModel != "deepseek-v4.1-flash" || u.ProviderRequestID != "req-1" {
+		t.Errorf("model metadata = %+v", u)
+	}
+	if u.ContextWindow != 1000000 || u.RemainingContextTokens != 985617 {
+		t.Errorf("context budget = %d/%d", u.ContextWindow, u.RemainingContextTokens)
+	}
+}
+
+// A legacy or first-successful record omits the optional attempt metadata and
+// the context budget. Decoding must leave those fields at their zero values,
+// which the app treats as complete usage with an unknown window.
+func TestParseLineTurnUsageLegacyRecord(t *testing.T) {
+	line := `{"type":"turn_usage","session_id":"s-1","task_id":"t-1","turn":1,"usage":{"input_tokens":900,"output_tokens":10,"total_tokens":910}}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	u, ok := ev.(TurnUsage)
+	if !ok {
+		t.Fatalf("got %T, want TurnUsage", ev)
+	}
+	if u.Usage.InputTokens != 900 || u.Usage.TotalTokens != 910 {
+		t.Errorf("usage = %+v", u.Usage)
+	}
+	if u.Attempt != 0 || u.TerminalClass != "" || u.UsagePresence != "" {
+		t.Errorf("optional attempt metadata decoded as %+v", u)
+	}
+	if u.ContextWindow != 0 || u.RemainingContextTokens != 0 {
+		t.Errorf("absent budget decoded as %d/%d", u.ContextWindow, u.RemainingContextTokens)
+	}
+}
+
+// Unknown fields, including unknown detail counters, are ignored so a newer
+// cake never turns a usage record into a parse error.
+func TestParseLineTurnUsageIgnoresUnknownFields(t *testing.T) {
+	line := `{"type":"turn_usage","turn":1,"usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6,"input_tokens_details":{"cached_tokens":2,"future_counter":9},"future_usage_block":{"x":true}},"future_field":{"nested":true}}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	u, ok := ev.(TurnUsage)
+	if !ok {
+		t.Fatalf("got %T, want TurnUsage", ev)
+	}
+	if u.Usage.InputTokens != 5 || u.Usage.InputTokensDetails.CachedTokens != 2 {
+		t.Errorf("known fields lost with unknown ones: %+v", u.Usage)
+	}
+}
+
 func TestParseLineMalformed(t *testing.T) {
 	_, err := ParseLine([]byte(`{"type":"message", busted`))
 	if err == nil {

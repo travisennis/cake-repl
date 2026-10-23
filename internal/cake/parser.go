@@ -90,6 +90,12 @@ func ParseLine(line []byte) (Event, error) {
 			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
 		}
 		return ev, nil
+	case "turn_usage":
+		var ev TurnUsage
+		if err := json.Unmarshal(env.Raw, &ev); err != nil {
+			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
+		}
+		return ev, nil
 	default:
 		return Unknown{Type: env.Type}, nil
 	}
