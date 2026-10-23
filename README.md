@@ -14,12 +14,16 @@ Labeled user and assistant sections anchor the conversation. Assistant response
 bodies have no decorative prefix, so multiline terminal selections can be copied
 cleanly; operational events remain compact and visually distinct.
 The status line leads with current idle/running state, followed by labeled
-session, next-run, model, and working-directory context. The model shown is the
-identity cake reports on the stream once available — the `[[models]]` entry
-name, falling back to the provider model ID — and otherwise the `-model`/config
-value. Once a run reports a session ID — at `task_start` or its completion —
-the next prompt continues the same cake session, whether that run succeeded,
-failed, or was canceled.
+session, next-run, model, context, and working-directory context. The model
+shown is the identity cake reports on the stream once available — the
+`[[models]]` entry name, falling back to the provider model ID — and otherwise
+the `-model`/config value. The context segment reports the newest complete
+main-agent turn's input tokens against the model's configured window when cake
+reports one (for example `context: 132k/1M`), or a bare token count when the
+model configures no window. It is omitted until cake reports a complete
+measurement and cleared when the session target changes. Once a run reports a
+session ID — at `task_start` or its completion — the next prompt continues the
+same cake session, whether that run succeeded, failed, or was canceled.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output, the
@@ -194,6 +198,13 @@ down. The status line and timeline only show it shortened.
   `task_start`. Until then the `-model`/config value is shown, which is also
   what an older cake keeps showing. A new session or a switch to a different
   `-resume` target drops the reported identity.
+- The status-line context segment comes from cake's per-turn `turn_usage`
+  stream record, in live runs and replay hydration alike. It shows the newest
+  complete main-agent measurement's input tokens against the configured window
+  (`132k/1M`), or the bare token count when the model configures no window.
+  Partial usage records are ignored, an older cake that emits no record leaves
+  the segment out entirely, and a new session or a different `-resume` target
+  clears the measurement until that session reports its own.
 - A run that ends before completing — canceled, a nonzero exit, a wait error, or
   a stream that closes mid-task — is still pinned to the session id it
   announced, so the next prompt continues the session the run left behind

@@ -22,15 +22,31 @@ consumes cake events. This is the project's core external contract.
 - **stream-json schema.** The typed events in `events.go` (`task_start`,
   `session_meta`, `prompt_context`, `message`, `reasoning`, `function_call`,
   `function_call_output`, `hook_event`, `skill_activated`, `task_complete` +
-  `usage`, and `replay_error`) mirror cake's wire format. Replay omits the
-  session-only `turn_usage` record. Field names and JSON tags are the contract;
-  do not rename or repurpose them to match cake's output. `session_meta`
-  carries `working_directory` and the optional model identity (`model` is the
-  provider model ID, `model_config` the `[[models]]` entry name); `task_start`
-  gains the same optional pair with cake#664, and `task_complete` decodes it
-  ahead of any cake that reports it there. These fields feed the status-line
-  model under
+  `usage`, `turn_usage` + `usage`, and `replay_error`) mirror cake's wire format.
+  Field names and JSON tags are the contract; do not rename or repurpose them to
+  match cake's output. `session_meta` carries `working_directory` and the
+  optional model identity (`model` is the provider model ID, `model_config` the
+  `[[models]]` entry name); `task_start` gains the same optional pair with
+  cake#664, and `task_complete` decodes it ahead of any cake that reports it
+  there. These fields feed the status-line model under
   [ADR 014](../adr/014-source-the-status-line-model-from-the-cake-stream.md).
+- **Per-turn usage (`turn_usage`).** Live and replayed streams emit a
+  `turn_usage` record for every main-agent provider attempt that reports usage;
+  summary and compaction attempts are not streamed as context measurements. It
+  carries `session_id`, `task_id`, `turn`, `usage` (`input_tokens`,
+  `output_tokens`, `total_tokens`, plus optional `input_tokens_details` and
+  `output_tokens_details`), optional `attempt`/`terminal_class` on retried or
+  failed attempts, optional `usage_presence`, `model`, `response_model`,
+  `provider_request_id`, `timestamp`, and optional `context_window` /
+  `remaining_context_tokens` when the model configures a window and the usage
+  is complete. A first successful attempt omits `attempt` and
+  `terminal_class`. `task_complete.usage` stays the task aggregate and must
+  never be read as the current context. For the status line, only a complete
+  record is a measurement: `usage_presence` must be absent (a legacy complete
+  record) or `complete`, a record with no positive input count is ignored, and
+  the newest complete record wins, including its window. The app clears the
+  measurement whenever the session target changes or resets; it never reads
+  cake session files for the figure.
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
   and the versioned `sessions list --json` envelope) is the only contract; it is
@@ -89,6 +105,10 @@ consumes cake events. This is the project's core external contract.
   week decodes to `Unknown` by design and fails nothing. A passing suite is not
   evidence about a newer cake: when a change touches decoding, say in the
   handoff whether a real-cake round trip was run or the coverage is unknown.
+- **Reading cumulative usage as context.** `task_complete.usage` sums the whole
+  task, so its input count grows past any single context window. The status
+  context segment reads only the newest complete `turn_usage` record's input
+  tokens; never derive it from the completion aggregate.
 
 ## Related docs
 

@@ -94,10 +94,16 @@ in plain text like every other surface.
   completions, warnings, and errors use distinct compact markers. The one-line
   status display leads with a
   bracketed idle/running state, followed by labeled session, next-run, optional
-  model, and cwd context; the model is the identity cake reported on the stream
-  once available (the `[[models]]` entry name, falling back to the provider
-  model ID), else the `-model`/config value, and a new session or resume switch
-  drops the reported identity (ADR 014). The session field names the id cake
+  model, optional context, and cwd context; the model is the identity cake
+  reported on the stream once available (the `[[models]]` entry name, falling
+  back to the provider model ID), else the `-model`/config value, and a new
+  session or resume switch drops the reported identity (ADR 014). The context
+  field is cake's newest complete main-agent `turn_usage` measurement, rendered
+  compactly as `132k/1M` (the attempt's input tokens over the configured
+  window) or as a bare `132k` when the model configures no window. Partial usage
+  records are ignored, the field is omitted when no complete measurement exists,
+  and a new session or resume switch clears it so a stale figure never crosses
+  into another session's status line. The session field names the id cake
   reported for the current session and carries none after a retarget until the
   new target reports one, while the next-run field names the pinned target. It
   pads or truncates to the terminal width. The prompt
