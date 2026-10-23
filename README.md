@@ -18,7 +18,7 @@ session, next-run, model, context, and working-directory context. The model
 shown is the identity cake reports on the stream once available — the
 `[[models]]` entry name, falling back to the provider model ID — and otherwise
 the `-model`/config value. The context segment reports the newest complete
-main-agent turn's input tokens against the model's configured window when cake
+main-agent attempt's input tokens against the model's configured window when cake
 reports one (for example `context: 132k/1M`), or a bare token count when the
 model configures no window. It is omitted until cake reports a complete
 measurement and cleared when the session target changes. Once a run reports a

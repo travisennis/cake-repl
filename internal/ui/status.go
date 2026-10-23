@@ -94,17 +94,17 @@ func ContextValue(used, window int) string {
 	if used <= 0 {
 		return ""
 	}
-	value := CompactTokens(used)
+	value := compactTokens(used)
 	if window > 0 {
-		value += "/" + CompactTokens(window)
+		value += "/" + compactTokens(window)
 	}
 	return value
 }
 
-// CompactTokens formats a token count for the one-row status line: exact below
+// compactTokens formats a token count for the one-row status line: exact below
 // one thousand, rounded to the nearest thousand with a "k" suffix, and rounded
 // to one decimal of a million with an "M" suffix (1,048,576 renders as "1M").
-func CompactTokens(n int) string {
+func compactTokens(n int) string {
 	if n <= 0 {
 		return "0"
 	}

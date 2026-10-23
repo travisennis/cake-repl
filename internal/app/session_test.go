@@ -291,9 +291,9 @@ func TestOnTurnUsageKeepsLatestCompleteMeasurement(t *testing.T) {
 		t.Fatalf("first measurement = %+v", s.Context)
 	}
 
-	s.OnTurnUsage(completeTurn(140_000, 1_000_000))
-	if s.Context == nil || s.Context.Tokens != 140_000 {
-		t.Errorf("latest measurement = %+v, want 140000", s.Context)
+	s.OnTurnUsage(completeTurn(40_000, 1_000_000))
+	if s.Context == nil || s.Context.Tokens != 40_000 {
+		t.Errorf("latest measurement = %+v, want 40000", s.Context)
 	}
 }
 

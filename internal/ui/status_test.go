@@ -156,8 +156,8 @@ func TestCompactTokens(t *testing.T) {
 		{1_500_000, "1.5M"},
 	}
 	for _, tt := range tests {
-		if got := CompactTokens(tt.in); got != tt.want {
-			t.Errorf("CompactTokens(%d) = %q, want %q", tt.in, got, tt.want)
+		if got := compactTokens(tt.in); got != tt.want {
+			t.Errorf("compactTokens(%d) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }

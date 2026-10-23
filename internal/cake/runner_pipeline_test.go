@@ -14,6 +14,7 @@ func TestPipelineFromFixtures(t *testing.T) {
 		"happy-path",
 		"error-task",
 		"minimal",
+		"turn-usage",
 		"unknown-type",
 		"malformed-midstream",
 	}
