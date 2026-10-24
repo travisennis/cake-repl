@@ -84,7 +84,7 @@ func (m Model) statusLine() string {
 
 	context := ""
 	if c := m.session.Context; c != nil {
-		context = ui.ContextValue(c.Tokens, c.Window)
+		context = ui.ContextValue(c.Tokens, c.Window, c.Estimated)
 	}
 
 	return ui.StatusLine(m.theme, m.width, ui.Status{

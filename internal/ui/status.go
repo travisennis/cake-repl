@@ -88,23 +88,30 @@ func flattenLine(s string) string {
 // ContextValue formats one context measurement for the status line: the prompt
 // size the model saw on the newest complete attempt, over the model's
 // configured window when cake reports one (for example "132k/1M"). A model
-// that configures no window gets the bare count instead of a placeholder. It
-// returns empty for no measurement, which omits the segment.
-func ContextValue(used, window int) string {
+// that configures no window gets the bare count instead of a placeholder. An
+// estimated figure, which a replayed checkpoint supplies until the next live
+// measurement, is prefixed with "~" (for example "~24k/200k") so it is never
+// mistaken for a provider measurement. It returns empty for no measurement,
+// which omits the segment.
+func ContextValue(used, window int, estimated bool) string {
 	if used <= 0 {
 		return ""
 	}
-	value := compactTokens(used)
+	value := CompactTokens(used)
+	if estimated {
+		value = "~" + value
+	}
 	if window > 0 {
-		value += "/" + compactTokens(window)
+		value += "/" + CompactTokens(window)
 	}
 	return value
 }
 
-// compactTokens formats a token count for the one-row status line: exact below
-// one thousand, rounded to the nearest thousand with a "k" suffix, and rounded
-// to one decimal of a million with an "M" suffix (1,048,576 renders as "1M").
-func compactTokens(n int) string {
+// CompactTokens formats a token count for the one-row status line and for
+// timeline markers: exact below one thousand, rounded to the nearest thousand
+// with a "k" suffix, and rounded to one decimal of a million with an "M" suffix
+// (1,048,576 renders as "1M").
+func CompactTokens(n int) string {
 	if n <= 0 {
 		return "0"
 	}

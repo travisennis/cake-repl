@@ -940,6 +940,18 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		// timeline representation of its own.
 		m.session.OnTurnUsage(e)
 
+	case cake.Compaction:
+		// Replay emits one compaction record at its physical position. It becomes
+		// exactly one boundary marker: the retained tail is never expanded into
+		// duplicate messages or tool calls. A replayed checkpoint also seeds the
+		// status context with its own estimate, which the next turn_usage
+		// replaces. A live stream never seeds that estimate, so live behavior is
+		// unchanged.
+		if replay {
+			m.session.OnCompaction(e)
+		}
+		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: compactionMarker(e)})
+
 	case cake.TaskComplete:
 		m.session.OnTaskComplete(e)
 		m.session.OnModel(e.ModelConfig, e.Model)
@@ -1148,6 +1160,23 @@ func describeHook(e cake.HookEvent) (string, bool) {
 	benign := decision == "" || decision == "allow" || decision == "none"
 	failed := e.ExitCode != nil && *e.ExitCode != 0
 	return b.String(), !benign || failed
+}
+
+// compactionMarker renders the one timeline marker for a context checkpoint:
+// the estimated input reduction when cake reported one, plus how many records
+// the checkpoint retained. The retained tail's content is never shown; the
+// marker only stands where the checkpoint sits in the transcript.
+func compactionMarker(e cake.Compaction) string {
+	var b strings.Builder
+	b.WriteString("context compacted")
+	before, after := e.EstimatedInput.BeforeTokens, e.EstimatedInput.AfterTokens
+	if before > 0 && after > 0 {
+		fmt.Fprintf(&b, " %s -> %s", ui.CompactTokens(before), ui.CompactTokens(after))
+	}
+	if n := e.RetainedCount; n > 0 {
+		fmt.Fprintf(&b, ", %d record%s retained", n, plural(n))
+	}
+	return b.String()
 }
 
 func completionSummary(e cake.TaskComplete) string {

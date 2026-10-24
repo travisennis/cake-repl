@@ -348,6 +348,45 @@ func TestOnTurnUsageLatestRecordDropsAbsentWindow(t *testing.T) {
 	}
 }
 
+// A replayed checkpoint seeds the status estimate from its after_tokens while
+// keeping the window the model last reported. It is marked estimated, and the
+// next complete turn_usage replaces it with a real measurement.
+func TestOnCompactionSeedsEstimatedContextFromKnownWindow(t *testing.T) {
+	var s sessionState
+	s.OnTurnUsage(completeTurn(118_000, 200_000))
+
+	s.OnCompaction(cake.Compaction{EstimatedInput: cake.CompactionEstimate{BeforeTokens: 118_000, AfterTokens: 24_000}})
+	if s.Context == nil || s.Context.Tokens != 24_000 || s.Context.Window != 200_000 || !s.Context.Estimated {
+		t.Fatalf("context = %+v, want estimated 24000/200000", s.Context)
+	}
+
+	s.OnTurnUsage(completeTurn(6_000, 200_000))
+	if s.Context == nil || s.Context.Tokens != 6_000 || s.Context.Estimated {
+		t.Errorf("live measurement did not replace the estimate: %+v", s.Context)
+	}
+}
+
+// Without a measurement before it, a checkpoint still seeds the estimate but
+// renders no fabricated window.
+func TestOnCompactionWithoutKnownWindowUsesBareEstimate(t *testing.T) {
+	var s sessionState
+	s.OnCompaction(cake.Compaction{EstimatedInput: cake.CompactionEstimate{AfterTokens: 24_000}})
+	if s.Context == nil || s.Context.Tokens != 24_000 || s.Context.Window != 0 || !s.Context.Estimated {
+		t.Errorf("context = %+v, want estimated 24000 with no window", s.Context)
+	}
+}
+
+// A checkpoint with no usable estimate is not a measurement: it must not clear
+// or replace one already known.
+func TestOnCompactionIgnoresMissingEstimate(t *testing.T) {
+	var s sessionState
+	s.OnTurnUsage(completeTurn(10_000, 1_000_000))
+	s.OnCompaction(cake.Compaction{EstimatedInput: cake.CompactionEstimate{BeforeTokens: 118_000}})
+	if s.Context == nil || s.Context.Tokens != 10_000 || s.Context.Estimated {
+		t.Errorf("context = %+v, want the unchanged measurement", s.Context)
+	}
+}
+
 func TestContextUsageClearsOnNewSessionAndResumeSwitch(t *testing.T) {
 	var s sessionState
 	s.OnTurnUsage(completeTurn(10_000, 1_000_000))

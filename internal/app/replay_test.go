@@ -204,6 +204,100 @@ fi
 	}
 }
 
+// A replayed checkpoint becomes one marker at the record's physical position,
+// never an expansion of its retained tail, and seeds the status context with
+// its own estimate until a live measurement arrives.
+func TestResumeHydrationRendersOneCompactionMarkerAndEstimatedContext(t *testing.T) {
+	fixture, err := filepath.Abs(replayFixturePath("compaction.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REPLAY_FIXTURE", fixture)
+	bin := writeFakeCake(t, `
+if [ "$3" = "replay" ]; then
+cat "$REPLAY_FIXTURE"
+fi
+`)
+	m := New(Config{
+		CakeBin:     bin,
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 200, 24
+	m.layout()
+	m = hydrateTestModel(t, m)
+
+	var markerIdx []int
+	for i, item := range m.items {
+		if item.Kind == ui.KindInfo && strings.HasPrefix(item.Text, "context compacted") {
+			markerIdx = append(markerIdx, i)
+		}
+	}
+	if len(markerIdx) != 1 {
+		t.Fatalf("compaction markers = %d, want exactly one: %+v", len(markerIdx), m.items)
+	}
+	const wantMarker = "context compacted 118k -> 24k, 4 records retained"
+	if got := m.items[markerIdx[0]].Text; got != wantMarker {
+		t.Errorf("marker = %q, want %q", got, wantMarker)
+	}
+
+	// The marker sits at the record's physical position: after the tool output
+	// that precedes the checkpoint and before the answer that follows it.
+	preTool, postAnswer := -1, -1
+	for i, item := range m.items {
+		switch {
+		case item.Kind == ui.KindTool && item.Tool != nil && item.Tool.Output == "/tmp/project\n":
+			preTool = i
+		case item.Kind == ui.KindAssistant && item.Text == "after compaction answer":
+			postAnswer = i
+		}
+	}
+	if preTool < 0 || postAnswer < 0 {
+		t.Fatalf("surrounding items missing: preTool=%d postAnswer=%d items=%+v", preTool, postAnswer, m.items)
+	}
+	if preTool >= markerIdx[0] || markerIdx[0] >= postAnswer {
+		t.Errorf("marker at %d is not between tool output %d and answer %d", markerIdx[0], preTool, postAnswer)
+	}
+
+	// The retained tail is count-only: its messages and tool call must never
+	// appear as extra timeline items.
+	tools := 0
+	for _, item := range m.items {
+		if item.Kind == ui.KindTool {
+			tools++
+			if item.Tool != nil && (strings.Contains(item.Tool.Output, "RETAINED-") || strings.Contains(item.Tool.Arguments, "RETAINED-")) {
+				t.Errorf("retained tool content rendered: %+v", item.Tool)
+			}
+		}
+		if strings.Contains(item.Text, "RETAINED-") {
+			t.Errorf("retained message content rendered: %q", item.Text)
+		}
+	}
+	if tools != 2 {
+		t.Errorf("tool items = %d, want 2 from the surrounding transcript", tools)
+	}
+
+	context := m.session.Context
+	if context == nil || context.Tokens != 24_000 || context.Window != 200_000 || !context.Estimated {
+		t.Fatalf("context = %+v, want estimated 24000/200000", context)
+	}
+	if line := m.statusLine(); !strings.Contains(line, "context: ~24k/200k") {
+		t.Errorf("status line missing the estimated context: %q", line)
+	}
+
+	// The next live measurement replaces the estimate and drops the qualifier.
+	m.applyEvent(cake.TurnUsage{
+		Usage:         cake.Usage{InputTokens: 6_000},
+		UsagePresence: "complete",
+		ContextWindow: 200_000,
+	})
+	line := m.statusLine()
+	if !strings.Contains(line, "context: 6k/200k") || strings.Contains(line, "~6k") {
+		t.Errorf("live measurement did not replace the estimate: %q", line)
+	}
+}
+
 func TestResumeReplayFailureWarnsAndKeepsSessionUsable(t *testing.T) {
 	argsPath := filepath.Join(t.TempDir(), "args")
 	t.Setenv("ARGS_FILE", argsPath)

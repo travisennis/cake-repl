@@ -29,10 +29,13 @@ type sessionState struct {
 
 // ContextUsage is one context measurement: Tokens is the prompt size the model
 // saw on the newest complete main-agent attempt, and Window is the model's
-// configured context window (a non-positive value means none).
+// configured context window (a non-positive value means none). Estimated marks
+// a figure seeded from a replay checkpoint instead of a provider measurement,
+// so the status line can qualify it.
 type ContextUsage struct {
-	Tokens int
-	Window int
+	Tokens    int
+	Window    int
+	Estimated bool
 }
 
 // usagePresenceComplete is the only usage_presence value that marks a turn
@@ -82,6 +85,25 @@ func (s *sessionState) OnTurnUsage(e cake.TurnUsage) {
 		return
 	}
 	s.Context = &ContextUsage{Tokens: e.Usage.InputTokens, Window: e.ContextWindow}
+}
+
+// OnCompaction seeds the context display from a replayed checkpoint's own token
+// estimate. The checkpoint is the newest statement about the session's context,
+// so its after_tokens replaces an older turn_usage figure, while the window
+// stays the one the model last reported. The figure is marked Estimated so a
+// resume never presents cake's estimate as a provider measurement; the next
+// live turn_usage replaces it. The record carries no window of its own, so an
+// unknown window renders the bare estimate instead of a fabricated fraction.
+func (s *sessionState) OnCompaction(e cake.Compaction) {
+	after := e.EstimatedInput.AfterTokens
+	if after <= 0 {
+		return
+	}
+	window := 0
+	if s.Context != nil {
+		window = s.Context.Window
+	}
+	s.Context = &ContextUsage{Tokens: after, Window: window, Estimated: true}
 }
 
 // OnTaskComplete records the outcome. Once a session id is known, future
