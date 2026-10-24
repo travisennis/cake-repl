@@ -186,6 +186,34 @@ func TestParseStreamTurnUsage(t *testing.T) {
 	}
 }
 
+// A compaction record sits at its physical position in the replay stream and is
+// decoded as one typed event. The retained tail is count-only: its messages and
+// tool call never become separate events.
+func TestParseStreamCompaction(t *testing.T) {
+	events := parseFixture(t, "compaction")
+	wantTypes(t, events,
+		"session_meta", "task_start", "prompt_context", "message", "message",
+		"function_call", "function_call_output", "turn_usage", "compaction",
+		"message", "function_call", "function_call_output", "task_complete")
+
+	checkpoint, ok := events[8].(Compaction)
+	if !ok {
+		t.Fatalf("event 8 is %T, want Compaction", events[8])
+	}
+	if checkpoint.Trigger != "threshold" || checkpoint.RetainedCount != 4 {
+		t.Errorf("checkpoint = %+v", checkpoint)
+	}
+	if checkpoint.Summary != "Earlier turns checked the project and answered questions about it." {
+		t.Errorf("summary = %q, want the first line", checkpoint.Summary)
+	}
+	if checkpoint.EstimatedInput.BeforeTokens != 118000 || checkpoint.EstimatedInput.AfterTokens != 24000 {
+		t.Errorf("estimate = %+v", checkpoint.EstimatedInput)
+	}
+	if checkpoint.Model.ModelConfig != "test" {
+		t.Errorf("model = %+v", checkpoint.Model)
+	}
+}
+
 func TestParseStreamUnknownTypeKeepsStreaming(t *testing.T) {
 	events := parseFixture(t, "unknown-type")
 	wantTypes(t, events, "task_start", "future_feature", "task_complete")

@@ -156,28 +156,31 @@ func TestCompactTokens(t *testing.T) {
 		{1_500_000, "1.5M"},
 	}
 	for _, tt := range tests {
-		if got := compactTokens(tt.in); got != tt.want {
-			t.Errorf("compactTokens(%d) = %q, want %q", tt.in, got, tt.want)
+		if got := CompactTokens(tt.in); got != tt.want {
+			t.Errorf("CompactTokens(%d) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
 
 func TestContextValue(t *testing.T) {
 	tests := []struct {
-		name   string
-		used   int
-		window int
-		want   string
+		name      string
+		used      int
+		window    int
+		estimated bool
+		want      string
 	}{
-		{"known window", 132_000, 1_000_000, "132k/1M"},
-		{"unknown window", 132_000, 0, "132k"},
-		{"no measurement", 0, 0, ""},
-		{"no measurement with window", 0, 1_000_000, ""},
+		{"known window", 132_000, 1_000_000, false, "132k/1M"},
+		{"unknown window", 132_000, 0, false, "132k"},
+		{"estimated with window", 24_000, 200_000, true, "~24k/200k"},
+		{"estimated without window", 24_000, 0, true, "~24k"},
+		{"no measurement", 0, 0, false, ""},
+		{"no measurement with window", 0, 1_000_000, false, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ContextValue(tt.used, tt.window); got != tt.want {
-				t.Errorf("ContextValue(%d, %d) = %q, want %q", tt.used, tt.window, got, tt.want)
+			if got := ContextValue(tt.used, tt.window, tt.estimated); got != tt.want {
+				t.Errorf("ContextValue(%d, %d, %t) = %q, want %q", tt.used, tt.window, tt.estimated, got, tt.want)
 			}
 		})
 	}
@@ -185,7 +188,7 @@ func TestContextValue(t *testing.T) {
 
 func TestStatusLine_ContextSegment(t *testing.T) {
 	th := DefaultTheme()
-	got := StatusLine(th, 100, Status{State: "idle", Session: "abc12345", Context: ContextValue(132_000, 1_000_000), Cwd: "project"})
+	got := StatusLine(th, 100, Status{State: "idle", Session: "abc12345", Context: ContextValue(132_000, 1_000_000, false), Cwd: "project"})
 	if !strings.Contains(got, "context: 132k/1M") {
 		t.Errorf("status line missing context segment: %q", got)
 	}

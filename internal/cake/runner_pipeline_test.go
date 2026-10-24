@@ -15,6 +15,7 @@ func TestPipelineFromFixtures(t *testing.T) {
 		"error-task",
 		"minimal",
 		"turn-usage",
+		"compaction",
 		"unknown-type",
 		"malformed-midstream",
 	}

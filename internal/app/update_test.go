@@ -913,6 +913,37 @@ func TestLiveTurnUsageUpdatesStatusContext(t *testing.T) {
 	}
 }
 
+// A live compaction record renders one marker but never seeds an estimated
+// context figure: live context remains a provider measurement only.
+func TestLiveCompactionMarkerDoesNotSeedContext(t *testing.T) {
+	m := laidOut(160, 24)
+	m.applyEvent(cake.TurnUsage{
+		Usage:         cake.Usage{InputTokens: 14_383},
+		UsagePresence: "complete",
+		ContextWindow: 1_000_000,
+	})
+	m.applyEvent(cake.Compaction{
+		EstimatedInput: cake.CompactionEstimate{BeforeTokens: 118_000, AfterTokens: 24_000},
+		RetainedCount:  1,
+	})
+
+	var marker string
+	for _, item := range m.items {
+		if item.Kind == ui.KindInfo {
+			marker = item.Text
+		}
+	}
+	if marker != "context compacted 118k -> 24k, 1 record retained" {
+		t.Errorf("marker = %q", marker)
+	}
+	if m.session.Context == nil || m.session.Context.Tokens != 14_383 || m.session.Context.Estimated {
+		t.Errorf("live context = %+v, want the unchanged measurement", m.session.Context)
+	}
+	if line := m.statusLine(); !strings.Contains(line, "context: 14k/1M") || strings.Contains(line, "~") {
+		t.Errorf("live status line = %q, want an unqualified measurement", line)
+	}
+}
+
 func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Model = "gpt-x"
