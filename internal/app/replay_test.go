@@ -206,7 +206,7 @@ fi
 
 // A replayed checkpoint becomes one marker at the record's physical position,
 // never an expansion of its retained tail, and seeds the status context with
-// its own estimate until a live measurement arrives.
+// its own estimate until a newer complete measurement arrives.
 func TestResumeHydrationRendersOneCompactionMarkerAndEstimatedContext(t *testing.T) {
 	fixture, err := filepath.Abs(replayFixturePath("compaction.ndjson"))
 	if err != nil {
@@ -242,22 +242,30 @@ fi
 		t.Errorf("marker = %q, want %q", got, wantMarker)
 	}
 
-	// The marker sits at the record's physical position: after the tool output
-	// that precedes the checkpoint and before the answer that follows it.
+	// The marker sits at the record's physical position: after the completed
+	// task that produced the checkpoint and before the next task's answer.
 	preTool, postAnswer := -1, -1
+	var completions []int
 	for i, item := range m.items {
 		switch {
 		case item.Kind == ui.KindTool && item.Tool != nil && item.Tool.Output == "/tmp/project\n":
 			preTool = i
 		case item.Kind == ui.KindAssistant && item.Text == "after compaction answer":
 			postAnswer = i
+		case item.Kind == ui.KindComplete:
+			completions = append(completions, i)
 		}
 	}
-	if preTool < 0 || postAnswer < 0 {
-		t.Fatalf("surrounding items missing: preTool=%d postAnswer=%d items=%+v", preTool, postAnswer, m.items)
+	if preTool < 0 || postAnswer < 0 || len(completions) != 2 {
+		t.Fatalf("surrounding items missing: preTool=%d postAnswer=%d completions=%v items=%+v",
+			preTool, postAnswer, completions, m.items)
 	}
-	if preTool >= markerIdx[0] || markerIdx[0] >= postAnswer {
-		t.Errorf("marker at %d is not between tool output %d and answer %d", markerIdx[0], preTool, postAnswer)
+	preComplete, postComplete := completions[0], completions[1]
+	ordered := preTool < preComplete && preComplete < markerIdx[0] &&
+		markerIdx[0] < postAnswer && postAnswer < postComplete
+	if !ordered {
+		t.Errorf("marker at %d is not between completion %d and answer %d (tool %d, final completion %d)",
+			markerIdx[0], preComplete, postAnswer, preTool, postComplete)
 	}
 
 	// The retained tail is count-only: its messages and tool call must never
@@ -295,6 +303,49 @@ fi
 	line := m.statusLine()
 	if !strings.Contains(line, "context: 6k/200k") || strings.Contains(line, "~6k") {
 		t.Errorf("live measurement did not replace the estimate: %q", line)
+	}
+}
+
+// A newer complete turn_usage replayed after the checkpoint replaces the
+// checkpoint's estimated context during hydration. The marker stays at its
+// physical position, but the status shows the measured figure without "~".
+func TestResumeHydrationNewerReplayedMeasurementReplacesEstimate(t *testing.T) {
+	fixture, err := filepath.Abs(replayFixturePath("compaction-continued.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REPLAY_FIXTURE", fixture)
+	bin := writeFakeCake(t, `
+if [ "$3" = "replay" ]; then
+cat "$REPLAY_FIXTURE"
+fi
+`)
+	m := New(Config{
+		CakeBin:     bin,
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    replayTestSessionID,
+	})
+	m.width, m.height = 200, 24
+	m.layout()
+	m = hydrateTestModel(t, m)
+
+	markers := 0
+	for _, item := range m.items {
+		if item.Kind == ui.KindInfo && strings.HasPrefix(item.Text, "context compacted") {
+			markers++
+		}
+	}
+	if markers != 1 {
+		t.Fatalf("compaction markers = %d, want exactly one: %+v", markers, m.items)
+	}
+
+	context := m.session.Context
+	if context == nil || context.Tokens != 30_000 || context.Window != 200_000 || context.Estimated {
+		t.Fatalf("context = %+v, want the newer measured 30000/200000", context)
+	}
+	if line := m.statusLine(); !strings.Contains(line, "context: 30k/200k") || strings.Contains(line, "~30k") {
+		t.Errorf("status line = %q, want the newer unqualified measurement", line)
 	}
 }
 

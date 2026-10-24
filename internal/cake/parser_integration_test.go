@@ -193,12 +193,13 @@ func TestParseStreamCompaction(t *testing.T) {
 	events := parseFixture(t, "compaction")
 	wantTypes(t, events,
 		"session_meta", "task_start", "prompt_context", "message", "message",
-		"function_call", "function_call_output", "turn_usage", "compaction",
-		"message", "function_call", "function_call_output", "task_complete")
+		"function_call", "function_call_output", "turn_usage", "task_complete",
+		"compaction", "task_start", "prompt_context", "message", "message",
+		"function_call", "function_call_output", "task_complete")
 
-	checkpoint, ok := events[8].(Compaction)
+	checkpoint, ok := events[9].(Compaction)
 	if !ok {
-		t.Fatalf("event 8 is %T, want Compaction", events[8])
+		t.Fatalf("event 9 is %T, want Compaction", events[9])
 	}
 	if checkpoint.Trigger != "threshold" || checkpoint.RetainedCount != 4 {
 		t.Errorf("checkpoint = %+v", checkpoint)
@@ -211,6 +212,30 @@ func TestParseStreamCompaction(t *testing.T) {
 	}
 	if checkpoint.Model.ModelConfig != "test" {
 		t.Errorf("model = %+v", checkpoint.Model)
+	}
+}
+
+// A compacted session that continued has a newer turn_usage after the
+// checkpoint; both records decode in physical order.
+func TestParseStreamCompactionContinued(t *testing.T) {
+	events := parseFixture(t, "compaction-continued")
+	wantTypes(t, events,
+		"session_meta", "task_start", "turn_usage", "task_complete",
+		"compaction", "task_start", "turn_usage", "task_complete")
+
+	checkpoint, ok := events[4].(Compaction)
+	if !ok {
+		t.Fatalf("event 4 is %T, want Compaction", events[4])
+	}
+	if checkpoint.EstimatedInput.AfterTokens != 24000 || checkpoint.RetainedCount != 1 {
+		t.Errorf("checkpoint = %+v", checkpoint)
+	}
+	newer, ok := events[6].(TurnUsage)
+	if !ok {
+		t.Fatalf("event 6 is %T, want TurnUsage", events[6])
+	}
+	if newer.Usage.InputTokens != 30000 || newer.ContextWindow != 200000 {
+		t.Errorf("newer measurement = %+v", newer)
 	}
 }
 
