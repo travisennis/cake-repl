@@ -22,7 +22,7 @@ func (m Model) View() string {
 		m.theme,
 		m.input.View(),
 		m.width,
-		m.running,
+		m.running || m.compacting,
 		m.input.LineCount(),
 		"Ctrl+S submit · Enter newline · /help",
 	)
@@ -72,8 +72,11 @@ func (m Model) statusLine() string {
 	}
 
 	state := "idle"
-	if m.running {
+	switch {
+	case m.running:
 		state = m.spin.View() + " running"
+	case m.compacting:
+		state = m.spin.View() + " compacting"
 	}
 
 	mode, resumeID := m.session.RunOptions()

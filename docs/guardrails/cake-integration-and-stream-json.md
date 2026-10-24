@@ -60,14 +60,28 @@ consumes cake events. This is the project's core external contract.
   names are documented on the type; it has no struct tags) so an unknown or
   malformed optional field keeps the record and the rest of its marker instead
   of breaking the stream. The app appends exactly one `KindInfo` marker such as
-  `context compacted 118k -> 24k, 4 records retained`. The estimate is not
-  replay-only: replay seeds the status context from
-  `estimated_input.after_tokens`, and the planned live compaction client
-  (task 119) will seed the same `ContextUsage` figure. Either way it is visibly
-  marked estimated, and a newer complete `turn_usage`, replayed after the
-  checkpoint or reported by a live turn, replaces it. A live `compaction`
-  stream record never seeds the estimate.
-  See [cli-and-user-output.md](cli-and-user-output.md) for the rendered forms.
+  `context compacted 118k -> 24k, 4 records retained`. Replay seeds the status
+  context from `estimated_input.after_tokens`, and the live compaction result
+  seeds the same `ContextUsage` figure. Either way it is visibly marked
+  estimated, and a newer complete `turn_usage`, replayed after the checkpoint or
+  reported by a live turn, replaces it. A live `compaction` stream record never
+  seeds the estimate. See
+  [cli-and-user-output.md](cli-and-user-output.md) for the rendered forms.
+- **External compactor (`internal/compact`).** The only non-cake executable the
+  REPL runs. `cake-compact compact -json -threshold` is invoked with
+  `-threshold-percent`, `-keep-tokens`, `-cake-bin` when cake-repl has one, an
+  optional `-summarizer-model` from the configured model, and `-- <session-id>`.
+  Never pass `-fork`: the integration is in place only. The one JSON document is
+  decoded field by field (`Document`) with unknown fields ignored; `in_place` is
+  read rather than assumed. Exit 0 with a document is success or a silent no-op
+  (`compacted:false`); a nonzero exit is a failure whose bounded stderr tail is
+  shown; cancellation is a warning. The process is the same subprocess discipline
+  as a cake run: model-owned context, SIGTERM then `WaitDelay`, bounded
+  stdout/stderr, no session-file reads by the REPL, and a content-free debug log
+  line. The child inherits the REPL's environment and working directory, so
+  `CAKE_DATA_DIR` and a relative `-cake-bin` select the same root and executable
+  they do for cake; the REPL does not reimplement Cake's data-directory layout.
+  See [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
   and the versioned `sessions list --json` envelope) is the only contract; it is
@@ -103,6 +117,12 @@ consumes cake events. This is the project's core external contract.
   `schema_version`; none may be fatal. Also cover cancellation, the bounded
   teardown when a descendant holds stdout (short `waitDelay`, finite fake helper
   with cleanup), and the 8 MiB stdout cap.
+- For the external compactor, add fake `cake-compact` scripts for a success
+  document, a `compacted:false` no-op, a non-zero exit with stderr, malformed
+  output, a missing binary, cancellation, and the `WaitDelay` teardown when a
+  descendant holds stdout. App tests drive the trigger, the gate, the in-place
+  success, the non-in-place rejection, and cancellation through `Ctrl+C` and
+  `Ctrl+N`; none may need a real cake or a model call.
 - Verify a real round trip if you have a `cake` binary, but never make a real
   cake binary a test requirement.
 
@@ -130,6 +150,14 @@ consumes cake events. This is the project's core external contract.
   task, so its input count grows past any single context window. The status
   context segment reads only the newest complete `turn_usage` record's input
   tokens; never derive it from the completion aggregate.
+- **Treating a compactor result as authoritative about the session id.** Accept
+  a live compaction only when the document says `compacted:true` and
+  `in_place:true` and its `session_id` is the pinned one. A minimal-fork result
+  has a different id; retargeting to it silently abandons the session the user
+  is in. The REPL keeps its pin and warns instead.
+- **Reading session files to decide when to compact.** The trigger uses the
+  stream's `turn_usage`; the compactor re-checks the session. A REPL-side session
+  reader would cross the engine boundary and duplicate Cake's projection rules.
 
 ## Related docs
 

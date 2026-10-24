@@ -94,7 +94,7 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 // HelpText lists commands and keybindings for /help.
 const HelpText = `commands
   /help            show this help
-  /exit /quit /q   exit (cancels a running task first)
+  /exit /quit /q   exit (cancels a running task or compaction first)
   /new             start a fresh cake session on the next prompt
   /resume <uuid>   resume a specific cake session on the next prompt
                    (startup -resume <uuid> also reloads visible history;
@@ -109,8 +109,8 @@ const HelpText = `commands
 keybindings
   enter            insert newline
   ctrl+s           submit prompt
-  ctrl+c           cancel running task; quit when idle
-  ctrl+n           start a new session (cancels a running task)
+  ctrl+c           cancel running task or compaction; quit when idle
+  ctrl+n           start a new session (cancels a running task or compaction)
   ctrl+u           clear input
   ctrl+o           cycle all tool output: truncated / full / hidden
   ctrl+y           copy last assistant response (markdown)

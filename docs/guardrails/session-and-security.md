@@ -59,6 +59,27 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   cancellable, `WaitDelay`-bounded operation as a `/sessions` listing (ADR 019),
   and a failed listing is a non-fatal warning that leaves the prompt usable. See
   [ADR 021](../adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
+- **Between-turn compaction is an opt-in external operation.** The `[compaction]`
+  table (disabled by default) enables `cake-compact compact -json -threshold`
+  after a successfully completed turn whose newest complete `turn_usage` figure
+  reaches five percentage points below `threshold-percent`. The compactor
+  re-checks the session and appends an in-place checkpoint; the REPL never reads
+  or writes the session file and never passes `-fork`. At most one compaction
+  runs, and prompt submission plus `/new`, `/resume`, and `/sessions` are
+  refused until its child has exited and been reaped. Ctrl+C and quitting cancel
+  it, `/exit` cancels and then exits, and Ctrl+N cancels and starts a new
+  session. Only a completed turn triggers it (a canceled or failed run does
+  not), `-no-session` disables it at startup with a warning, and success keeps
+  `ResumeID` unchanged with an estimated status figure. A `compacted:false`
+  no-op is silent; a failure, cancellation, or non-in-place result keeps the
+  session and figure and warns. The automatically loaded project-local
+  `.cake-repl.toml` cannot enable compaction or select its executable (ADR 006,
+  extended by
+  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md));
+  it may disable compaction and tune the thresholds. If two REPLs race, Cake's
+  append lock serializes writers and the loser warns. See
+  [cake-integration-and-stream-json.md](cake-integration-and-stream-json.md) for
+  the subprocess contract.
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
   resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
@@ -134,7 +155,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   Update loop never observed, and `ListSessions` bounds its teardown
   with `WaitDelay` (a hard kill — the listing has no state to flush) so a stuck
   helper, or a descendant holding the inherited stdout pipe, cannot hang the REPL.
-  See [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md).
+  The external compactor follows the same model-owned lifecycle as a cake run:
+  SIGTERM then `WaitDelay`, a 1 MiB stdout cap, and a bounded stderr tail. See
+  [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md) and
+  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md).
 - **Terminal ownership across a suspend (security boundary).** The REPL owns raw
   input, the cursor, mouse reporting, and (by default) the alternate screen, so
   it must never stop or exit without giving them back. An external, catchable
@@ -167,6 +191,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   unreleasable terminal.
 - `just test-race` for any `runner.go` change, and for the session-listing
   lifecycle (cancellation, request identity, `WaitDelay`).
+- For between-turn compaction, cover the config provenance and merge rules
+  (project-local cannot enable or select the executable), the trigger headroom
+  and every disqualifying run, the gated state, in-place success and estimated
+  context, a no-op, a non-zero exit, a non-in-place document, and cancellation
+  through Ctrl+C and Ctrl+N. Use fake `cake-compact` scripts; never a real model
+  call.
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
 - Terminal behavior around a suspend has no unit-test surface beyond the step
   order and mode sequences, so a change there needs the driven session in
@@ -188,6 +218,14 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Presenting a compaction estimate as a measurement.** Rendering a
   checkpoint's `estimated_input.after_tokens` without the `~` qualifier, or
   keeping it after a newer complete `turn_usage` has replaced the context.
+- **Reopening the session-lock race.** Accepting a prompt, or retargeting
+  `/new`/`/resume`/`/sessions`, while the compactor still holds or is writing the
+  session. Keep the gate closed until the child is reaped, even after Ctrl+C.
+- **Letting a project file turn on metered compaction.** The automatically
+  loaded `.cake-repl.toml` may disable compaction and tune `threshold-percent` /
+  `keep-tokens`, but `enabled = true` and `cake-compact-bin` must be ignored with
+  a warning. Enabling there would let a cloned repository spend the user's
+  quota and mutate the session without the user opting in.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Reopening terminal injection.** Adding a render path that bypasses

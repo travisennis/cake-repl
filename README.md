@@ -146,8 +146,8 @@ another policy (`read-only`, `workspace-write`, `workspace-write-interactive`, o
 | `Enter` | insert newline |
 | `Tab` | complete slash commands |
 | `Ctrl+S` | submit prompt |
-| `Ctrl+C` | cancel running cake task; quit when idle |
-| `Ctrl+N` | start a new session (cancels a running task) |
+| `Ctrl+C` | cancel running cake task or context compaction; quit when idle |
+| `Ctrl+N` | start a new session (cancels a running task or compaction) |
 | `Ctrl+U` | clear input |
 | `Ctrl+O` | cycle all tool output: truncated / full / hidden |
 | `Ctrl+Y` | copy the last assistant response (markdown) to the clipboard |
@@ -174,7 +174,7 @@ down. The status line and timeline only show it shortened.
 | Command | Action |
 |---|---|
 | `/help` | show commands and keybindings |
-| `/exit` `/quit` `/q` | exit (cancels a running task first, then exits) |
+| `/exit` `/quit` `/q` | exit (cancels a running task or compaction first, then exits) |
 | `/new` | next prompt starts a fresh cake session |
 | `/resume <uuid>` | next prompt uses `cake --resume <uuid>` |
 | `/sessions` | browse this directory's past sessions and resume one |
@@ -250,9 +250,9 @@ down. The status line and timeline only show it shortened.
   `/resume <uuid>`, and `Esc` or `q` leaves the REPL idle and fresh so the next
   prompt starts a new session. `-resume <uuid>` keeps the replay-and-pin startup
   path above, and `-fork` stays mutually exclusive with `-resume` in both forms.
-- `/new` and `/resume` are rejected while a task is running.
-  Finish or cancel the task first (Ctrl+C), or use `Ctrl+N` to cancel and start
-  a new session in one action.
+- `/new` and `/resume` are rejected while a task or context compaction is
+  running. Finish or cancel it first (Ctrl+C), or use `Ctrl+N` to cancel and
+  start a new session in one action.
 - On exit, cake-repl prints the command that resumes the session. The hint
   reproduces the effective startup run controls — `-cwd`, `-config <path>` or
   `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
@@ -264,6 +264,51 @@ down. The status line and timeline only show it shortened.
   `-model ""`, `-profile ""`, or `-cake-bin cake` — is re-emitted (for example
   `-sandbox ''`), so reloading the config cannot reintroduce a value the original
   run suppressed.
+
+## Context compaction (experimental)
+
+cake-repl can compact context between prompts. After a successful turn whose
+newest context measurement reaches the configured threshold, it runs the
+external `cake-compact` binary, which summarizes retired history and appends an
+in-place checkpoint to the same cake session. The session id does not change, so
+the next prompt resumes the same session; replay still shows the raw transcript
+plus one `context compacted …` marker. The feature is opt-in, off by default,
+and experimental: summary quality has not been qualified.
+
+```toml
+[compaction]
+enabled = true
+cake-compact-bin = "cake-compact"
+threshold-percent = 80
+keep-tokens = 20000
+```
+
+- The REPL triggers five percentage points below `threshold-percent`, because
+the live `turn_usage` figure does not include the response and tool results that
+will be in the session. `cake-compact` re-checks the session and compacts only
+when it agrees; a no-op is silent.
+- While compaction runs, the status line and terminal title show `compacting`,
+prompt submission is rejected, and `/new`, `/resume`, and `/sessions` wait.
+`Ctrl+C` cancels the child; `/exit` cancels and then exits; `Ctrl+N` cancels and
+starts a new session.
+- On success the status context becomes the compactor's estimate (`~24k/200k`)
+until a newer complete measurement replaces it, and the timeline shows one
+`context compacted 118k -> 24k, 4 records retained` notice. A failure,
+cancellation, or non-in-place result keeps the current session and context
+figure and shows one warning. The REPL never reads or writes cake session files.
+- `-no-session` disables compaction with a startup warning. The automatically
+loaded project-local `.cake-repl.toml` cannot enable compaction or choose
+`cake-compact-bin`; only XDG config or an explicit `-config` can. A project may
+disable compaction or tune the thresholds.
+- `cake-compact` must be installed, and the configured `cake` must support
+`cake sessions checkpoint`. The compactor inherits the REPL's environment and
+working directory, so `CAKE_DATA_DIR` and a relative `-cake-bin` resolve the
+same way they do for cake. A missing binary or verb is a visible warning, and
+there is no fallback to writing session files.
+- Compaction only happens between prompts. A single long tool loop that fills
+the window before the turn ends is not covered; that needs a request-boundary
+mechanism inside Cake. See
+[ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
 
 ## Config file
 
@@ -286,9 +331,12 @@ default paths. Pass `--no-config` to skip config file loading entirely.
 
 The automatically loaded `.cake-repl.toml` cannot select the executable: its
 `cake-bin` key is ignored with a plain startup warning naming the file and key.
-Set the executable in XDG config, an explicitly selected `-config` file, or
-`-cake-bin`. Explicitly selecting `.cake-repl.toml` with `-config` allows its
-`cake-bin` value. `-no-config` skips file values and these warnings.
+It also cannot enable context compaction or set `compaction.cake-compact-bin`;
+both are ignored with a warning. It may disable compaction and tune
+`threshold-percent` and `keep-tokens`. Set the executable and enable compaction
+in XDG config, an explicitly selected `-config` file, or `-cake-bin`.
+Explicitly selecting `.cake-repl.toml` with `-config` allows its `cake-bin` and
+compaction values. `-no-config` skips file values and these warnings.
 
 ### Format
 
@@ -312,13 +360,24 @@ max-timeline-items = 200
 # Keep ANSI color in tool output instead of stripping it (default: false).
 # Only tools that force color (`git diff --color`, `rg --color=always`) emit it.
 tool-color = true
+
+# Compact context between turns through the external compactor (default: off).
+# XDG or explicit -config only; the automatic project-local file cannot enable
+# compaction or select the compactor executable.
+[compaction]
+enabled = false
+cake-compact-bin = "cake-compact"
+threshold-percent = 80
+keep-tokens = 20000
 ```
 
 ### Merge order
 
 Hardcoded defaults < XDG config < project-local config < CLI flags.
 For `cake-bin`, precedence is hardcoded `cake` < XDG/explicit `-config` file <
-`-cake-bin`; the automatic project-local layer is excluded. Trusted relative
+`-cake-bin`; the automatic project-local layer is excluded. The same exclusion
+applies to `compaction.enabled = true` and `compaction.cake-compact-bin`; the
+project-local layer may only disable compaction or tune it. Trusted relative
 executable paths keep their usual resolution. A CLI flag always wins over the
 same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
@@ -416,6 +475,13 @@ validation is available with `just release-check`.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
+- Context compaction is best-effort and between turns only. The live `turn_usage`
+  measurement excludes the finished turn's response and tool results, so the
+  REPL triggers on a headroom below the configured threshold and the compactor
+  makes the final call. A compaction that a user cancels or that fails after its
+  append may already have changed the session; the next complete `turn_usage`
+  reports the real context. A single long tool loop that fills the window before
+  the prompt ends is not covered.
 - Suspension recovery covers catchable stop signals. Because the stop uses
   SIGSTOP, the shell reports the resumed job as `suspended (signal)`; continuing
   it in the background (`bg`) puts the REPL back in charge of the terminal while

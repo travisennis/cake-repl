@@ -228,8 +228,8 @@ tool-color = true
 				t.Fatal(err)
 			}
 			cfg, ignored, err := LoadProject(path)
-			if err != nil || !ignored {
-				t.Fatalf("LoadProject = %v, %v, want ignored key", ignored, err)
+			if err != nil || len(ignored) != 1 || ignored[0] != "cake-bin" {
+				t.Fatalf("LoadProject ignored = %v, %v, want cake-bin ignored", ignored, err)
 			}
 			got := Merge(&Config{CakeBin: "../trusted-cake"}, cfg)
 			want := Config{CakeBin: "../trusted-cake", Model: "local-model", Profile: "local-profile", OutputLimit: 5000, MaxTimelineItems: 200, ToolColor: true, ToolColorSet: true}
@@ -246,11 +246,11 @@ func TestLoadProjectWithoutExecutable(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, ignored, err := LoadProject(path); err != nil || ignored {
-			t.Fatalf("LoadProject without cake-bin = %v, %v", ignored, err)
+		if _, ignored, err := LoadProject(path); err != nil || len(ignored) != 0 {
+			t.Fatalf("LoadProject without executable-selecting keys = %v, %v", ignored, err)
 		}
 	}
-	if _, ignored, err := LoadProject(filepath.Join(t.TempDir(), "missing")); err != nil || ignored {
+	if _, ignored, err := LoadProject(filepath.Join(t.TempDir(), "missing")); err != nil || len(ignored) != 0 {
 		t.Fatalf("LoadProject missing file = %v, %v", ignored, err)
 	}
 }
@@ -262,5 +262,145 @@ func TestLoadProjectInvalidSyntax(t *testing.T) {
 	}
 	if _, _, err := LoadProject(path); err == nil {
 		t.Fatal("LoadProject with invalid TOML: want error")
+	}
+}
+
+func TestLoadCompactionTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`
+[compaction]
+enabled = true
+cake-compact-bin = "/opt/bin/cake-compact"
+threshold-percent = 70
+keep-tokens = 12000
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load = %v", err)
+	}
+	want := Compaction{
+		Enabled:          true,
+		EnabledSet:       true,
+		CakeCompactBin:   "/opt/bin/cake-compact",
+		ThresholdPercent: 70,
+		KeepTokens:       12000,
+	}
+	if cfg.Compaction != want {
+		t.Fatalf("Compaction = %+v, want %+v", cfg.Compaction, want)
+	}
+}
+
+func TestMergeCompactionDefaultsAndOverrides(t *testing.T) {
+	base := DefaultCompaction()
+	if base.Enabled || base.CakeCompactBin != DefaultCakeCompactBin ||
+		base.ThresholdPercent != DefaultCompactionThresholdPercent ||
+		base.KeepTokens != DefaultCompactionKeepTokens {
+		t.Fatalf("defaults = %+v", base)
+	}
+
+	file := &Config{Compaction: Compaction{Enabled: true, EnabledSet: true, ThresholdPercent: 60}}
+	got := MergeCompaction(base, file)
+	if !got.Enabled || got.ThresholdPercent != 60 {
+		t.Fatalf("file values not applied: %+v", got)
+	}
+	if got.CakeCompactBin != DefaultCakeCompactBin || got.KeepTokens != DefaultCompactionKeepTokens {
+		t.Fatalf("untouched defaults changed: %+v", got)
+	}
+	if got := MergeCompaction(base, nil); got != base {
+		t.Fatalf("nil file changed defaults: %+v", got)
+	}
+}
+
+func TestMergeCompactionDisableWins(t *testing.T) {
+	xdg := &Config{Compaction: Compaction{Enabled: true, EnabledSet: true, ThresholdPercent: 75}}
+	local := &Config{Compaction: Compaction{Enabled: false, EnabledSet: true}}
+	got := Merge(xdg, local)
+	if got.Compaction.Enabled {
+		t.Fatalf("project-local enabled=false did not disable: %+v", got.Compaction)
+	}
+	if got.Compaction.ThresholdPercent != 75 {
+		t.Fatalf("unrelated threshold lost: %+v", got.Compaction)
+	}
+}
+
+func TestLoadProjectCannotEnableOrSelectCompactor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
+	if err := os.WriteFile(path, []byte(`
+[compaction]
+enabled = true
+cake-compact-bin = "/tmp/untrusted-compactor"
+threshold-percent = 50
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, ignored, err := LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantIgnored := []string{"compaction.cake-compact-bin", "compaction.enabled"}
+	if strings.Join(ignored, ",") != strings.Join(wantIgnored, ",") {
+		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
+	}
+	if cfg.Compaction.Enabled || cfg.Compaction.CakeCompactBin != "" {
+		t.Fatalf("project-local security keys survived: %+v", cfg.Compaction)
+	}
+	if cfg.Compaction.ThresholdPercent != 50 {
+		t.Fatalf("allowed tuning key dropped: %+v", cfg.Compaction)
+	}
+
+	trusted := &Config{
+		CakeBin:    "cake",
+		Compaction: Compaction{Enabled: true, EnabledSet: true, CakeCompactBin: "trusted-compactor", ThresholdPercent: 80},
+	}
+	merged := Merge(trusted, cfg)
+	if !merged.Compaction.Enabled || merged.Compaction.CakeCompactBin != "trusted-compactor" {
+		t.Fatalf("trusted values did not survive: %+v", merged.Compaction)
+	}
+}
+
+func TestLoadProjectCanDisableCompaction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
+	if err := os.WriteFile(path, []byte("[compaction]\nenabled = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ignored, err := LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ignored) != 0 {
+		t.Fatalf("ignored = %v, want none", ignored)
+	}
+	if !cfg.Compaction.EnabledSet || cfg.Compaction.Enabled {
+		t.Fatalf("disable was not preserved: %+v", cfg.Compaction)
+	}
+	xdg := &Config{Compaction: Compaction{Enabled: true, EnabledSet: true}}
+	if Merge(xdg, cfg).Compaction.Enabled {
+		t.Fatal("project-local disable did not override XDG enable")
+	}
+}
+
+func TestCompactionValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		c       Compaction
+		wantErr bool
+	}{
+		{"disabled ignores values", Compaction{}, false},
+		{"valid", Compaction{Enabled: true, CakeCompactBin: "cake-compact", ThresholdPercent: 80}, false},
+		{"missing binary", Compaction{Enabled: true, ThresholdPercent: 80}, true},
+		{"threshold too low", Compaction{Enabled: true, CakeCompactBin: "x", ThresholdPercent: 0}, true},
+		{"threshold too high", Compaction{Enabled: true, CakeCompactBin: "x", ThresholdPercent: 101}, true},
+		{"negative keep", Compaction{Enabled: true, CakeCompactBin: "x", ThresholdPercent: 80, KeepTokens: -1}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.c.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

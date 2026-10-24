@@ -849,3 +849,113 @@ func TestStartupConfigMalformedFiles(t *testing.T) {
 		})
 	}
 }
+
+// TestStartupCompactionConfig drives the `[compaction]` table through the real
+// config layers and flag surface: disabled by default, XDG-tunable, unable to be
+// enabled or pointed at an executable by the untrusted project-local layer,
+// disabled by -no-session, and rejected when the threshold is impossible.
+func TestStartupCompactionConfig(t *testing.T) {
+	defaults := app.CompactionConfig{
+		Bin:              "cake-compact",
+		ThresholdPercent: 80,
+		KeepTokens:       20000,
+	}
+	enabled := defaults
+	enabled.Enabled = true
+
+	const enableXDG = "[compaction]\nenabled = true\nthreshold-percent = 70\nkeep-tokens = 12000\n"
+	enabledTuned := enabled
+	enabledTuned.ThresholdPercent = 70
+	enabledTuned.KeepTokens = 12000
+	disabledTuned := enabledTuned
+	disabledTuned.Enabled = false
+	disabledProjectTuned := disabledTuned
+	disabledProjectTuned.ThresholdPercent = 60
+
+	tests := []struct {
+		name     string
+		xdg      string
+		local    string
+		args     []string
+		want     app.CompactionConfig
+		wantWarn []string
+		wantErr  string
+	}{
+		{name: "disabled by default", want: defaults},
+		{name: "XDG enables and tunes", xdg: enableXDG, want: enabledTuned},
+		{
+			name:     "project cannot enable or select the executable",
+			local:    "[compaction]\nenabled = true\ncake-compact-bin = \"/tmp/untrusted\"\n",
+			want:     defaults,
+			wantWarn: []string{"ignoring compaction.cake-compact-bin", "ignoring compaction.enabled = true"},
+		},
+		{
+			name:  "project can disable",
+			xdg:   enableXDG,
+			local: "[compaction]\nenabled = false\nthreshold-percent = 60\n",
+			want:  disabledProjectTuned,
+		},
+		{
+			name:     "no-session disables with a warning",
+			xdg:      enableXDG,
+			args:     []string{"-no-session"},
+			want:     disabledTuned,
+			wantWarn: []string{"disabled by -no-session"},
+		},
+		{
+			name:    "invalid threshold is rejected",
+			xdg:     "[compaction]\nenabled = true\nthreshold-percent = 101\n",
+			wantErr: "threshold-percent",
+		},
+		{
+			name:    "invalid project tuning is rejected",
+			xdg:     enableXDG,
+			local:   "[compaction]\nthreshold-percent = -1\n",
+			wantErr: "threshold-percent",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+			xdgPath := filepath.Join(dir, "xdg", "cake-repl", "config.toml")
+			if err := os.MkdirAll(filepath.Dir(xdgPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for path, content := range map[string]string{xdgPath: tt.xdg, ".cake-repl.toml": tt.local} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			fs := flag.NewFlagSet("cake-repl", flag.ContinueOnError)
+			f := bindFlags(fs)
+			if err := fs.Parse(normalizeOptionalArgs(tt.args)); err != nil {
+				t.Fatalf("parsing %v: %v", tt.args, err)
+			}
+			var warnings bytes.Buffer
+			cfg, err := effectiveConfig(f, explicitFlags(fs), &warnings)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Compaction != tt.want {
+				t.Errorf("compaction = %+v, want %+v", cfg.Compaction, tt.want)
+			}
+			for _, want := range tt.wantWarn {
+				if !strings.Contains(warnings.String(), want) {
+					t.Errorf("warnings = %q, want it to contain %q", warnings.String(), want)
+				}
+			}
+			if tt.wantWarn == nil && warnings.Len() != 0 {
+				t.Errorf("unexpected warnings = %q", warnings.String())
+			}
+		})
+	}
+}

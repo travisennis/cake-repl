@@ -59,6 +59,21 @@ type Config struct {
 	// the alternate screen, so recent terminal history stays visible above the
 	// REPL. See ADR 015.
 	Inline bool
+	// Compaction is the opt-in between-turn context compaction configuration.
+	// The zero value is disabled, so a caller that does not wire it behaves
+	// exactly as before.
+	Compaction CompactionConfig
+}
+
+// CompactionConfig is the resolved `[compaction]` configuration. Bin is the
+// external compactor executable, ThresholdPercent is the context-window
+// percentage it compacts at, and KeepTokens is its retained-tail target. See
+// ADR 023.
+type CompactionConfig struct {
+	Enabled          bool
+	Bin              string
+	ThresholdPercent int
+	KeepTokens       int
 }
 
 const (
@@ -105,9 +120,23 @@ type Model struct {
 	replayWarn    bool
 	sawComplete   bool
 	exitAfter     bool
+	// compacting is true while the external compactor runs. It gates prompt
+	// submission and session-target changes so the next cake process cannot
+	// race the compactor's session lock, and it marks the status line/title as
+	// busy. compactionCancel stops the child; the result stays in flight until
+	// a compactionDoneMsg reaps it, even after a cancel.
+	compacting       bool
+	compactionCancel context.CancelFunc
+	// compactionSeq allocates a request identity for one compaction and
+	// compactionReq is the identity whose result may still be applied. A
+	// canceled or superseded run cannot touch the status line or context of a
+	// later one.
+	compactionSeq uint64
+	compactionReq uint64
 	// newSessionPending is true while an old run canceled by Ctrl+N is being
 	// drained. Its remaining events and cancellation result belong before the
-	// new-session boundary and must not affect the fresh state.
+	// new-session boundary and must not affect the fresh state. It also covers
+	// a canceled compaction being drained after Ctrl+N.
 	newSessionPending bool
 
 	session      sessionState
@@ -348,11 +377,22 @@ func (m Model) CancelRunning() {
 	if m.replayRun != nil {
 		m.replayRun.Cancel()
 	}
+	m.cancelCompaction()
 	// A session listing can be in flight without the model ever seeing a key:
 	// the startup picker starts one before the first frame, and main calls this
 	// for an exit the Update loop never observed (SIGINT, SIGTERM, a recovered
 	// panic), which is exactly the path where quit() cannot cancel it.
 	m.cancelSessionList()
+}
+
+// cancelCompaction stops an in-flight compactor. The process keeps the same
+// result identity until its compactionDoneMsg arrives, so the gate stays closed
+// until the child has actually exited and been reaped.
+func (m *Model) cancelCompaction() {
+	if m.compactionCancel != nil {
+		m.compactionCancel()
+		m.compactionCancel = nil
+	}
 }
 
 // SessionData returns the id of the session the REPL is continuing and the
@@ -392,12 +432,15 @@ func (m Model) Init() tea.Cmd {
 
 // windowTitle renders the terminal title for a working directory and run state.
 // It is the single place the title format is defined, so the idle form, the
-// working form, and the sequence main writes on an unobserved exit cannot
-// drift apart.
-func windowTitle(cwd string, running bool) string {
+// working form, the compacting form, and the sequence main writes on an
+// unobserved exit cannot drift apart.
+func windowTitle(cwd string, running, compacting bool) string {
 	title := "cake-repl: " + ui.Sanitize(cwd)
-	if running {
+	switch {
+	case running:
 		title = "[working] " + title
+	case compacting:
+		title = "[compacting] " + title
 	}
 	return title
 }
@@ -407,10 +450,11 @@ func windowTitle(cwd string, running bool) string {
 // but neither is visible when the terminal window is unfocused, behind another
 // window, or reduced to a tab, so the title carries the same signal: a working
 // marker prefixes the documented `cake-repl: <cwd>` title while a task runs and
-// is absent when the REPL is idle. Emit this on every running-state transition
-// so the title never describes a state the REPL has left.
+// is absent when the REPL is idle. Emit this on every busy-state transition
+// (a run starting or ending, a compaction starting or ending) so the title never
+// describes a state the REPL has left.
 func (m Model) titleCmd() tea.Cmd {
-	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.running))
+	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.running, m.compacting))
 }
 
 // IdleTitleSequence returns the escape sequence that restores the idle terminal
@@ -420,7 +464,7 @@ func (m Model) titleCmd() tea.Cmd {
 // all, so neither exit runs the model's own title command. The sequence is the
 // one tea.SetWindowTitle writes.
 func IdleTitleSequence(cwd string) string {
-	return ansi.SetWindowTitle(windowTitle(cwd, false))
+	return ansi.SetWindowTitle(windowTitle(cwd, false, false))
 }
 
 // trimFront removes the first `over` items from the timeline, adjusts
