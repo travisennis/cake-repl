@@ -5,8 +5,9 @@ A standalone terminal REPL for the [`cake`](https://github.com/travisennis/cake)
 `cake-repl` treats cake as the engine: each submitted prompt spawns one
 `cake --output-format stream-json` process and renders its event stream live —
 assistant messages in REPL-themed markdown, thinking indicators, tool calls
-grouped with their outputs, hook denials, and completion stats. When `-resume`
-is given a UUID, cake-repl first replays that session through
+grouped with their outputs, hook denials, completion stats, and
+context-compaction boundaries. When `-resume` is given a UUID, cake-repl first
+replays that session through
 `cake --output-format stream-json replay <uuid>` to hydrate the visible timeline;
 given on its own, `-resume` opens a picker of this directory's past sessions
 instead.
@@ -21,9 +22,12 @@ the `-model`/config value. The context segment reports the newest complete
 main-agent attempt's input tokens against the model's configured window when cake
 reports one (for example `context: 132k/1M`), or a bare token count when the
 model configures no window. It is omitted until cake reports a complete
-measurement and cleared when the session target changes. Once a run reports a
-session ID — at `task_start` or its completion — the next prompt continues the
-same cake session, whether that run succeeded, failed, or was canceled.
+measurement and cleared when the session target changes. A replayed session that
+contains a context checkpoint shows the checkpoint's own estimate instead,
+marked with `~` (for example `~24k/200k`), until the next live turn reports a
+real measurement. Once a run reports a session ID — at `task_start` or its
+completion — the next prompt continues the same cake session, whether that run
+succeeded, failed, or was canceled.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output, the
@@ -204,7 +208,11 @@ down. The status line and timeline only show it shortened.
   (`132k/1M`), or the bare token count when the model configures no window.
   Partial usage records are ignored, an older cake that emits no record leaves
   the segment out entirely, and a new session or a different `-resume` target
-  clears the measurement until that session reports its own.
+  clears the measurement until that session reports its own. When replay
+  hydrates a session containing a `compaction` record, that checkpoint's
+  `estimated_input.after_tokens` seeds the segment and is prefixed with `~`
+  (`~24k/200k`) because it is cake's estimate, not a provider measurement; the
+  next live `turn_usage` replaces it.
 - A run that ends before completing — canceled, a nonzero exit, a wait error, or
   a stream that closes mid-task — is still pinned to the session id it
   announced, so the next prompt continues the session the run left behind

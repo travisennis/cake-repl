@@ -22,7 +22,8 @@ consumes cake events. This is the project's core external contract.
 - **stream-json schema.** The typed events in `events.go` (`task_start`,
   `session_meta`, `prompt_context`, `message`, `reasoning`, `function_call`,
   `function_call_output`, `hook_event`, `skill_activated`, `task_complete` +
-  `usage`, `turn_usage` + `usage`, and `replay_error`) mirror cake's wire format.
+  `usage`, `turn_usage` + `usage`, `compaction`, and `replay_error`) mirror
+  cake's wire format.
   Field names and JSON tags are the contract; do not rename or repurpose them to
   match cake's output. `session_meta` carries `working_directory` and the
   optional model identity (`model` is the provider model ID, `model_config` the
@@ -47,6 +48,21 @@ consumes cake events. This is the project's core external contract.
   the newest complete record wins, including its window. The app clears the
   measurement whenever the session target changes or resets; it never reads
   cake session files for the figure.
+- **Context compaction (`compaction`).** Replay emits one `compaction` record
+  at its physical position when a session has a context checkpoint. Decode only
+  what rendering needs: record identity, `trigger`, `summary_instruction_version`,
+  a bounded first line of `summary`, the `retained` count, `estimated_input`,
+  and `model`. The retained tail's messages, reasoning, and tool payloads are
+  never decoded into events or timeline items, and one record never expands into
+  duplicate transcript entries. The record decodes field by field (its wire
+  names are documented on the type; it has no struct tags) so an unknown or
+  malformed optional field keeps the record and the rest of its marker instead
+  of breaking the stream. The app appends exactly one `KindInfo` marker such as
+  `context compacted 118k -> 24k, 4 records retained`. On replay it also seeds
+  the status context from `estimated_input.after_tokens`, visibly marked
+  estimated, until the next live `turn_usage` replaces it; a live stream never
+  seeds that estimate. See
+  [cli-and-user-output.md](cli-and-user-output.md) for the rendered forms.
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
   and the versioned `sessions list --json` envelope) is the only contract; it is
