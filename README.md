@@ -22,12 +22,13 @@ the `-model`/config value. The context segment reports the newest complete
 main-agent attempt's input tokens against the model's configured window when cake
 reports one (for example `context: 132k/1M`), or a bare token count when the
 model configures no window. It is omitted until cake reports a complete
-measurement and cleared when the session target changes. A replayed session that
-contains a context checkpoint shows the checkpoint's own estimate instead,
-marked with `~` (for example `~24k/200k`), until the next live turn reports a
-real measurement. Once a run reports a session ID — at `task_start` or its
-completion — the next prompt continues the same cake session, whether that run
-succeeded, failed, or was canceled.
+measurement or a context checkpoint supplies an estimate, and cleared when the
+session target changes. Replay seeds it from a context checkpoint's own estimate,
+marked with `~` (for example `~24k/200k`) because that is cake's estimate rather
+than a provider measurement; a newer complete `turn_usage`, replayed after the
+checkpoint or reported by a live turn, replaces it. Once a run reports a session
+ID — at `task_start` or its completion — the next prompt continues the same cake
+session, whether that run succeeded, failed, or was canceled.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output, the
@@ -211,8 +212,9 @@ down. The status line and timeline only show it shortened.
   clears the measurement until that session reports its own. When replay
   hydrates a session containing a `compaction` record, that checkpoint's
   `estimated_input.after_tokens` seeds the segment and is prefixed with `~`
-  (`~24k/200k`) because it is cake's estimate, not a provider measurement; the
-  next live `turn_usage` replaces it.
+  (`~24k/200k`) because it is cake's estimate, not a provider measurement. A
+  newer complete `turn_usage` replaces it, whether replay emits it after the
+  checkpoint or a later live turn reports it.
 - A run that ends before completing — canceled, a nonzero exit, a wait error, or
   a stream that closes mid-task — is still pinned to the session id it
   announced, so the next prompt continues the session the run left behind

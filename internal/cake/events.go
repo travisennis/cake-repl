@@ -153,12 +153,13 @@ func (e ReplayError) EventType() string { return "replay_error" }
 // tail that replaced retired history; the REPL renders one boundary marker and
 // seeds an estimated context size from it.
 //
-// Only what those two jobs need is decoded. The retained tail is reduced to its
-// record count, and the summary is kept as a single bounded line, so a
-// checkpoint never pins its retained messages, reasoning, or tool content in
-// memory. The wire fields are type, checkpoint_version, checkpoint_id,
-// session_id, task_id, timestamp, trigger, summary, retained,
-// estimated_input, summary_instruction_version, and model.
+// The retained tail is reduced to its record count and the summary to a
+// bounded first line, so a checkpoint never pins its retained messages,
+// reasoning, or tool content in memory. Identity, trigger, and model fields are
+// decoded for the event contract and are not rendered; the marker and estimate
+// read only the estimate and retained count. The wire fields are type,
+// checkpoint_version, checkpoint_id, session_id, task_id, timestamp, trigger,
+// summary, retained, estimated_input, summary_instruction_version, and model.
 type Compaction struct {
 	CheckpointVersion         int
 	CheckpointID              string
@@ -264,9 +265,11 @@ func boundedFirstLine(s string, limit int) string {
 }
 
 // countJSONArrayElements counts the top-level elements of raw when it is a JSON
-// array, and returns 0 otherwise. It walks the array with the tokenizer and
-// discards each element instead of decoding it into a value, so the retained
-// tail's message, reasoning, and tool payloads are never retained.
+// array, and returns 0 otherwise. It streams the array with the tokenizer and
+// discards each element instead of retaining it, so the retained tail's
+// message, reasoning, and tool payloads never stay on the decoded event.
+// Tokenization still materializes each scalar transiently, bounded by the
+// record itself.
 func countJSONArrayElements(raw json.RawMessage) int {
 	if len(raw) == 0 {
 		return 0

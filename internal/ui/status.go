@@ -89,10 +89,9 @@ func flattenLine(s string) string {
 // size the model saw on the newest complete attempt, over the model's
 // configured window when cake reports one (for example "132k/1M"). A model
 // that configures no window gets the bare count instead of a placeholder. An
-// estimated figure, which a replayed checkpoint supplies until the next live
+// estimated figure, supplied by a compaction estimate rather than a provider
 // measurement, is prefixed with "~" (for example "~24k/200k") so it is never
-// mistaken for a provider measurement. It returns empty for no measurement,
-// which omits the segment.
+// mistaken for one. It returns empty for no figure, which omits the segment.
 func ContextValue(used, window int, estimated bool) string {
 	if used <= 0 {
 		return ""

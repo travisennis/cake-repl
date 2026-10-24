@@ -21,17 +21,20 @@ type sessionState struct {
 	// earlier session must never retarget the run. It is cleared whenever the
 	// session target changes, so it always belongs to the invocation being run.
 	AnnouncedID string
-	// Context is the latest complete context measurement cake reported for the
-	// current session. Nil means none is available yet, or the target changed,
-	// so the status line omits the segment rather than showing a stale figure.
+	// Context is the newest context figure for the current session: a complete
+	// cake measurement, or a replayed checkpoint's estimate that no newer
+	// complete measurement has replaced. Nil means none is available yet, or the
+	// target changed, so the status line omits the segment rather than showing a
+	// stale figure.
 	Context *ContextUsage
 }
 
-// ContextUsage is one context measurement: Tokens is the prompt size the model
-// saw on the newest complete main-agent attempt, and Window is the model's
-// configured context window (a non-positive value means none). Estimated marks
-// a figure seeded from a replay checkpoint instead of a provider measurement,
-// so the status line can qualify it.
+// ContextUsage is one context figure: Tokens is the prompt size the model saw on
+// the newest complete main-agent attempt, or a compaction estimate when
+// Estimated is set, and Window is the model's configured context window (a
+// non-positive value means none). Estimated marks a figure supplied by a
+// compaction estimate instead of a provider measurement, so the status line can
+// qualify it.
 type ContextUsage struct {
 	Tokens    int
 	Window    int
@@ -76,7 +79,9 @@ func (s *sessionState) OnTaskStart(e cake.TaskStart) {
 // positive input count is not a measurement at all. The newest complete record
 // wins, including its window: a later record that carries no context_window
 // clears the window rather than pairing a new measurement with a window from
-// another model.
+// another model. A complete record also replaces an estimated compaction
+// figure, whether replay emitted it after the checkpoint or a live turn
+// reported it.
 func (s *sessionState) OnTurnUsage(e cake.TurnUsage) {
 	if e.UsagePresence != "" && e.UsagePresence != usagePresenceComplete {
 		return
@@ -88,12 +93,15 @@ func (s *sessionState) OnTurnUsage(e cake.TurnUsage) {
 }
 
 // OnCompaction seeds the context display from a replayed checkpoint's own token
-// estimate. The checkpoint is the newest statement about the session's context,
-// so its after_tokens replaces an older turn_usage figure, while the window
-// stays the one the model last reported. The figure is marked Estimated so a
-// resume never presents cake's estimate as a provider measurement; the next
-// live turn_usage replaces it. The record carries no window of its own, so an
-// unknown window renders the bare estimate instead of a fabricated fraction.
+// estimate. At its position in the replay the checkpoint is the newest
+// statement about the session's context, so its after_tokens replaces an older
+// turn_usage figure, while the window stays the one the model last reported.
+// The figure is marked Estimated so a resume never presents cake's estimate as
+// a provider measurement; a newer complete turn_usage—replayed after this
+// record or reported by a live turn—replaces it. The same ContextUsage shape
+// will carry a live compaction result's estimate; this method is the replay
+// path. The record carries no window of its own, so an unknown window renders
+// the bare estimate instead of a fabricated fraction.
 func (s *sessionState) OnCompaction(e cake.Compaction) {
 	after := e.EstimatedInput.AfterTokens
 	if after <= 0 {
