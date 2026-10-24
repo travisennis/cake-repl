@@ -913,8 +913,34 @@ func TestLiveTurnUsageUpdatesStatusContext(t *testing.T) {
 	}
 }
 
-// A live compaction record renders one marker but never seeds an estimated
-// context figure: live context remains a provider measurement only.
+// The marker formatter will be shared with the planned live compaction notice,
+// so pin its degraded forms as well as the full one.
+func TestCompactionMarker(t *testing.T) {
+	tests := []struct {
+		name     string
+		before   int
+		after    int
+		retained int
+		want     string
+	}{
+		{"full", 118_000, 24_000, 4, "context compacted 118k -> 24k, 4 records retained"},
+		{"one record", 118_000, 24_000, 1, "context compacted 118k -> 24k, 1 record retained"},
+		{"no estimate", 0, 0, 2, "context compacted, 2 records retained"},
+		{"no retained", 118_000, 24_000, 0, "context compacted 118k -> 24k"},
+		{"bare", 0, 0, 0, "context compacted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compactionMarker(tt.before, tt.after, tt.retained); got != tt.want {
+				t.Errorf("compactionMarker(%d, %d, %d) = %q, want %q", tt.before, tt.after, tt.retained, got, tt.want)
+			}
+		})
+	}
+}
+
+// A live compaction stream record renders one marker but never seeds an
+// estimated context figure: only a replayed checkpoint, or the planned live
+// compaction client's own result, supplies an estimate.
 func TestLiveCompactionMarkerDoesNotSeedContext(t *testing.T) {
 	m := laidOut(160, 24)
 	m.applyEvent(cake.TurnUsage{
