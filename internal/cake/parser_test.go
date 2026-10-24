@@ -1,8 +1,10 @@
 package cake
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestParseLineTaskStart(t *testing.T) {
@@ -362,6 +364,87 @@ func TestParseLineTurnUsageIgnoresUnknownFields(t *testing.T) {
 	}
 	if u.Usage.InputTokens != 5 || u.Usage.InputTokensDetails.CachedTokens != 2 {
 		t.Errorf("known fields lost with unknown ones: %+v", u.Usage)
+	}
+}
+
+// A compaction record decodes into the fields the timeline marker and the
+// resumed status estimate need. Its retained tail is counted, not decoded, and
+// its summary is reduced to the first line.
+func TestParseLineCompaction(t *testing.T) {
+	line := `{"type":"compaction","checkpoint_version":1,"checkpoint_id":"checkpoint-1","session_id":"s-1","task_id":"t-1","timestamp":"2026-10-23T14:00:08Z","trigger":"threshold","summary":"Earlier turns read README.md.\nRETAINED-SUMMARY-TAIL","retained":[{"type":"message","role":"user","content":"RETAINED-USER-INPUT"},{"type":"message","role":"assistant","content":"RETAINED-ANSWER"},{"type":"function_call","id":"fc-r","call_id":"call-9","name":"Read","arguments":"{}"},{"type":"function_call_output","call_id":"call-9","output":"RETAINED-TOOL-OUTPUT"}],"model":{"model":"gpt-5.4","model_config":"test"},"summary_instruction_version":1,"estimated_input":{"before_tokens":118000,"after_tokens":24000,"basis":"measured_usage"}}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	c, ok := ev.(Compaction)
+	if !ok {
+		t.Fatalf("got %T, want Compaction", ev)
+	}
+	if c.CheckpointVersion != 1 || c.CheckpointID != "checkpoint-1" {
+		t.Errorf("checkpoint identity = %+v", c)
+	}
+	if c.SessionID != "s-1" || c.TaskID != "t-1" || c.Timestamp != "2026-10-23T14:00:08Z" {
+		t.Errorf("record identity = %+v", c)
+	}
+	if c.Trigger != "threshold" || c.SummaryInstructionVersion != 1 {
+		t.Errorf("record metadata = %+v", c)
+	}
+	if c.Summary != "Earlier turns read README.md." {
+		t.Errorf("summary = %q, want the first line only", c.Summary)
+	}
+	if c.RetainedCount != 4 {
+		t.Errorf("retained count = %d, want 4", c.RetainedCount)
+	}
+	want := CompactionEstimate{BeforeTokens: 118000, AfterTokens: 24000, Basis: "measured_usage"}
+	if c.EstimatedInput != want {
+		t.Errorf("estimated input = %+v, want %+v", c.EstimatedInput, want)
+	}
+	if c.Model.Model != "gpt-5.4" || c.Model.ModelConfig != "test" {
+		t.Errorf("model = %+v", c.Model)
+	}
+}
+
+// An unknown or malformed optional field must not drop the checkpoint: the
+// marker still renders, and the fields that decoded stay usable.
+func TestParseLineCompactionToleratesMalformedOptionalFields(t *testing.T) {
+	line := `{"type":"compaction","checkpoint_version":"one","checkpoint_id":"checkpoint-1","trigger":"manual","summary":{"provider":"future"},"retained":{"not":"an array"},"estimated_input":"unknown","model":["future"],"summary_instruction_version":null,"future_field":{"nested":true}}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine returned an error for malformed optional fields: %v", err)
+	}
+	c, ok := ev.(Compaction)
+	if !ok {
+		t.Fatalf("got %T, want Compaction", ev)
+	}
+	if c.CheckpointID != "checkpoint-1" || c.Trigger != "manual" {
+		t.Errorf("well-formed fields lost: %+v", c)
+	}
+	if c.CheckpointVersion != 0 || c.Summary != "" || c.RetainedCount != 0 {
+		t.Errorf("malformed fields decoded as %+v", c)
+	}
+	if c.EstimatedInput != (CompactionEstimate{}) || c.Model != (CompactionModel{}) {
+		t.Errorf("malformed blocks decoded as %+v/%+v", c.EstimatedInput, c.Model)
+	}
+}
+
+// The summary is bounded on a rune boundary, so one large generated summary
+// cannot be pinned by the decoded event.
+func TestParseLineCompactionBoundsSummary(t *testing.T) {
+	summary := "a" + strings.Repeat("é", 2_000)
+	line := `{"type":"compaction","summary":` + strconv.Quote(summary) + `}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	c, ok := ev.(Compaction)
+	if !ok {
+		t.Fatalf("got %T, want Compaction", ev)
+	}
+	if len(c.Summary) > maxCompactionSummaryBytes {
+		t.Errorf("summary length = %d bytes, want at most %d", len(c.Summary), maxCompactionSummaryBytes)
+	}
+	if !utf8.ValidString(c.Summary) {
+		t.Errorf("summary was cut mid-rune: %q", c.Summary)
 	}
 }
 

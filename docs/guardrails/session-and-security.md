@@ -45,8 +45,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   replay command before accepting a new prompt. Ordered replay events hydrate
   the local timeline; metadata restores known session/task ids, and replayed
   user messages are rendered because no prompt was submitted by the REPL.
-  Hydration is not a live task, so the running state remains idle. A replay
-  failure or unsupported cake binary produces a warning and leaves the explicit
+  Hydration is not a live task, so the running state remains idle. A replayed
+  `compaction` checkpoint renders one timeline marker and seeds the status
+  context from its `estimated_input.after_tokens`, always marked with `~`; a
+  newer complete `turn_usage`, replayed or live, replaces it. A replay failure
+  or unsupported cake binary produces a warning and leaves the explicit
   `--resume <uuid>` pin unchanged so the user can continue.
 - **Startup session picker.** A bare `-resume` names no session, so it hydrates
   nothing: no replay is started and no pin is set. It opens the same idle
@@ -182,6 +185,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Orphaning a session.** Leaving the run mode at `RunFresh` after a failure
   that reported a session id, so the user's next prompt silently starts a new
   session and abandons everything the failed run wrote.
+- **Presenting a compaction estimate as a measurement.** Rendering a
+  checkpoint's `estimated_input.after_tokens` without the `~` qualifier, or
+  keeping it after a newer complete `turn_usage` has replaced the context.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Reopening terminal injection.** Adding a render path that bypasses

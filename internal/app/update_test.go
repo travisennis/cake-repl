@@ -913,6 +913,63 @@ func TestLiveTurnUsageUpdatesStatusContext(t *testing.T) {
 	}
 }
 
+// The marker formatter will be shared with the planned live compaction notice,
+// so pin its degraded forms as well as the full one.
+func TestCompactionMarker(t *testing.T) {
+	tests := []struct {
+		name     string
+		before   int
+		after    int
+		retained int
+		want     string
+	}{
+		{"full", 118_000, 24_000, 4, "context compacted 118k -> 24k, 4 records retained"},
+		{"one record", 118_000, 24_000, 1, "context compacted 118k -> 24k, 1 record retained"},
+		{"no estimate", 0, 0, 2, "context compacted, 2 records retained"},
+		{"no retained", 118_000, 24_000, 0, "context compacted 118k -> 24k"},
+		{"bare", 0, 0, 0, "context compacted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compactionMarker(tt.before, tt.after, tt.retained); got != tt.want {
+				t.Errorf("compactionMarker(%d, %d, %d) = %q, want %q", tt.before, tt.after, tt.retained, got, tt.want)
+			}
+		})
+	}
+}
+
+// A live compaction stream record renders one marker but never seeds an
+// estimated context figure: only a replayed checkpoint, or the planned live
+// compaction client's own result, supplies an estimate.
+func TestLiveCompactionMarkerDoesNotSeedContext(t *testing.T) {
+	m := laidOut(160, 24)
+	m.applyEvent(cake.TurnUsage{
+		Usage:         cake.Usage{InputTokens: 14_383},
+		UsagePresence: "complete",
+		ContextWindow: 1_000_000,
+	})
+	m.applyEvent(cake.Compaction{
+		EstimatedInput: cake.CompactionEstimate{BeforeTokens: 118_000, AfterTokens: 24_000},
+		RetainedCount:  1,
+	})
+
+	var marker string
+	for _, item := range m.items {
+		if item.Kind == ui.KindInfo {
+			marker = item.Text
+		}
+	}
+	if marker != "context compacted 118k -> 24k, 1 record retained" {
+		t.Errorf("marker = %q", marker)
+	}
+	if m.session.Context == nil || m.session.Context.Tokens != 14_383 || m.session.Context.Estimated {
+		t.Errorf("live context = %+v, want the unchanged measurement", m.session.Context)
+	}
+	if line := m.statusLine(); !strings.Contains(line, "context: 14k/1M") || strings.Contains(line, "~") {
+		t.Errorf("live status line = %q, want an unqualified measurement", line)
+	}
+}
+
 func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Model = "gpt-x"

@@ -940,6 +940,22 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		// timeline representation of its own.
 		m.session.OnTurnUsage(e)
 
+	case cake.Compaction:
+		// Replay emits one compaction record at its physical position. It becomes
+		// exactly one boundary marker: the retained tail is never expanded into
+		// duplicate messages or tool calls. A replayed checkpoint also seeds the
+		// status context with its own estimate, which any newer complete
+		// turn_usage replaces. A live compaction stream record never seeds that
+		// estimate; the planned compaction client (task 119) will seed the same
+		// ContextUsage figure from its live result.
+		if replay {
+			m.session.OnCompaction(e)
+		}
+		m.appendItem(ui.Item{
+			Kind: ui.KindInfo,
+			Text: compactionMarker(e.EstimatedInput.BeforeTokens, e.EstimatedInput.AfterTokens, e.RetainedCount),
+		})
+
 	case cake.TaskComplete:
 		m.session.OnTaskComplete(e)
 		m.session.OnModel(e.ModelConfig, e.Model)
@@ -1148,6 +1164,24 @@ func describeHook(e cake.HookEvent) (string, bool) {
 	benign := decision == "" || decision == "allow" || decision == "none"
 	failed := e.ExitCode != nil && *e.ExitCode != 0
 	return b.String(), !benign || failed
+}
+
+// compactionMarker renders the one timeline marker for a context checkpoint:
+// the estimated input reduction when cake reported one, plus how many records
+// the checkpoint retained. The retained tail's content is never shown; the
+// marker only stands where the checkpoint sits in the transcript. The planned
+// live compaction client (task 119) will reuse this formatter, so replay and
+// live notices will share one wording.
+func compactionMarker(before, after, retained int) string {
+	var b strings.Builder
+	b.WriteString("context compacted")
+	if before > 0 && after > 0 {
+		fmt.Fprintf(&b, " %s -> %s", ui.CompactTokens(before), ui.CompactTokens(after))
+	}
+	if retained > 0 {
+		fmt.Fprintf(&b, ", %d record%s retained", retained, plural(retained))
+	}
+	return b.String()
 }
 
 func completionSummary(e cake.TaskComplete) string {

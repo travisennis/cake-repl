@@ -3,7 +3,12 @@
 // newline-delimited JSON on stdout and exposed as typed Go values.
 package cake
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"unicode/utf8"
+)
 
 // Event is implemented by every decoded stream-json record.
 type Event interface {
@@ -142,6 +147,165 @@ type ReplayError struct {
 }
 
 func (e ReplayError) EventType() string { return "replay_error" }
+
+// Compaction is one committed context checkpoint, emitted by replay at its
+// physical position in the transcript. It describes a summary plus a retained
+// tail that replaced retired history; the REPL renders one boundary marker and
+// seeds an estimated context size from it.
+//
+// The retained tail is reduced to its record count and the summary to a
+// bounded first line, so a checkpoint never pins its retained messages,
+// reasoning, or tool content in memory. Identity, trigger, and model fields are
+// decoded for the event contract and are not rendered; the marker and estimate
+// read only the estimate and retained count. The wire fields are type,
+// checkpoint_version, checkpoint_id, session_id, task_id, timestamp, trigger,
+// summary, retained, estimated_input, summary_instruction_version, and model.
+type Compaction struct {
+	CheckpointVersion         int
+	CheckpointID              string
+	SessionID                 string
+	TaskID                    string
+	Timestamp                 string
+	Trigger                   string
+	Summary                   string
+	RetainedCount             int
+	EstimatedInput            CompactionEstimate
+	SummaryInstructionVersion int
+	Model                     CompactionModel
+}
+
+// maxCompactionSummaryBytes bounds the summary line a decoded Compaction keeps.
+// The record itself can be several megabytes; the event only needs enough text
+// to stay recognizable in diagnostics, never the whole generated summary.
+const maxCompactionSummaryBytes = 200
+
+// CompactionEstimate is a checkpoint's own token estimate for the request
+// before and after it. These are estimates, not provider measurements.
+// Basis is cake's estimate basis (measured_usage or content_class).
+type CompactionEstimate struct {
+	BeforeTokens int
+	AfterTokens  int
+	Basis        string
+}
+
+// CompactionModel identifies the model a checkpoint was written under.
+// Model is the provider model ID; ModelConfig is the [[models]] entry name.
+type CompactionModel struct {
+	Model       string
+	ModelConfig string
+}
+
+func (e Compaction) EventType() string { return "compaction" }
+
+// UnmarshalJSON decodes a compaction record field by field so an unknown or
+// malformed optional field never drops the record from the stream: a field that
+// does not decode keeps its zero value and the rest of the checkpoint still
+// renders. A record that is not a JSON object is still an error, because the
+// line itself is malformed.
+func (e *Compaction) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	decodeOptionalField(fields["checkpoint_version"], &e.CheckpointVersion)
+	decodeOptionalField(fields["checkpoint_id"], &e.CheckpointID)
+	decodeOptionalField(fields["session_id"], &e.SessionID)
+	decodeOptionalField(fields["task_id"], &e.TaskID)
+	decodeOptionalField(fields["timestamp"], &e.Timestamp)
+	decodeOptionalField(fields["trigger"], &e.Trigger)
+	decodeOptionalField(fields["summary_instruction_version"], &e.SummaryInstructionVersion)
+
+	var summary string
+	if decodeOptionalField(fields["summary"], &summary) {
+		e.Summary = boundedFirstLine(summary, maxCompactionSummaryBytes)
+	}
+
+	var estimate map[string]json.RawMessage
+	if decodeOptionalField(fields["estimated_input"], &estimate) {
+		decodeOptionalField(estimate["before_tokens"], &e.EstimatedInput.BeforeTokens)
+		decodeOptionalField(estimate["after_tokens"], &e.EstimatedInput.AfterTokens)
+		decodeOptionalField(estimate["basis"], &e.EstimatedInput.Basis)
+	}
+
+	var model map[string]json.RawMessage
+	if decodeOptionalField(fields["model"], &model) {
+		decodeOptionalField(model["model"], &e.Model.Model)
+		decodeOptionalField(model["model_config"], &e.Model.ModelConfig)
+	}
+
+	e.RetainedCount = countJSONArrayElements(fields["retained"])
+	return nil
+}
+
+// decodeOptionalField decodes one optional field, reporting whether it decoded. A
+// missing or malformed field is not an error: the event keeps decoding so one
+// unexpected value cannot break the stream.
+func decodeOptionalField(raw json.RawMessage, dst any) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	return json.Unmarshal(raw, dst) == nil
+}
+
+// boundedFirstLine returns the first line of s, cut on a rune boundary to at
+// most limit bytes.
+func boundedFirstLine(s string, limit int) string {
+	if line, _, ok := strings.Cut(s, "\n"); ok {
+		s = line
+	}
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// countJSONArrayElements counts the top-level elements of raw when it is a JSON
+// array, and returns 0 otherwise. It streams the array with the tokenizer and
+// discards each element instead of retaining it, so the retained tail's
+// message, reasoning, and tool payloads never stay on the decoded event.
+// Tokenization still materializes each scalar transiently, bounded by the
+// record itself.
+func countJSONArrayElements(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	tok, err := dec.Token()
+	if err != nil || tok != json.Delim('[') {
+		return 0
+	}
+	count, depth := 0, 0
+	for {
+		tok, err = dec.Token()
+		if err != nil {
+			return count
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			switch v {
+			case '[', '{':
+				if depth == 0 {
+					count++
+				}
+				depth++
+			default: // ']' or '}'
+				if depth == 0 {
+					return count
+				}
+				depth--
+			}
+		default:
+			if depth == 0 {
+				count++
+			}
+		}
+	}
+}
 
 // FunctionCall is a tool invocation requested by the model.
 type FunctionCall struct {

@@ -101,9 +101,19 @@ in plain text like every other surface.
   field is cake's newest complete main-agent `turn_usage` measurement, rendered
   compactly as `132k/1M` (the attempt's input tokens over the configured
   window) or as a bare `132k` when the model configures no window. Partial usage
-  records are ignored, the field is omitted when no complete measurement exists,
-  and a new session or resume switch clears it so a stale figure never crosses
-  into another session's status line. The session field names the id cake
+  records are ignored, the field is omitted when no complete measurement or
+  checkpoint estimate exists, and a new session or resume switch clears it so a
+  stale figure never crosses into another session's status line. A replayed
+  `compaction` record seeds the field from its `estimated_input.after_tokens`,
+  prefixed with `~` (for example `~24k/200k`) because it is cake's estimate
+  rather than a provider measurement; a newer complete `turn_usage`, replayed
+  after the checkpoint or reported by a live turn, replaces it. The record also
+  adds exactly one `i` info marker at its physical timeline position, for
+  example `context compacted 118k -> 24k, 4 records retained`, and never expands
+  the checkpoint's retained tail into duplicate conversation or tool items. The
+  planned live compaction client (task 119) will reuse the same marker
+  formatter, so replay and live notices will share one wording. The session
+  field names the id cake
   reported for the current session and carries none after a retarget until the
   new target reports one, while the next-run field names the pinned target. It
   pads or truncates to the terminal width. The prompt

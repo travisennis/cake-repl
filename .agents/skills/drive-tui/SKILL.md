@@ -33,8 +33,8 @@ not read.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `FAKE_CAKE_FIXTURE` | `happy-path` | fixture for a live prompt: `happy-path`, `error-task`, `minimal`, `turn-usage`, `unknown-type`, `malformed-midstream`, `wide-emoji-row` |
-| `FAKE_CAKE_REPLAY_FIXTURE` | `replay-path` | fixture for `replay <uuid>`, used when the REPL starts with `-resume` |
+| `FAKE_CAKE_FIXTURE` | `happy-path` | fixture for a live prompt: `happy-path`, `error-task`, `minimal`, `turn-usage`, `compaction` (forward-compat; current cake emits this record only on replay), `unknown-type`, `malformed-midstream`, `wide-emoji-row` |
+| `FAKE_CAKE_REPLAY_FIXTURE` | `replay-path` | fixture for `replay <uuid>`, used when the REPL starts with `-resume`; `compaction` shows the checkpoint marker and estimated context, and `compaction-continued` shows a newer replayed `turn_usage` replacing the estimate |
 | `FAKE_CAKE_SESSIONS` | `valid` | response for `sessions list --json`: `valid` (two sessions), `empty`, or `error` |
 | `FAKE_CAKE_DELAY` | `0` | seconds between lines, so the running state or a loading listing is observable (`FAKE_CAKE_DELAY=0.4`) |
 | `FAKE_CAKE_ARGS_FILE` | unset | append each invocation's argv, to check which flags the REPL passed through |

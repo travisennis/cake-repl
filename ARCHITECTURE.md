@@ -79,7 +79,10 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   separate hydration state, so it does not appear as a live task; failures warn
   and preserve the explicit `--resume <uuid>` next-run pin. A bare `-resume`
   never reaches this path: it opens the session picker, which runs only the
-  read-only session listing, so no replay runs before the first prompt. See
+  read-only session listing, so no replay runs before the first prompt. A
+  session containing a context checkpoint renders one `compaction` marker at the
+  record's physical position and never expands the checkpoint's retained tail
+  into duplicate timeline items. See
   [`docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md`](docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md).
 - **Session listing is read-only.** `cake sessions list --json` is invoked only
   from `internal/cake`, with the same working directory as a live prompt, to list
