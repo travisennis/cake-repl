@@ -84,6 +84,14 @@ func ParseLine(line []byte) (Event, error) {
 			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
 		}
 		return ev, nil
+	case "compaction":
+		// Compaction decodes its own fields tolerantly, so a malformed optional
+		// field keeps the record instead of turning it into a ParseError.
+		var ev Compaction
+		if err := json.Unmarshal(env.Raw, &ev); err != nil {
+			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
+		}
+		return ev, nil
 	case "task_complete":
 		var ev TaskComplete
 		if err := json.Unmarshal(env.Raw, &ev); err != nil {
