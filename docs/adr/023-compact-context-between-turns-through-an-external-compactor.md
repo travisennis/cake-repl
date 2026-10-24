@@ -138,6 +138,13 @@ quality claim.
   recovery fork can produce a checkpoint-free copy.
 - Rollback: set `enabled = false` (the default) or remove the section; no
   session state is introduced by the REPL itself.
+- Residual risk: once a trusted layer enables compaction, a project-local file
+  can tune `threshold-percent` low and `keep-tokens` small, increasing how often
+  the compactor runs and how much it retires. This is accepted because the
+  metered operation must already be enabled in XDG config or an explicit
+  `-config`, and the user can disable it there or in the project; the compactor
+  still re-checks the session and its minimum-reduction guard. Flooring or
+  ignoring project-local tuning is a separate decision.
 
 ## More Information
 

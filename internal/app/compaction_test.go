@@ -328,6 +328,39 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 	}
 }
 
+func TestExitWhileCompactingCancelsThenQuits(t *testing.T) {
+	bin := writeFakeCompactor(t, `exec sleep 30`)
+	m := compactionModel(t, bin)
+
+	tm, compactionCmd := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
+	done := runCompactionCmd(compactionCmd)
+
+	tm, cmd := m.execCommand(Command{Kind: CmdExit})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Fatalf("/exit returned %v, want no command before the child is reaped", cmd)
+	}
+	if !m.exitAfter || !m.compacting {
+		t.Fatalf("/exit state = exitAfter:%v compacting:%v", m.exitAfter, m.compacting)
+	}
+	if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "canceling context compaction, then exiting") {
+		t.Fatalf("/exit notice = %+v", it)
+	}
+
+	tm, quitCmd := m.Update(waitForCompaction(t, done))
+	m = tm.(Model)
+	if m.compacting {
+		t.Fatal("reaped cancellation left the gate closed")
+	}
+	if quitCmd == nil {
+		t.Fatal("no quit command after the canceled child was reaped")
+	}
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatalf("quit command = %T, want tea.QuitMsg", quitCmd())
+	}
+}
+
 func TestCtrlNWhileCompactingResetsWithoutApplyingResult(t *testing.T) {
 	bin := writeFakeCompactor(t, `exec sleep 30`)
 	m := compactionModel(t, bin)

@@ -172,16 +172,10 @@ func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) 
 		})
 		return
 	}
-	window := 0
-	if m.session.Context != nil {
-		window = m.session.Context.Window
-	}
-	if window <= 0 {
-		window = doc.Window
-	}
-	if doc.AfterTokens > 0 {
-		m.session.Context = &ContextUsage{Tokens: doc.AfterTokens, Window: window, Estimated: true}
-	}
+	// The compactor's document carries the window it used; when it does not, the
+	// session's last known window is kept. The estimate is marked so the status
+	// line renders it with "~".
+	m.session.OnCompactionEstimate(doc.AfterTokens, doc.Window)
 	m.appendItem(ui.Item{
 		Kind: ui.KindInfo,
 		Text: compactionMarker(doc.BeforeTokens, doc.AfterTokens, doc.RetainedCount),

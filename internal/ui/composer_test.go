@@ -9,7 +9,7 @@ import (
 )
 
 func TestPromptComposer_RendersFocusedChromeAndHints(t *testing.T) {
-	got := PromptComposer(DefaultTheme(), "first\nsecond", 80, false, 2,
+	got := PromptComposer(DefaultTheme(), "first\nsecond", 80, "ready", 2,
 		"Ctrl+S submit · Enter newline · /help")
 
 	for _, want := range []string{"prompt · ready", "first", "second", "Ctrl+S submit", "Enter newline", "/help", "2 lines"} {
@@ -23,7 +23,7 @@ func TestPromptComposer_RendersFocusedChromeAndHints(t *testing.T) {
 }
 
 func TestPromptComposer_ConstrainsEveryLineToWidth(t *testing.T) {
-	got := PromptComposer(DefaultTheme(), strings.Repeat("x", 60)+"\nshort", 24, true, 1,
+	got := PromptComposer(DefaultTheme(), strings.Repeat("x", 60)+"\nshort", 24, "running", 1,
 		"Ctrl+S submit · Enter newline · /help")
 
 	for i, line := range strings.Split(got, "\n") {
@@ -36,12 +36,20 @@ func TestPromptComposer_ConstrainsEveryLineToWidth(t *testing.T) {
 	}
 }
 
+func TestPromptComposer_ShowsCompactingState(t *testing.T) {
+	got := PromptComposer(DefaultTheme(), "hello", 40, "compacting", 1,
+		"Ctrl+S submit · Enter newline · /help")
+	if !strings.Contains(got, "prompt · compacting") {
+		t.Errorf("composer missing compacting state:\n%s", got)
+	}
+}
+
 func TestPromptComposer_AsciiNoANSIAndVisibleBoundaries(t *testing.T) {
 	orig := lipgloss.ColorProfile()
 	defer lipgloss.SetColorProfile(orig)
 	lipgloss.SetColorProfile(termenv.Ascii)
 
-	got := PromptComposer(DefaultTheme(), "hello", 40, false, 1,
+	got := PromptComposer(DefaultTheme(), "hello", 40, "ready", 1,
 		"Ctrl+S submit · Enter newline · /help")
 	if strings.Contains(got, "\x1b[") {
 		t.Errorf("composer contains ANSI escapes in Ascii mode: %q", got)

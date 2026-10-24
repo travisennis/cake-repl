@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -78,9 +79,9 @@ func (o Options) Args() []string {
 	return append(args, "--", o.SessionID)
 }
 
-// Document is the subset of `cake-compact compact -json` output the REPL reads.
-// Unknown fields are ignored so a newer compactor keeps working. The compactor
-// reports in_place explicitly; the REPL never assumes the default.
+// Document is the documented `cake-compact compact -json` result the REPL
+// consumes. Unknown fields are ignored so a newer compactor keeps working. The
+// compactor reports in_place explicitly; the REPL never assumes the default.
 type Document struct {
 	Compacted       bool   `json:"compacted"`
 	Reason          string `json:"reason"`
@@ -119,11 +120,23 @@ func Compact(ctx context.Context, opts Options) Result {
 	// Prefer a graceful stop so the compactor can abandon an incomplete append
 	// and cancel its summarizer; WaitDelay then forces the issue. Windows
 	// cannot deliver SIGTERM, so kill outright there.
+	//
+	// cancelRequested records whether the watcher actually signaled the child.
+	// Cancellation is classified from this flag plus the final process status,
+	// not from ctx.Err(), so a Ctrl+C that lands after a natural exit cannot
+	// relabel a real failure as a cancellation (the same ordering as runner.go).
+	var cancelRequested atomic.Bool
 	cmd.Cancel = func() error {
+		var err error
 		if runtime.GOOS == "windows" {
-			return cmd.Process.Kill()
+			err = cmd.Process.Kill()
+		} else {
+			err = cmd.Process.Signal(syscall.SIGTERM)
 		}
-		return cmd.Process.Signal(syscall.SIGTERM)
+		if err == nil {
+			cancelRequested.Store(true)
+		}
+		return err
 	}
 	cmd.WaitDelay = opts.waitDelay
 	if cmd.WaitDelay <= 0 {
@@ -138,23 +151,32 @@ func Compact(ctx context.Context, opts Options) Result {
 	res := Result{ExitCode: -1}
 	err := cmd.Run()
 	res.Stderr = stderr.String()
-	res.Canceled = ctx.Err() != nil
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil:
+		// A process that exited cleanly is not a cancellation, even if a late
+		// Ctrl+C also flipped the context; a completed document wins.
 		res.ExitCode = 0
 	case errors.Is(err, context.Canceled):
+		// The context canceled before a clean exit. A document that was still
+		// produced is applied as success by the caller; without one the run is
+		// a cancellation.
 		res.ExitCode = exitCode(cmd)
+		res.Canceled = true
 	case errors.As(err, &exitErr):
 		res.ExitCode = exitCode(cmd)
+		res.Canceled = canceledExit(exitErr, cancelRequested.Load())
 	default:
 		// The process could not be started (a missing or non-executable
 		// binary) or teardown failed in another way.
 		res.Err = err
 	}
 	if opts.DebugLog != nil {
-		fmt.Fprintf(opts.DebugLog, "compaction: session=%s exit=%d canceled=%v err=%v stderr=%s\n",
-			opts.SessionID, res.ExitCode, res.Canceled, res.Err, res.Stderr)
+		// Metadata only: the compactor's stderr may contain session content and
+		// is already bounded for the failure warning. The owner-only debug log
+		// records the lifecycle, not a second copy of the diagnostic.
+		fmt.Fprintf(opts.DebugLog, "compaction: session=%s exit=%d canceled=%v err=%v\n",
+			opts.SessionID, res.ExitCode, res.Canceled, res.Err)
 	}
 	if res.ExitCode != 0 || res.Err != nil {
 		return res
@@ -177,6 +199,18 @@ func exitCode(cmd *exec.Cmd) int {
 		return -1
 	}
 	return cmd.ProcessState.ExitCode()
+}
+
+// canceledExit reports whether a non-zero exit is a cancellation rather than a
+// natural failure. On POSIX, signaling an exited-but-unreaped process can
+// succeed, so both the cancel callback and a signal-terminated status are
+// required; Windows has no signal status, so a successful cancel is enough.
+// This mirrors the live-run classification.
+func canceledExit(exitErr *exec.ExitError, cancelRequested bool) bool {
+	if !cancelRequested {
+		return false
+	}
+	return runtime.GOOS == "windows" || !exitErr.Exited()
 }
 
 // capWriter keeps at most limit bytes and records whether more arrived. It

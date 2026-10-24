@@ -96,19 +96,24 @@ func (s *sessionState) OnTurnUsage(e cake.TurnUsage) {
 // estimate. At its position in the replay the checkpoint is the newest
 // statement about the session's context, so its after_tokens replaces an older
 // turn_usage figure, while the window stays the one the model last reported.
-// The figure is marked Estimated so a resume never presents cake's estimate as
-// a provider measurement; a newer complete turn_usage—replayed after this
-// record or reported by a live turn—replaces it. The same ContextUsage shape
-// will carry a live compaction result's estimate; this method is the replay
-// path. The record carries no window of its own, so an unknown window renders
-// the bare estimate instead of a fabricated fraction.
+// The record carries no window of its own; OnCompactionEstimate keeps the known
+// one and marks the figure estimated.
 func (s *sessionState) OnCompaction(e cake.Compaction) {
-	after := e.EstimatedInput.AfterTokens
+	s.OnCompactionEstimate(e.EstimatedInput.AfterTokens, 0)
+}
+
+// OnCompactionEstimate records the newest context estimate for the current
+// session, marked Estimated so a resume never presents cake's estimate as a
+// provider measurement. A live compactor supplies its own after_tokens and, when
+// reported, the window it used; a replayed checkpoint supplies after_tokens only
+// and keeps the window already known. A non-positive after count is not an
+// estimate and leaves the current figure unchanged. A newer complete turn_usage,
+// replayed after the checkpoint or reported by a live turn, replaces it.
+func (s *sessionState) OnCompactionEstimate(after, window int) {
 	if after <= 0 {
 		return
 	}
-	window := 0
-	if s.Context != nil {
+	if window <= 0 && s.Context != nil {
 		window = s.Context.Window
 	}
 	s.Context = &ContextUsage{Tokens: after, Window: window, Estimated: true}

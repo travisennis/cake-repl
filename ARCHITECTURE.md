@@ -64,6 +64,7 @@ internal/app/            Bubble Tea state machine (the REPL itself).
   model.go               Model struct, layout, timeline render cache.
   update.go              Event/key/command handling (the Update loop).
   session.go             sessionState: pure run-mode state machine.
+  compaction.go          Between-turn trigger, gate, and compactor result handling (ADR 023).
   commands.go            Slash-command parsing + HelpText.
   completion.go          Tab completion for slash commands.
   keys.go                Key bindings.

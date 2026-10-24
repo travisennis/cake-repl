@@ -268,7 +268,7 @@ down. The status line and timeline only show it shortened.
 ## Context compaction (experimental)
 
 cake-repl can compact context between prompts. After a successful turn whose
-newest context measurement reaches the configured threshold, it runs the
+newest context measurement approaches the configured threshold, it runs the
 external `cake-compact` binary, which summarizes retired history and appends an
 in-place checkpoint to the same cake session. The session id does not change, so
 the next prompt resumes the same session; replay still shows the raw transcript
@@ -284,31 +284,32 @@ keep-tokens = 20000
 ```
 
 - The REPL triggers five percentage points below `threshold-percent`, because
-the live `turn_usage` figure does not include the response and tool results that
-will be in the session. `cake-compact` re-checks the session and compacts only
-when it agrees; a no-op is silent.
-- While compaction runs, the status line and terminal title show `compacting`,
-prompt submission is rejected, and `/new`, `/resume`, and `/sessions` wait.
-`Ctrl+C` cancels the child; `/exit` cancels and then exits; `Ctrl+N` cancels and
-starts a new session.
+  the live `turn_usage` figure does not include the response and tool results
+  that will be in the session. `cake-compact` re-checks the session and compacts
+  only when it agrees; a no-op is silent.
+- While compaction runs, the composer, status line, and terminal title show
+  `compacting`, prompt submission is rejected, and `/new`, `/resume`, and
+  `/sessions` are refused. `Ctrl+C` cancels the child; `/exit` cancels and then
+  exits; `Ctrl+N` cancels and starts a new session.
 - On success the status context becomes the compactor's estimate (`~24k/200k`)
-until a newer complete measurement replaces it, and the timeline shows one
-`context compacted 118k -> 24k, 4 records retained` notice. A failure,
-cancellation, or non-in-place result keeps the current session and context
-figure and shows one warning. The REPL never reads or writes cake session files.
+  until a newer complete measurement replaces it, and the timeline shows one
+  `context compacted 118k -> 24k, 4 records retained` notice. A failure,
+  cancellation, or non-in-place result keeps the current session and context
+  figure and shows one warning. The REPL never reads or writes cake session
+  files.
 - `-no-session` disables compaction with a startup warning. The automatically
-loaded project-local `.cake-repl.toml` cannot enable compaction or choose
-`cake-compact-bin`; only XDG config or an explicit `-config` can. A project may
-disable compaction or tune the thresholds.
+  loaded project-local `.cake-repl.toml` cannot enable compaction or choose
+  `cake-compact-bin`; only XDG config or an explicit `-config` can. A project
+  may disable compaction or tune the thresholds.
 - `cake-compact` must be installed, and the configured `cake` must support
-`cake sessions checkpoint`. The compactor inherits the REPL's environment and
-working directory, so `CAKE_DATA_DIR` and a relative `-cake-bin` resolve the
-same way they do for cake. A missing binary or verb is a visible warning, and
-there is no fallback to writing session files.
+  `cake sessions checkpoint`. The compactor inherits the REPL's environment and
+  working directory, so `CAKE_DATA_DIR` and a relative `-cake-bin` resolve the
+  same way they do for cake. A missing binary or verb is a visible warning, and
+  there is no fallback to writing session files.
 - Compaction only happens between prompts. A single long tool loop that fills
-the window before the turn ends is not covered; that needs a request-boundary
-mechanism inside Cake. See
-[ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+  the window before the turn ends is not covered; that needs a request-boundary
+  mechanism inside Cake. See
+  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
 
 ## Config file
 
@@ -318,7 +319,10 @@ file are overridden by CLI flags.
 ### Paths
 
 Config files are loaded from two locations, with project-local values taking
-precedence over XDG-level values for keys other than `cake-bin`:
+precedence over XDG-level values, except that the automatic project-local layer
+cannot select `cake-bin`, cannot enable `compaction`, and cannot set
+`compaction.cake-compact-bin`; a project may disable compaction and tune its
+thresholds:
 
 | Path | Priority |
 |---|---|

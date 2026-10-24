@@ -2,8 +2,11 @@ package compact
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -142,6 +145,23 @@ func TestCompactMalformedOutput(t *testing.T) {
 	res := Compact(context.Background(), Options{Bin: bin, SessionID: "s-1"})
 	if res.ExitCode != 0 || res.Err == nil {
 		t.Fatalf("result = %+v, want a decode error", res)
+	}
+}
+
+func TestCanceledExitRequiresSignalTermination(t *testing.T) {
+	// A natural non-zero exit must stay a failure even when a Ctrl+C arrives
+	// late: the cancel callback alone is not enough on POSIX.
+	err := exec.Command("sh", "-c", "exit 3").Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected an ExitError, got %v", err)
+	}
+	if canceledExit(exitErr, false) {
+		t.Fatal("an unsignaled exit was classified as canceled")
+	}
+	want := runtime.GOOS == "windows"
+	if got := canceledExit(exitErr, true); got != want {
+		t.Fatalf("canceledExit(exited, requested=true) = %v, want %v", got, want)
 	}
 }
 

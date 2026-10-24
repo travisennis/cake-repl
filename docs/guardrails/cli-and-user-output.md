@@ -128,10 +128,10 @@ in plain text like every other surface.
   new target reports one, while the next-run field names the pinned target. It
   pads or truncates to the terminal width. The prompt
   textarea is framed as
-  a focused composer with ready/running state and concise submit, newline, and
-  help hints; it shows the busy state while a task or compaction runs, and its
-  borders remain visible without color. While the TUI is
-  running, the terminal title is `cake-repl: <absolute working directory>`,
+  a focused composer with ready/running/compacting state and concise submit,
+  newline, and help hints; it names the operation that is in flight while a
+  task or compaction runs, and its borders remain visible without color. While
+  the TUI is running, the terminal title is `cake-repl: <absolute working directory>`,
   using the directory selected by `-cwd` or the startup directory by default.
   The title carries a `[working]` prefix while a task is in flight, a
   `[compacting]` prefix while the compactor runs, and neither when idle, because

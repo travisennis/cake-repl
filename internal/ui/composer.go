@@ -8,15 +8,14 @@ import (
 )
 
 // PromptComposer renders the textarea content as the active input region.
-// The returned block is exactly width cells wide on every line.
-func PromptComposer(th Theme, content string, width int, running bool, lineCount int, hint string) string {
+// state is the ready, running, or compacting label shown in the top border. The
+// returned block is exactly width cells wide on every line.
+func PromptComposer(th Theme, content string, width int, state string, lineCount int, hint string) string {
 	if width <= 0 {
 		return ""
 	}
-
-	state := "ready"
-	if running {
-		state = "running"
+	if state == "" {
+		state = "ready"
 	}
 	title := th.PromptTitle.Render(" prompt · " + state + " ")
 	top := composerBorderLine(th, width, "╭", th.PromptBorder.Render("─ ")+title, "╮")
