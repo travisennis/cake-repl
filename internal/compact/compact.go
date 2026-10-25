@@ -38,8 +38,8 @@ const (
 type Options struct {
 	// Bin is the compactor executable.
 	Bin string
-	// Cwd is the working directory the compactor runs in, so a relative
-	// cake-bin resolves the same way it does for a live cake run.
+	// Cwd is the working directory the compactor runs in, so the compactor
+	// resolves its own relative -cake-bin and cake data root against it.
 	Cwd string
 	// SessionID is the session to compact in place.
 	SessionID string

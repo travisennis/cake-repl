@@ -79,9 +79,9 @@ consumes cake events. This is the project's core external contract.
   shown; cancellation is a warning. The process is the same subprocess discipline
   as a cake run: model-owned context, SIGTERM then `WaitDelay`, bounded
   stdout/stderr, no session-file reads by the REPL, and a content-free debug log
-  line. The child inherits the REPL's environment and working directory, so
-  `CAKE_DATA_DIR` and a relative `-cake-bin` select the same root and executable
-  they do for cake; the REPL does not reimplement Cake's data-directory layout.
+  line. The child inherits the REPL's environment and runs in the same `-cwd`, so
+  `CAKE_DATA_DIR` selects the same root and a relative `-cake-bin` resolves in
+  that directory; the REPL does not reimplement Cake's data-directory layout.
   See [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams

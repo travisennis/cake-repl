@@ -306,9 +306,9 @@ keep-tokens = 20000
   `-config` can. A project may only disable compaction.
 - `cake-compact` must be installed, and the configured `cake` must support
   `cake sessions checkpoint`. The compactor inherits the REPL's environment and
-  working directory, so `CAKE_DATA_DIR` and a relative `-cake-bin` resolve the
-  same way they do for cake. A missing binary or verb is a visible warning, and
-  there is no fallback to writing session files.
+  runs in the same `-cwd`, so `CAKE_DATA_DIR` selects the same root and a
+  relative `-cake-bin` resolves in that directory. A missing binary or verb is a
+  visible warning, and there is no fallback to writing session files.
 - Compaction only happens between prompts. A single long tool loop that fills
   the window before the turn ends is not covered; that needs a request-boundary
   mechanism inside Cake. See
