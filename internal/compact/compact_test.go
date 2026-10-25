@@ -26,11 +26,12 @@ func writeFakeCompactor(t *testing.T, script string) string {
 
 func TestArgs(t *testing.T) {
 	args := Options{
-		SessionID:        "11111111-2222-3333-4444-555555555555",
-		CakeBin:          "/usr/local/bin/cake",
-		ThresholdPercent: 80,
-		KeepTokens:       20000,
-		SummarizerModel:  "gpt-x",
+		SessionID:         "11111111-2222-3333-4444-555555555555",
+		CakeBin:           "/usr/local/bin/cake",
+		ThresholdPercent:  80,
+		KeepTokens:        20000,
+		SummarizerModel:   "gpt-x",
+		SummarizerProfile: "work",
 	}.Args()
 	want := []string{
 		"compact", "-json", "-threshold",
@@ -38,6 +39,7 @@ func TestArgs(t *testing.T) {
 		"-keep-tokens", "20000",
 		"-cake-bin", "/usr/local/bin/cake",
 		"-summarizer-model", "gpt-x",
+		"-summarizer-profile", "work",
 		"--", "11111111-2222-3333-4444-555555555555",
 	}
 	if !slices.Equal(args, want) {

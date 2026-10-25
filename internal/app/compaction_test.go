@@ -78,6 +78,7 @@ func compactionModel(t *testing.T, bin string) Model {
 	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: bin, ThresholdPercent: 80, KeepTokens: 20000}
 	m.cfg.CakeBin = "/opt/bin/cake"
 	m.cfg.Model = "test-model"
+	m.cfg.Profile = "test-profile"
 	m.session.OnTaskStart(cake.TaskStart{SessionID: compactionSessionID, TaskID: "t-1"})
 	m.applyEvent(cake.TurnUsage{
 		Usage:         cake.Usage{InputTokens: 170_000},
@@ -211,7 +212,8 @@ JSON
 	want := []string{
 		"compact", "-json", "-threshold", "-threshold-percent", "80",
 		"-keep-tokens", "20000", "-cake-bin", "/opt/bin/cake",
-		"-summarizer-model", "test-model", "--", compactionSessionID,
+		"-summarizer-model", "test-model", "-summarizer-profile", "test-profile",
+		"--", compactionSessionID,
 	}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("compactor args = %v, want %v", got, want)
@@ -304,8 +306,10 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 
 	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = tm.(Model)
-	if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "canceling context compaction") {
-		t.Fatalf("ctrl+c notice = %+v", it)
+	// Cancellation is reported once, when the child is reaped; the keypress
+	// itself adds no notice, matching the run path.
+	if it := lastItem(t, m); it.Kind != ui.KindComplete {
+		t.Fatalf("ctrl+c added a timeline notice: %+v", it)
 	}
 	if !m.compacting {
 		t.Fatal("cancel reopened the gate before the child was reaped")

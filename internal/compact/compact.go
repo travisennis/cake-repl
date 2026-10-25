@@ -50,9 +50,11 @@ type Options struct {
 	// and lets the compactor apply its own default.
 	ThresholdPercent int
 	KeepTokens       int
-	// SummarizerModel is the model cake-repl was configured with. Empty leaves
-	// the compactor's summarizer default.
-	SummarizerModel string
+	// SummarizerModel and SummarizerProfile are what cake-repl was configured
+	// with. Empty leaves the compactor's summarizer default, so the summary
+	// runs on the same model the REPL would use for a turn.
+	SummarizerModel   string
+	SummarizerProfile string
 	// DebugLog receives a content-free lifecycle line when set.
 	DebugLog io.Writer
 
@@ -74,6 +76,9 @@ func (o Options) Args() []string {
 	}
 	if o.SummarizerModel != "" {
 		args = append(args, "-summarizer-model", o.SummarizerModel)
+	}
+	if o.SummarizerProfile != "" {
+		args = append(args, "-summarizer-profile", o.SummarizerProfile)
 	}
 	// The session argument may be a path, so end flag parsing before it.
 	return append(args, "--", o.SessionID)

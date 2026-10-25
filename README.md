@@ -287,6 +287,9 @@ keep-tokens = 20000
   the live `turn_usage` figure does not include the response and tool results
   that will be in the session. `cake-compact` re-checks the session and compacts
   only when it agrees; a no-op is silent.
+- The summary is a metered model call made by `cake-compact` through cake. It
+  uses the REPL's `-model` and `-profile` when set; with neither, cake's own
+  default model applies.
 - While compaction runs, the composer, status line, and terminal title show
   `compacting`, prompt submission is rejected, and `/new`, `/resume`, and
   `/sessions` are refused. `Ctrl+C` cancels the child; `/exit` cancels and then

@@ -69,8 +69,9 @@ consumes cake events. This is the project's core external contract.
   [cli-and-user-output.md](cli-and-user-output.md) for the rendered forms.
 - **External compactor (`internal/compact`).** The only non-cake executable the
   REPL runs. `cake-compact compact -json -threshold` is invoked with
-  `-threshold-percent`, `-keep-tokens`, `-cake-bin` when cake-repl has one, an
-  optional `-summarizer-model` from the configured model, and `-- <session-id>`.
+  `-threshold-percent`, `-keep-tokens`, `-cake-bin` when cake-repl has one,
+  `-summarizer-model` and `-summarizer-profile` from the model and profile the
+  REPL was configured with (each omitted when unset), and `-- <session-id>`.
   Never pass `-fork`: the integration is in place only. The one JSON document is
   decoded field by field (`Document`) with unknown fields ignored; `in_place` is
   read rather than assumed. Exit 0 with a document is success or a silent no-op

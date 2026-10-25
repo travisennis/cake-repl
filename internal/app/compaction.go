@@ -90,21 +90,23 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	m.compacting = true
 	req := m.compactionReq
 	opts := compact.Options{
-		Bin:              m.cfg.Compaction.Bin,
-		Cwd:              m.cfg.Cwd,
-		SessionID:        sessionID,
-		CakeBin:          m.cfg.CakeBin,
-		ThresholdPercent: m.cfg.Compaction.ThresholdPercent,
-		KeepTokens:       m.cfg.Compaction.KeepTokens,
-		SummarizerModel:  m.cfg.Model,
-		DebugLog:         m.cfg.DebugLog,
+		Bin:               m.cfg.Compaction.Bin,
+		Cwd:               m.cfg.Cwd,
+		SessionID:         sessionID,
+		CakeBin:           m.cfg.CakeBin,
+		ThresholdPercent:  m.cfg.Compaction.ThresholdPercent,
+		KeepTokens:        m.cfg.Compaction.KeepTokens,
+		SummarizerModel:   m.cfg.Model,
+		SummarizerProfile: m.cfg.Profile,
+		DebugLog:          m.cfg.DebugLog,
 	}
 	run := func() tea.Msg {
 		return compactionDoneMsg{req: req, sessionID: sessionID, res: compact.Compact(ctx, opts)}
 	}
-	// The title drops the working marker and picks up the compacting marker in
-	// the same transition, so the window never names a state the REPL has left.
-	return m, tea.Batch(run, m.spin.Tick, m.titleCmd())
+	// The title picks up the compacting marker in the same transition. The
+	// spinner needs no new tick: finishRun runs while the finished turn's tick
+	// is still pending, and the handler keeps that chain alive while compacting.
+	return m, tea.Batch(run, m.titleCmd())
 }
 
 // finishCompaction applies one compactor result. In-place success keeps the

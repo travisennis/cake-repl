@@ -74,8 +74,9 @@ Behavior:
   complete `turn_usage` context figure. When the session has a known id, a
   positive window, and the figure reaches a small headroom below
   `threshold-percent` of the window, the REPL starts `cake-compact compact
-  -threshold -json` with the threshold, keep target, and the configured
-  summarizer model (when the REPL has one). The headroom compensates for the
+  -threshold -json` with the threshold, keep target, and the summarizer model
+  and profile it was configured with (each omitted when unset, so the compactor
+  applies its own default). The headroom compensates for the
   response and tool results that the measurement does not include. The
   compactor re-checks the session and decides whether to act.
 - **External boundary.** The compactor is another documented external

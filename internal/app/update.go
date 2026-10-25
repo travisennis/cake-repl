@@ -418,8 +418,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.compacting {
 			// Keep the compaction gate closed until the child exits and the
 			// result is reaped, so the next prompt cannot race its session lock.
+			// The reaped result supplies the one "canceled" notice, matching a
+			// canceled run, so no second notice is added here.
 			m.cancelCompaction()
-			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling context compaction…"})
 			return m, nil
 		}
 		if m.hydrating || m.replayPending {
