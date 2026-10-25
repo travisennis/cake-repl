@@ -16,6 +16,15 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   add-dir, toolbox, sandbox, no-skills, skills, and system-prompt flags, or the
   supported read-only `replay <uuid>` and `sessions list --json` commands; never
   read cake session files, parse its human text, or import its internals.
+- **compaction contract**: the opt-in between-turn compactor is run only through
+  `internal/compact` as `cake-compact compact -json -threshold … <session-id>`,
+  never with `-fork`, and only its one JSON document is decoded. The session id
+  stays pinned; an `in_place:false` or mismatched result is rejected. Only
+  trusted config (XDG or an explicit `-config`) may enable or tune it; the
+  automatic project-local layer may only disable it. See
+  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md)
+  and
+  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md).
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.
@@ -64,12 +73,13 @@ When choosing build, test, lint, verification, or commit-prep commands, read
 
 ### cake Integration And Stream-JSON
 
-Use for `internal/cake/`, cake CLI arguments, or event consumption.
+Use for `internal/cake/`, `internal/compact/`, cake CLI arguments, the external
+compactor contract, or event consumption.
 
 Consult:
 
 - [cake integration and stream-json](docs/guardrails/cake-integration-and-stream-json.md),
-  for the engine contract and the decoding rules — this is the core external
+  for the engine and compactor contracts and the decoding rules — this is the core external
   contract.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md), for engine isolation, replay hydration,
   and the module map.
@@ -94,7 +104,8 @@ Keep `-no-color` usable.
 
 ### Sessions, Security, And Subprocess Lifecycle
 
-Use for the run-mode state machine, subprocess lifecycle, or the debug log.
+Use for the run-mode state machine, subprocess lifecycle, compaction gating and
+cancellation, or the debug log.
 
 Consult:
 

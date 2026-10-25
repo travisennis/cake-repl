@@ -6,7 +6,9 @@ submitted prompt spawns one `cake --output-format stream-json` subprocess and
 renders its NDJSON event stream live. When startup receives `-resume <uuid>`, a
 read-only replay stream hydrates the local timeline before the first prompt; a
 bare `-resume` opens a picker of this directory's sessions instead, and hydrates
-nothing until one is chosen.
+nothing until one is chosen. When opted in, a completed turn over its context
+threshold is followed by one external `cake-compact` run that appends an
+in-place checkpoint to the same session (ADR 023).
 
 ## System boundary: cake is an external process
 
@@ -36,6 +38,12 @@ It communicates only through:
 - `--no-skills` / `--skills <names>`, and `--system-prompt <path>`,
 - `--` to terminate flag parsing before the prompt argument.
 
+One non-cake executable is also part of the boundary: the opt-in
+`cake-compact compact -json -threshold … <session-id>` compactor. The REPL never
+passes `-fork`, never reads or writes the session file, and decodes only the
+one-document result. See
+[`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+
 This boundary is the project's reason to exist. Changes that cross it are out of
 scope unless the cake contract itself has changed. See
 [`docs/guardrails/cake-integration-and-stream-json.md`](docs/guardrails/cake-integration-and-stream-json.md).
@@ -50,10 +58,13 @@ internal/cake/           cake-as-engine: subprocess lifecycle + stream-json deco
   events.go              Typed live and replay event structs and the Event interface (the wire schema).
   parser.go              ParseLine: one NDJSON line -> typed Event (forward-compatible).
   runner.go              Start/Replay: subprocess lifecycle, cancellation, stderr tail, ParseError events.
+internal/compact/        External compactor: one documented subprocess and its result document.
+  compact.go             Args, Compact: bounded subprocess lifecycle + document decoding.
 internal/app/            Bubble Tea state machine (the REPL itself).
   model.go               Model struct, layout, timeline render cache.
   update.go              Event/key/command handling (the Update loop).
   session.go             sessionState: pure run-mode state machine.
+  compaction.go          Between-turn trigger, gate, and compactor result handling (ADR 023).
   commands.go            Slash-command parsing + HelpText.
   completion.go          Tab completion for slash commands.
   keys.go                Key bindings.
@@ -64,8 +75,9 @@ internal/ui/             Pure rendering: timeline, status line, tool blocks, the
 internal/version/        Binary version string (overridden by release ldflags).
 ```
 
-Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
-`ui` depend on neither `app` nor each other. Keep it that way.
+Dependency direction is one-way: `app` depends on `cake`, `compact`, and `ui`;
+`cake`, `compact`, and `ui` depend on neither `app` nor each other. Keep it that
+way.
 
 ## Architectural invariants
 
@@ -136,7 +148,25 @@ Dependency direction is one-way: `app` depends on `cake` and `ui`; `cake` and
   [`ADR 002`](docs/adr/002-config-file-for-repl-defaults.md) and its partial
   supersession in [`ADR 006`](docs/adr/006-project-local-config-cannot-select-the-cake-executable.md).
 - **One cake process at a time.** Submitting while a task runs is rejected; the
-  model tracks a single live `*cake.Run`.
+  model tracks a single live `*cake.Run`. The external compactor is separate but
+  serialized with it: it starts only after a completed turn, and while it runs
+  the model refuses prompts and session-target changes until the child has
+  exited and been reaped. See
+  [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+- **Compaction is opt-in, between-turns, and in place.** A completed turn whose
+  newest complete `turn_usage` figure reaches a five-point headroom below the
+  configured threshold starts one model-owned `cake-compact` subprocess through
+  `internal/compact`. The compactor re-checks the session and decides; a
+  `compacted:false` result is a silent no-op. Only a document that says
+  `compacted:true` and `in_place:true` with the pinned session id is applied: the
+  REPL keeps `ResumeID`, appends one shared marker, and seeds the status context
+  from `after_tokens` as an estimate. A failure, cancellation, or other result
+  keeps the session and figure and warns. The REPL never reads session files;
+  `-no-session` disables the feature; and the untrusted project-local config
+  layer cannot enable it, choose its executable, or tune it. See
+  [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md)
+  and
+  [`docs/adr/024-ignore-project-local-compaction-tuning.md`](docs/adr/024-ignore-project-local-compaction-tuning.md).
 - **Graceful cancellation.** Cancel sends SIGTERM then SIGKILL after a grace
   period (kill outright on Windows). Cancellation is classified from whether
   `cmd.Cancel` successfully signaled the process and, on POSIX, whether the

@@ -5,8 +5,11 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -18,16 +21,73 @@ import (
 // ToolColor is the exception: false is a meaningful value, not "unset", so an
 // explicit `tool-color = false` can turn off an inherited true. Its presence is
 // tracked in ToolColorSet, taken from the decoded file's TOML metadata rather
-// than inferred from the value.
+// than inferred from the value. Compaction.Enabled is the same kind of value and
+// uses the same presence rule.
 type Config struct {
-	Model            string `toml:"model"`
-	Profile          string `toml:"profile"`
-	OutputLimit      int    `toml:"output-limit"`
-	MaxTimelineItems int    `toml:"max-timeline-items"`
-	CakeBin          string `toml:"cake-bin"`
-	ToolColor        bool   `toml:"tool-color"`
-	ToolColorSet     bool   `toml:"-"`
+	Model            string     `toml:"model"`
+	Profile          string     `toml:"profile"`
+	OutputLimit      int        `toml:"output-limit"`
+	MaxTimelineItems int        `toml:"max-timeline-items"`
+	CakeBin          string     `toml:"cake-bin"`
+	ToolColor        bool       `toml:"tool-color"`
+	ToolColorSet     bool       `toml:"-"`
+	Compaction       Compaction `toml:"compaction"`
 }
+
+// Compaction holds the opt-in between-turn context compaction settings in the
+// `[compaction]` table. Enabled is false by default and is the only field whose
+// false value is meaningful, so EnabledSet records whether the file actually
+// supplied the key.
+type Compaction struct {
+	Enabled          bool   `toml:"enabled"`
+	EnabledSet       bool   `toml:"-"`
+	CakeCompactBin   string `toml:"cake-compact-bin"`
+	ThresholdPercent int    `toml:"threshold-percent"`
+	KeepTokens       int    `toml:"keep-tokens"`
+}
+
+const (
+	// DefaultCakeCompactBin is the compactor executable resolved on PATH when
+	// the config does not name one.
+	DefaultCakeCompactBin = "cake-compact"
+	// DefaultCompactionThresholdPercent is the context-window percentage at
+	// which the compactor itself compacts.
+	DefaultCompactionThresholdPercent = 80
+	// DefaultCompactionKeepTokens is the retained-tail target; zero would let
+	// the compactor apply its own window-relative default.
+	DefaultCompactionKeepTokens = 20_000
+)
+
+// DefaultCompaction returns the effective compaction defaults before any config
+// file is merged.
+func DefaultCompaction() Compaction {
+	return Compaction{
+		CakeCompactBin:   DefaultCakeCompactBin,
+		ThresholdPercent: DefaultCompactionThresholdPercent,
+		KeepTokens:       DefaultCompactionKeepTokens,
+	}
+}
+
+// Validate checks the effective compaction settings. Only values that cannot
+// describe a trigger are rejected; zero means "use the default" and is resolved
+// before validation. The compactor is validated only when it can run.
+func (c Compaction) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if c.CakeCompactBin == "" {
+		return errMissingCompactor
+	}
+	if c.ThresholdPercent < 1 || c.ThresholdPercent > 100 {
+		return fmt.Errorf("compaction.threshold-percent must be between 1 and 100, got %d", c.ThresholdPercent)
+	}
+	if c.KeepTokens < 0 {
+		return fmt.Errorf("compaction.keep-tokens must not be negative, got %d", c.KeepTokens)
+	}
+	return nil
+}
+
+var errMissingCompactor = errors.New("compaction.cake-compact-bin must name an executable")
 
 // DefaultPaths returns the XDG config path and the project-local config path.
 // The XDG path is $XDG_CONFIG_HOME/cake-repl/config.toml (falling back to
@@ -55,15 +115,43 @@ func Load(path string) (*Config, error) {
 	return cfg, err
 }
 
-// LoadProject loads automatically discovered project defaults, excluding the
-// executable. ignoredCakeBin reports key presence, even when its value is empty.
-func LoadProject(path string) (cfg *Config, ignoredCakeBin bool, err error) {
+// LoadProject loads automatically discovered project defaults. A project file is
+// untrusted provenance, so it cannot select an executable, cannot enable the
+// metered, session-mutating compactor, and cannot tune its thresholds. ignored
+// names each key dropped for that reason, in a stable order, and reports key
+// presence even when its value is empty. A project file may still disable
+// compaction. See ADR 006 and ADR 024.
+func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	cfg, meta, err := load(path)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
+	}
+	if definedFold(meta, "cake-bin") {
+		ignored = append(ignored, "cake-bin")
 	}
 	cfg.CakeBin = ""
-	return cfg, meta.IsDefined("cake-bin"), nil
+	if definedFold(meta, "compaction", "cake-compact-bin") {
+		ignored = append(ignored, "compaction.cake-compact-bin")
+	}
+	cfg.Compaction.CakeCompactBin = ""
+	if definedFold(meta, "compaction", "enabled") && cfg.Compaction.Enabled {
+		// Disabling is allowed to win; enabling is not.
+		ignored = append(ignored, "compaction.enabled")
+		cfg.Compaction.Enabled = false
+		cfg.Compaction.EnabledSet = false
+	}
+	// Tuning is ignored too: an untrusted file must not be able to turn an
+	// already-enabled metered operation up. Clearing the value lets the trusted
+	// layer's non-zero merge win. See ADR 024.
+	if definedFold(meta, "compaction", "threshold-percent") {
+		ignored = append(ignored, "compaction.threshold-percent")
+		cfg.Compaction.ThresholdPercent = 0
+	}
+	if definedFold(meta, "compaction", "keep-tokens") {
+		ignored = append(ignored, "compaction.keep-tokens")
+		cfg.Compaction.KeepTokens = 0
+	}
+	return cfg, ignored, nil
 }
 
 func load(path string) (*Config, toml.MetaData, error) {
@@ -75,8 +163,34 @@ func load(path string) (*Config, toml.MetaData, error) {
 		}
 		return nil, meta, err
 	}
-	cfg.ToolColorSet = meta.IsDefined("tool-color")
+	cfg.ToolColorSet = definedFold(meta, "tool-color")
+	cfg.Compaction.EnabledSet = definedFold(meta, "compaction", "enabled")
 	return cfg, meta, nil
+}
+
+// definedFold reports whether a TOML key path was supplied, matching each
+// segment case-insensitively. The decoder matches struct tags case-insensitively,
+// but MetaData.IsDefined is case-sensitive; presence checks must use the same
+// rule as decoding, or a differently spelled key could decode into the struct
+// while its presence check missed it. That matters most for the untrusted
+// project-local layer, where a missed key would survive provenance stripping.
+func definedFold(meta toml.MetaData, path ...string) bool {
+	for _, key := range meta.Keys() {
+		if len(key) != len(path) {
+			continue
+		}
+		match := true
+		for i := range path {
+			if !strings.EqualFold(key[i], path[i]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 // Merge applies src values to dst for each non-zero field in src. dst is
@@ -107,5 +221,34 @@ func Merge(dst, src *Config) *Config {
 		dst.ToolColor = src.ToolColor
 		dst.ToolColorSet = true
 	}
+	mergeCompaction(&dst.Compaction, src.Compaction)
 	return dst
+}
+
+// mergeCompaction applies a higher-priority compaction table. Non-zero values
+// override; enabled merges on key presence so an explicit false can disable an
+// inherited true.
+func mergeCompaction(dst *Compaction, src Compaction) {
+	if src.EnabledSet {
+		dst.Enabled = src.Enabled
+		dst.EnabledSet = true
+	}
+	if src.CakeCompactBin != "" {
+		dst.CakeCompactBin = src.CakeCompactBin
+	}
+	if src.ThresholdPercent != 0 {
+		dst.ThresholdPercent = src.ThresholdPercent
+	}
+	if src.KeepTokens != 0 {
+		dst.KeepTokens = src.KeepTokens
+	}
+}
+
+// MergeCompaction applies a config file's `[compaction]` table to a base
+// carrying the hardcoded defaults. A nil file leaves the defaults untouched.
+func MergeCompaction(base Compaction, file *Config) Compaction {
+	if file != nil {
+		mergeCompaction(&base, file.Compaction)
+	}
+	return base
 }

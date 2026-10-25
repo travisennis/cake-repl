@@ -376,6 +376,29 @@ func TestOnCompactionWithoutKnownWindowUsesBareEstimate(t *testing.T) {
 	}
 }
 
+// A live compactor supplies the window it used; when its document omits one,
+// the session keeps the window already known. A non-positive estimate leaves the
+// current figure alone.
+func TestOnCompactionEstimateUsesResultWindowAndKeepsKnownWindow(t *testing.T) {
+	var s sessionState
+	s.OnTurnUsage(completeTurn(170_000, 200_000))
+
+	s.OnCompactionEstimate(24_000, 200_000)
+	if s.Context == nil || s.Context.Tokens != 24_000 || s.Context.Window != 200_000 || !s.Context.Estimated {
+		t.Fatalf("context = %+v, want estimated 24000/200000", s.Context)
+	}
+
+	s.OnCompactionEstimate(12_000, 0)
+	if s.Context == nil || s.Context.Tokens != 12_000 || s.Context.Window != 200_000 || !s.Context.Estimated {
+		t.Fatalf("context = %+v, want estimated 12000/200000 with the known window", s.Context)
+	}
+
+	s.OnCompactionEstimate(0, 100_000)
+	if s.Context == nil || s.Context.Tokens != 12_000 || s.Context.Window != 200_000 {
+		t.Fatalf("a zero estimate changed the context: %+v", s.Context)
+	}
+}
+
 // A checkpoint with no usable estimate is not a measurement: it must not clear
 // or replace one already known.
 func TestOnCompactionIgnoresMissingEstimate(t *testing.T) {

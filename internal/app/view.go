@@ -22,7 +22,7 @@ func (m Model) View() string {
 		m.theme,
 		m.input.View(),
 		m.width,
-		m.running,
+		m.activityState(),
 		m.input.LineCount(),
 		"Ctrl+S submit · Enter newline · /help",
 	)
@@ -65,6 +65,21 @@ func (m Model) browserView() string {
 	return body + "\n" + hint
 }
 
+// activityState names the state shown by the composer: a live task, the
+// between-turn compactor, or idle. The status line uses "idle" instead of
+// "ready", but the two surfaces must never disagree about which operation is
+// in flight.
+func (m Model) activityState() string {
+	switch {
+	case m.running:
+		return "running"
+	case m.compacting:
+		return "compacting"
+	default:
+		return "ready"
+	}
+}
+
 func (m Model) statusLine() string {
 	session := "–"
 	if m.session.SessionID != "" {
@@ -72,8 +87,11 @@ func (m Model) statusLine() string {
 	}
 
 	state := "idle"
-	if m.running {
+	switch {
+	case m.running:
 		state = m.spin.View() + " running"
+	case m.compacting:
+		state = m.spin.View() + " compacting"
 	}
 
 	mode, resumeID := m.session.RunOptions()

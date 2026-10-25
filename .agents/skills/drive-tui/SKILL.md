@@ -125,7 +125,8 @@ wait_for "$session" '[ idle ]'                # the task finished
 ```
 
 Markers this REPL renders: the composer title `prompt · ready` / `prompt ·
-running`, and the status line `[ idle ]` / `[ <spinner> running ]`. The spinner
+running` / `prompt · compacting`, and the status line `[ idle ]` / `[ <spinner>
+running ]` / `[ <spinner> compacting ]`. The spinner
 glyph advances every frame, so match the stable word (`running`, `prompt ·
 running`), not the glyph. Any other text you expect — an assistant message, a
 tool block, a hint — is a valid predicate too.

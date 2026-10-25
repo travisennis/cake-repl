@@ -295,6 +295,24 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		Inline:           *f.inline,
 	}
 	applyConfigFile(&cfg, cfgFile, explicit)
+
+	// Resolve the `[compaction]` table over the hardcoded defaults. There is no
+	// CLI flag for it, so the config file (or its absence) is authoritative.
+	compaction := config.MergeCompaction(config.DefaultCompaction(), cfgFile)
+	if err := compaction.Validate(); err != nil {
+		return app.Config{}, err
+	}
+	if *f.noSession && compaction.Enabled {
+		fmt.Fprintf(warnings, "cake-repl: warning: context compaction is disabled by -no-session\n")
+		compaction.Enabled = false
+	}
+	cfg.Compaction = app.CompactionConfig{
+		Enabled:          compaction.Enabled,
+		Bin:              compaction.CakeCompactBin,
+		ThresholdPercent: compaction.ThresholdPercent,
+		KeepTokens:       compaction.KeepTokens,
+	}
+
 	if f.resume.set {
 		// A bare -resume names no session, so nothing is hydrated and nothing is
 		// pinned: the REPL opens the session picker and the picked row pins the
@@ -430,14 +448,33 @@ func loadStartupConfig(configPath string, explicitConfig, noConfig bool, warning
 		if err != nil {
 			return nil, fmt.Errorf("loading XDG config %s: %w", xdgPath, err)
 		}
-		localCfg, ignoredCakeBin, err := config.LoadProject(localPath)
+		localCfg, ignored, err := config.LoadProject(localPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading project-local config %s: %w", localPath, err)
 		}
-		if ignoredCakeBin {
-			fmt.Fprintf(warnings, "cake-repl: warning: ignoring cake-bin in project-local config %q; use XDG config, -config, or -cake-bin to select the executable\n", localPath)
+		for _, key := range ignored {
+			fmt.Fprintln(warnings, projectConfigWarning(key, localPath))
 		}
 		return config.Merge(xdgCfg, localCfg), nil
+	}
+}
+
+// projectConfigWarning explains why a key in the automatically loaded
+// project-local config was dropped. The text never echoes the configured value.
+func projectConfigWarning(key, path string) string {
+	switch key {
+	case "cake-bin":
+		return fmt.Sprintf("cake-repl: warning: ignoring cake-bin in project-local config %q; use XDG config, -config, or -cake-bin to select the executable", path)
+	case "compaction.cake-compact-bin":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.cake-compact-bin in project-local config %q; use XDG config or -config to select the compactor", path)
+	case "compaction.enabled":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.enabled = true in project-local config %q; enable compaction in XDG config or an explicit -config", path)
+	case "compaction.threshold-percent":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.threshold-percent in project-local config %q; tune compaction in XDG config or an explicit -config", path)
+	case "compaction.keep-tokens":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.keep-tokens in project-local config %q; tune compaction in XDG config or an explicit -config", path)
+	default:
+		return fmt.Sprintf("cake-repl: warning: ignoring %s in project-local config %q", key, path)
 	}
 }
 

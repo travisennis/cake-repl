@@ -28,24 +28,35 @@ commands or help text (`internal/app/commands.go`), key bindings
   resolves its own policy. See
   [ADR 017](../adr/017-default-the-cake-sandbox-to-workspace-write-interactive.md).
 - **Config file shape.** TOML config supports only stable REPL defaults:
-  `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`, and
-  `tool-color`. Merge order is hardcoded defaults < XDG config < project-local
-  config < CLI flags, except `cake-bin`: the automatically loaded
-  `.cake-repl.toml` key is ignored with a plain startup warning naming the file
-  and key, even with `-no-color`. Executable precedence is hardcoded `cake` <
-  XDG/explicit `-config` < `-cake-bin` (including trusted relative paths).
-  Explicit `-config` may select the project file; `-no-config` skips file values
-  and warnings. Other project-local keys retain their existing behavior. See
-  [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md).
+  `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`,
+  `tool-color`, and the opt-in `[compaction]` policy table (`enabled`,
+  `cake-compact-bin`, `threshold-percent`, `keep-tokens`). Merge order is
+  hardcoded defaults < XDG config < project-local config < CLI flags, except
+  `cake-bin`: the automatically loaded `.cake-repl.toml` key is ignored with a
+  plain startup warning naming the file and key, even with `-no-color`.
+  Executable precedence is hardcoded `cake` < XDG/explicit `-config` <
+  `-cake-bin` (including trusted relative paths). The same untrusted layer cannot
+  enable compaction (`enabled = true`), set `compaction.cake-compact-bin`, or
+  tune `threshold-percent`/`keep-tokens`; each is ignored with a warning, while
+  `enabled = false` still applies. Explicit `-config` may select the project
+  file; `-no-config` skips file values and warnings. Other project-local keys
+  retain their existing behavior. See
+  [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md)
+  and
+  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
+  narrowed by
+  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md).
   Session-specific values must stay out of config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
   `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
-  stable. `/new`, `/resume`, and `/sessions` require an idle REPL; `Ctrl+N`
-  remains the cancel-and-reset operation during an active run.
+  stable. `/new`, `/resume`, and `/sessions` require an idle REPL (no live run,
+  replay, or compaction); `Ctrl+N` remains the cancel-and-reset operation during
+  an active run or compaction, and `/exit` cancels either before exiting.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
-  (scroll). While the `/sessions` browser is open its keys are modal:
+  (scroll). `Ctrl+C` cancels a running task or compaction and quits only when
+  idle; `Ctrl+N` cancels either and starts a new session. While the `/sessions` browser is open its keys are modal:
   `Up`/`Down`, `PgUp`/`PgDn`, and `Home`/`End` move the selection, `Enter`
   resumes the highlighted session, and `Esc`, `q`, or `Ctrl+C` close it.
 - **Session browser.** `/sessions` opens an idle-only overlay that replaces the
@@ -92,8 +103,8 @@ in plain text like every other surface.
   (e.g. a `summary`) is never shown because providers differ in what they emit.
   Reasoning and tool output remain secondary, while task starts, info,
   completions, warnings, and errors use distinct compact markers. The one-line
-  status display leads with a
-  bracketed idle/running state, followed by labeled session, next-run, optional
+  status display leads with a bracketed idle/running/compacting state, followed
+  by labeled session, next-run, optional
   model, optional context, and cwd context; the model is the identity cake
   reported on the stream once available (the `[[models]]` entry name, falling
   back to the provider model ID), else the `-model`/config value, and a new
@@ -105,25 +116,28 @@ in plain text like every other surface.
   checkpoint estimate exists, and a new session or resume switch clears it so a
   stale figure never crosses into another session's status line. A replayed
   `compaction` record seeds the field from its `estimated_input.after_tokens`,
-  prefixed with `~` (for example `~24k/200k`) because it is cake's estimate
-  rather than a provider measurement; a newer complete `turn_usage`, replayed
-  after the checkpoint or reported by a live turn, replaces it. The record also
-  adds exactly one `i` info marker at its physical timeline position, for
-  example `context compacted 118k -> 24k, 4 records retained`, and never expands
-  the checkpoint's retained tail into duplicate conversation or tool items. The
-  planned live compaction client (task 119) will reuse the same marker
-  formatter, so replay and live notices will share one wording. The session
+  and a live compactor success seeds it from the result's `after_tokens`;
+  either is prefixed with `~` (for example `~24k/200k`) because it is an estimate
+  rather than a provider measurement, and a newer complete `turn_usage`,
+  replayed after the checkpoint or reported by a live turn, replaces it. Each
+  checkpoint also adds exactly one `i` info marker at its physical timeline
+  position, for example `context compacted 118k -> 24k, 4 records retained`, and
+  never expands the checkpoint's retained tail into duplicate conversation or
+  tool items. Replay and the live result share one formatter and wording; the
+  live path appends its own marker at the end of the compacted turn. The session
   field names the id cake
   reported for the current session and carries none after a retarget until the
   new target reports one, while the next-run field names the pinned target. It
   pads or truncates to the terminal width. The prompt
   textarea is framed as
-  a focused composer with ready/running state and concise submit, newline, and
-  help hints; its borders remain visible without color. While the TUI is
-  running, the terminal title is `cake-repl: <absolute working directory>`,
+  a focused composer with ready/running/compacting state and concise submit,
+  newline, and help hints; it names the operation that is in flight while a
+  task or compaction runs, and its borders remain visible without color. While
+  the TUI is running, the terminal title is `cake-repl: <absolute working directory>`,
   using the directory selected by `-cwd` or the startup directory by default.
-  The title carries a `[working]` prefix while a task is in flight and drops it
-  when the run ends, because the status line and composer are both invisible
+  The title carries a `[working]` prefix while a task is in flight, a
+  `[compacting]` prefix while the compactor runs, and neither when idle, because
+  the status line and composer are both invisible
   when the window is unfocused, minimized, or reduced to a tab. The title never
   names a state the REPL has left: the model re-sets it on every run-state
   transition, and `main` writes the idle title sequence once the program

@@ -265,12 +265,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if !m.running {
+		if !m.running && !m.compacting {
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
+
+	case compactionDoneMsg:
+		return m.finishCompaction(msg)
 
 	case replayStartedMsg:
 		if msg.err != nil {
@@ -397,6 +400,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // model with the quit command, so no caller reads the model in a sibling return
 // operand whose order relative to this call is unspecified.
 func (m Model) quit() (Model, tea.Cmd) {
+	m.cancelCompaction()
 	m.cancelSessionList()
 	return m, tea.Quit
 }
@@ -409,6 +413,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.CancelQuit):
 		if m.running {
 			m.run.Cancel()
+			return m, nil
+		}
+		if m.compacting {
+			// Keep the compaction gate closed until the child exits and the
+			// result is reaped, so the next prompt cannot race its session lock.
+			// The reaped result supplies the one "canceled" notice, matching a
+			// canceled run, so no second notice is added here.
+			m.cancelCompaction()
 			return m, nil
 		}
 		if m.hydrating || m.replayPending {
@@ -508,13 +520,17 @@ func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // startNewSession creates an immediate visual and session-state boundary.
-// When a live run or replay is active, its process is canceled and drained
-// normally, but its remaining events are suppressed so they cannot enter or
-// re-pin the new session.
+// When a live run, replay, or compaction is active, its process is canceled and
+// drained normally, but its remaining events are suppressed so they cannot enter
+// or re-pin the new session.
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if m.running {
 		m.newSessionPending = true
 		m.run.Cancel()
+	}
+	if m.compacting {
+		m.newSessionPending = true
+		m.cancelCompaction()
 	}
 	if m.hydrating {
 		if m.replayRun != nil {
@@ -672,7 +688,12 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	}
 
 	if m.newSessionPending {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "waiting for the canceled task to exit…"})
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "waiting for the canceled operation to exit…"})
+		return m, nil
+	}
+
+	if m.compacting {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "context compaction is running — wait for it or press Ctrl+C to cancel"})
 		return m, nil
 	}
 
@@ -699,12 +720,22 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "finish or cancel the running task first"})
 		return m, nil
 	}
+	if m.compacting && needsIdle(cmd.Kind) {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "wait for context compaction to finish (Ctrl+C cancels it)"})
+		return m, nil
+	}
 
 	switch cmd.Kind {
 	case CmdHelp:
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: HelpText})
 
 	case CmdExit:
+		if m.compacting {
+			m.exitAfter = true
+			m.cancelCompaction()
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling context compaction, then exiting…"})
+			return m, nil
+		}
 		if m.running {
 			m.exitAfter = true
 			m.run.Cancel()
@@ -946,8 +977,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		// duplicate messages or tool calls. A replayed checkpoint also seeds the
 		// status context with its own estimate, which any newer complete
 		// turn_usage replaces. A live compaction stream record never seeds that
-		// estimate; the planned compaction client (task 119) will seed the same
-		// ContextUsage figure from its live result.
+		// estimate; the live compactor result does it in finishCompaction.
 		if replay {
 			m.session.OnCompaction(e)
 		}
@@ -1056,13 +1086,12 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	// The run has ended, so the title drops the working marker. Quitting paths
 	// skip this: main writes the idle title once the program returns, which is
 	// the only way to cover exits the model never observes.
-	titleCmd := m.titleCmd()
 	if m.newSessionPending {
 		m.newSessionPending = false
 		if m.exitAfter {
 			return m.quit()
 		}
-		return m, titleCmd
+		return m, m.titleCmd()
 	}
 
 	m.finishPendingTools()
@@ -1093,7 +1122,16 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	if m.exitAfter {
 		return m.quit()
 	}
-	return m, titleCmd
+
+	// Compact between turns, after the pin is settled and the completed turn's
+	// measurement is known. The compactor re-checks the session and may decline.
+	if m.shouldCompactAfter(res) {
+		next, cmd := m.startCompaction()
+		if cmd != nil {
+			return next, cmd
+		}
+	}
+	return m, m.titleCmd()
 }
 
 func (m Model) sessionInfo() string {
@@ -1169,9 +1207,8 @@ func describeHook(e cake.HookEvent) (string, bool) {
 // compactionMarker renders the one timeline marker for a context checkpoint:
 // the estimated input reduction when cake reported one, plus how many records
 // the checkpoint retained. The retained tail's content is never shown; the
-// marker only stands where the checkpoint sits in the transcript. The planned
-// live compaction client (task 119) will reuse this formatter, so replay and
-// live notices will share one wording.
+// marker only stands where the checkpoint sits in the transcript. Replay and the
+// live compactor result share this formatter, so both notices use one wording.
 func compactionMarker(before, after, retained int) string {
 	var b strings.Builder
 	b.WriteString("context compacted")
