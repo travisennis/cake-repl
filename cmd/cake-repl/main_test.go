@@ -869,17 +869,16 @@ func TestStartupCompactionConfig(t *testing.T) {
 	enabledTuned.KeepTokens = 12000
 	disabledTuned := enabledTuned
 	disabledTuned.Enabled = false
-	disabledProjectTuned := disabledTuned
-	disabledProjectTuned.ThresholdPercent = 60
 
 	tests := []struct {
-		name     string
-		xdg      string
-		local    string
-		args     []string
-		want     app.CompactionConfig
-		wantWarn []string
-		wantErr  string
+		name          string
+		xdg           string
+		local         string
+		args          []string
+		want          app.CompactionConfig
+		wantWarn      []string
+		wantWarnExact string
+		wantErr       string
 	}{
 		{name: "disabled by default", want: defaults},
 		{name: "XDG enables and tunes", xdg: enableXDG, want: enabledTuned},
@@ -890,10 +889,20 @@ func TestStartupCompactionConfig(t *testing.T) {
 			wantWarn: []string{"ignoring compaction.cake-compact-bin", "ignoring compaction.enabled = true"},
 		},
 		{
-			name:  "project can disable",
-			xdg:   enableXDG,
-			local: "[compaction]\nenabled = false\nthreshold-percent = 60\n",
-			want:  disabledProjectTuned,
+			name:     "project can disable while tuning is ignored",
+			xdg:      enableXDG,
+			local:    "[compaction]\nenabled = false\nthreshold-percent = 60\n",
+			want:     disabledTuned,
+			wantWarn: []string{"ignoring compaction.threshold-percent"},
+		},
+		{
+			name:     "project cannot tune thresholds",
+			xdg:      enableXDG,
+			local:    "[compaction]\nthreshold-percent = 1\nkeep-tokens = 1\n",
+			want:     enabledTuned,
+			wantWarn: []string{"ignoring compaction.threshold-percent", "ignoring compaction.keep-tokens"},
+			wantWarnExact: "cake-repl: warning: ignoring compaction.threshold-percent in project-local config \".cake-repl.toml\"; tune compaction in XDG config or an explicit -config\n" +
+				"cake-repl: warning: ignoring compaction.keep-tokens in project-local config \".cake-repl.toml\"; tune compaction in XDG config or an explicit -config\n",
 		},
 		{
 			name:     "no-session disables with a warning",
@@ -908,10 +917,11 @@ func TestStartupCompactionConfig(t *testing.T) {
 			wantErr: "threshold-percent",
 		},
 		{
-			name:    "invalid project tuning is rejected",
-			xdg:     enableXDG,
-			local:   "[compaction]\nthreshold-percent = -1\n",
-			wantErr: "threshold-percent",
+			name:     "invalid project tuning is ignored",
+			xdg:      enableXDG,
+			local:    "[compaction]\nthreshold-percent = -1\n",
+			want:     enabledTuned,
+			wantWarn: []string{"ignoring compaction.threshold-percent"},
 		},
 	}
 	for _, tt := range tests {
@@ -952,6 +962,9 @@ func TestStartupCompactionConfig(t *testing.T) {
 				if !strings.Contains(warnings.String(), want) {
 					t.Errorf("warnings = %q, want it to contain %q", warnings.String(), want)
 				}
+			}
+			if tt.wantWarnExact != "" && warnings.String() != tt.wantWarnExact {
+				t.Errorf("warnings = %q, want exactly %q", warnings.String(), tt.wantWarnExact)
 			}
 			if tt.wantWarn == nil && warnings.Len() != 0 {
 				t.Errorf("unexpected warnings = %q", warnings.String())

@@ -19,8 +19,12 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 - **compaction contract**: the opt-in between-turn compactor is run only through
   `internal/compact` as `cake-compact compact -json -threshold … <session-id>`,
   never with `-fork`, and only its one JSON document is decoded. The session id
-  stays pinned; an `in_place:false` or mismatched result is rejected. See
-  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+  stays pinned; an `in_place:false` or mismatched result is rejected. Only
+  trusted config (XDG or an explicit `-config`) may enable or tune it; the
+  automatic project-local layer may only disable it. See
+  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md)
+  and
+  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md).
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.

@@ -298,9 +298,9 @@ keep-tokens = 20000
   figure and shows one warning. The REPL never reads or writes cake session
   files.
 - `-no-session` disables compaction with a startup warning. The automatically
-  loaded project-local `.cake-repl.toml` cannot enable compaction or choose
-  `cake-compact-bin`; only XDG config or an explicit `-config` can. A project
-  may disable compaction or tune the thresholds.
+  loaded project-local `.cake-repl.toml` cannot enable compaction, choose
+  `cake-compact-bin`, or tune its thresholds; only XDG config or an explicit
+  `-config` can. A project may only disable compaction.
 - `cake-compact` must be installed, and the configured `cake` must support
   `cake sessions checkpoint`. The compactor inherits the REPL's environment and
   working directory, so `CAKE_DATA_DIR` and a relative `-cake-bin` resolve the
@@ -309,7 +309,9 @@ keep-tokens = 20000
 - Compaction only happens between prompts. A single long tool loop that fills
   the window before the turn ends is not covered; that needs a request-boundary
   mechanism inside Cake. See
-  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md)
+  and
+  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md).
 
 ## Config file
 
@@ -318,11 +320,11 @@ file are overridden by CLI flags.
 
 ### Paths
 
-Config files are loaded from two locations, with project-local values taking
+Config files are loaded from two locations. Project-local values take
 precedence over XDG-level values, except that the automatic project-local layer
-cannot select `cake-bin`, cannot enable `compaction`, and cannot set
-`compaction.cake-compact-bin`; a project may disable compaction and tune its
-thresholds:
+cannot select `cake-bin`, cannot enable `compaction`, cannot set
+`compaction.cake-compact-bin`, and cannot tune `threshold-percent` or
+`keep-tokens`; it may only disable compaction.
 
 | Path | Priority |
 |---|---|
@@ -335,12 +337,12 @@ default paths. Pass `--no-config` to skip config file loading entirely.
 
 The automatically loaded `.cake-repl.toml` cannot select the executable: its
 `cake-bin` key is ignored with a plain startup warning naming the file and key.
-It also cannot enable context compaction or set `compaction.cake-compact-bin`;
-both are ignored with a warning. It may disable compaction and tune
-`threshold-percent` and `keep-tokens`. Set the executable and enable compaction
-in XDG config, an explicitly selected `-config` file, or `-cake-bin`.
-Explicitly selecting `.cake-repl.toml` with `-config` allows its `cake-bin` and
-compaction values. `-no-config` skips file values and these warnings.
+It also cannot enable context compaction, set `compaction.cake-compact-bin`, or
+tune `threshold-percent`/`keep-tokens`; each is ignored with a warning. It may
+disable compaction. Set the executable, enable compaction, and tune it in XDG
+config, an explicitly selected `-config` file, or `-cake-bin`. Explicitly
+selecting `.cake-repl.toml` with `-config` allows its `cake-bin` and compaction
+values. `-no-config` skips file values and these warnings.
 
 ### Format
 
@@ -367,7 +369,7 @@ tool-color = true
 
 # Compact context between turns through the external compactor (default: off).
 # XDG or explicit -config only; the automatic project-local file cannot enable
-# compaction or select the compactor executable.
+# compaction, select the compactor executable, or tune its thresholds.
 [compaction]
 enabled = false
 cake-compact-bin = "cake-compact"
@@ -380,8 +382,9 @@ keep-tokens = 20000
 Hardcoded defaults < XDG config < project-local config < CLI flags.
 For `cake-bin`, precedence is hardcoded `cake` < XDG/explicit `-config` file <
 `-cake-bin`; the automatic project-local layer is excluded. The same exclusion
-applies to `compaction.enabled = true` and `compaction.cake-compact-bin`; the
-project-local layer may only disable compaction or tune it. Trusted relative
+applies to `compaction.enabled = true`, `compaction.cake-compact-bin`,
+`threshold-percent`, and `keep-tokens`; the project-local layer may only disable
+compaction. Trusted relative
 executable paths keep their usual resolution. A CLI flag always wins over the
 same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and

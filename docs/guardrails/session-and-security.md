@@ -10,7 +10,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   cannot set `cake-bin`; ignore the key and warn at startup using plain text
   that names the file and key without echoing the executable value. XDG config,
   explicit `-config` (including the project file), and `-cake-bin` remain
-  allowed sources. See
+  allowed sources. Key presence is matched case-insensitively to agree with the
+  TOML decoder, so `Cake-Bin` is ignored too. See
   [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md).
 
 - **Sandbox policy default.** Live invocations pass
@@ -73,10 +74,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `ResumeID` unchanged with an estimated status figure. A `compacted:false`
   no-op is silent; a failure, cancellation, or non-in-place result keeps the
   session and figure and warns. The automatically loaded project-local
-  `.cake-repl.toml` cannot enable compaction or select its executable (ADR 006,
-  extended by
-  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md));
-  it may disable compaction and tune the thresholds. If two REPLs race, Cake's
+  `.cake-repl.toml` cannot enable compaction, select its executable, or tune its
+  thresholds (ADR 006, extended by
+  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md)
+  and narrowed by
+  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md)); it may only
+  disable compaction. If two REPLs race, Cake's
   append lock serializes writers and the loser warns. See
   [cake-integration-and-stream-json.md](cake-integration-and-stream-json.md) for
   the subprocess contract.
@@ -192,11 +195,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - `just test-race` for any `runner.go` change, and for the session-listing
   lifecycle (cancellation, request identity, `WaitDelay`).
 - For between-turn compaction, cover the config provenance and merge rules
-  (project-local cannot enable or select the executable), the trigger headroom
-  and every disqualifying run, the gated state, in-place success and estimated
-  context, a no-op, a non-zero exit, a non-in-place document, and cancellation
-  through Ctrl+C and Ctrl+N. Use fake `cake-compact` scripts; never a real model
-  call.
+  (project-local cannot enable, select the executable, or tune it), the
+  trigger headroom and every disqualifying run, the gated state, in-place
+  success and estimated context, a no-op, a non-zero exit, a non-in-place
+  document, and cancellation through Ctrl+C and Ctrl+N. Use fake `cake-compact`
+  scripts; never a real model call.
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
 - Terminal behavior around a suspend has no unit-test surface beyond the step
   order and mode sequences, so a change there needs the driven session in
@@ -222,10 +225,13 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `/new`/`/resume`/`/sessions`, while the compactor still holds or is writing the
   session. Keep the gate closed until the child is reaped, even after Ctrl+C.
 - **Letting a project file turn on metered compaction.** The automatically
-  loaded `.cake-repl.toml` may disable compaction and tune `threshold-percent` /
-  `keep-tokens`, but `enabled = true` and `cake-compact-bin` must be ignored with
-  a warning. Enabling there would let a cloned repository spend the user's
-  quota and mutate the session without the user opting in.
+  loaded `.cake-repl.toml` may only disable compaction; `enabled = true`,
+  `cake-compact-bin`, `threshold-percent`, and `keep-tokens` must be ignored
+  with a warning. Enabling or tuning there would let a cloned repository spend
+  the user's quota and mutate the session without the user opting in. Key
+  presence must be matched case-insensitively, as TOML decoding does; a
+  case-sensitive metadata lookup misses `[Compaction] Enabled = true` and lets
+  it through.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Reopening terminal injection.** Adding a render path that bypasses

@@ -140,11 +140,12 @@ quality claim.
   session state is introduced by the REPL itself.
 - Residual risk: once a trusted layer enables compaction, a project-local file
   can tune `threshold-percent` low and `keep-tokens` small, increasing how often
-  the compactor runs and how much it retires. This is accepted because the
+  the compactor runs and how much it retires. This was accepted because the
   metered operation must already be enabled in XDG config or an explicit
   `-config`, and the user can disable it there or in the project; the compactor
   still re-checks the session and its minimum-reduction guard. Flooring or
-  ignoring project-local tuning is a separate decision.
+  ignoring project-local tuning is a separate decision; ADR 024 makes that
+  decision by ignoring project-local tuning.
 
 ## More Information
 
@@ -156,3 +157,6 @@ quality claim.
   cross-project plan and the Phase 5 qualification criteria.
 - ADR 006 (project-local executable provenance) is extended, not superseded:
   its rule now covers the compactor executable and the enabling decision.
+- [ADR 024](024-ignore-project-local-compaction-tuning.md) partially supersedes
+  this ADR's provenance rule: the automatic project-local layer may no longer
+  tune `threshold-percent` or `keep-tokens`; it may only disable compaction.

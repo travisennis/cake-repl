@@ -156,6 +156,8 @@ func TestLoadMergeToolColorPrecedence(t *testing.T) {
 		{name: "project false overrides XDG true", xdg: "tool-color = true\n", project: "tool-color = false\n", want: false},
 		{name: "absent project key inherits XDG true", xdg: "tool-color = true\n", project: "model = \"local\"\n", want: true},
 		{name: "project true overrides XDG false", xdg: "tool-color = false\n", project: "tool-color = true\n", want: true},
+		{name: "case-variant key is present", xdg: "Tool-Color = true\n", project: "", want: true},
+		{name: "case-variant false overrides XDG true", xdg: "tool-color = true\n", project: "Tool-Color = false\n", want: false},
 		{name: "absent everywhere stays false", xdg: "", project: "", want: false},
 	}
 	for _, tt := range tests {
@@ -333,6 +335,7 @@ func TestLoadProjectCannotEnableOrSelectCompactor(t *testing.T) {
 enabled = true
 cake-compact-bin = "/tmp/untrusted-compactor"
 threshold-percent = 50
+keep-tokens = 5000
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -341,30 +344,77 @@ threshold-percent = 50
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantIgnored := []string{"compaction.cake-compact-bin", "compaction.enabled"}
+	wantIgnored := []string{
+		"compaction.cake-compact-bin",
+		"compaction.enabled",
+		"compaction.threshold-percent",
+		"compaction.keep-tokens",
+	}
 	if strings.Join(ignored, ",") != strings.Join(wantIgnored, ",") {
 		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
 	}
-	if cfg.Compaction.Enabled || cfg.Compaction.CakeCompactBin != "" {
-		t.Fatalf("project-local security keys survived: %+v", cfg.Compaction)
-	}
-	if cfg.Compaction.ThresholdPercent != 50 {
-		t.Fatalf("allowed tuning key dropped: %+v", cfg.Compaction)
+	if cfg.Compaction.Enabled || cfg.Compaction.CakeCompactBin != "" ||
+		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
+		t.Fatalf("project-local security or tuning keys survived: %+v", cfg.Compaction)
 	}
 
 	trusted := &Config{
-		CakeBin:    "cake",
-		Compaction: Compaction{Enabled: true, EnabledSet: true, CakeCompactBin: "trusted-compactor", ThresholdPercent: 80},
+		CakeBin: "cake",
+		Compaction: Compaction{
+			Enabled:          true,
+			EnabledSet:       true,
+			CakeCompactBin:   "trusted-compactor",
+			ThresholdPercent: 80,
+			KeepTokens:       20000,
+		},
 	}
 	merged := Merge(trusted, cfg)
-	if !merged.Compaction.Enabled || merged.Compaction.CakeCompactBin != "trusted-compactor" {
+	if !merged.Compaction.Enabled || merged.Compaction.CakeCompactBin != "trusted-compactor" ||
+		merged.Compaction.ThresholdPercent != 80 || merged.Compaction.KeepTokens != 20000 {
 		t.Fatalf("trusted values did not survive: %+v", merged.Compaction)
 	}
 }
 
-func TestLoadProjectCanDisableCompaction(t *testing.T) {
+func TestLoadProjectCaseVariantKeysAreIgnored(t *testing.T) {
+	// The TOML decoder matches struct fields case-insensitively, while
+	// MetaData.IsDefined is case-sensitive. Presence checks must agree with the
+	// decoder or a differently spelled key would survive provenance stripping.
 	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
-	if err := os.WriteFile(path, []byte("[compaction]\nenabled = false\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`
+Cake-Bin = "/tmp/untrusted-cake"
+
+[Compaction]
+Enabled = true
+Cake-Compact-Bin = "/tmp/untrusted-compactor"
+Threshold-Percent = 1
+Keep-Tokens = 1
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, ignored, err := LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantIgnored := []string{
+		"cake-bin",
+		"compaction.cake-compact-bin",
+		"compaction.enabled",
+		"compaction.threshold-percent",
+		"compaction.keep-tokens",
+	}
+	if strings.Join(ignored, ",") != strings.Join(wantIgnored, ",") {
+		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
+	}
+	if cfg.CakeBin != "" || cfg.Compaction.Enabled || cfg.Compaction.CakeCompactBin != "" ||
+		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
+		t.Fatalf("case-variant project keys survived: cake-bin=%q compaction=%+v", cfg.CakeBin, cfg.Compaction)
+	}
+}
+
+func TestLoadProjectCaseVariantDisableIsAllowed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
+	if err := os.WriteFile(path, []byte("[Compaction]\nEnabled = false\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, ignored, err := LoadProject(path)
@@ -375,11 +425,41 @@ func TestLoadProjectCanDisableCompaction(t *testing.T) {
 		t.Fatalf("ignored = %v, want none", ignored)
 	}
 	if !cfg.Compaction.EnabledSet || cfg.Compaction.Enabled {
+		t.Fatalf("case-variant disable was not preserved: %+v", cfg.Compaction)
+	}
+}
+
+func TestLoadProjectCanDisableCompaction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
+	if err := os.WriteFile(path, []byte("[compaction]\nenabled = false\nthreshold-percent = 60\nkeep-tokens = 5000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ignored, err := LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantIgnored := []string{"compaction.threshold-percent", "compaction.keep-tokens"}
+	if strings.Join(ignored, ",") != strings.Join(wantIgnored, ",") {
+		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
+	}
+	if !cfg.Compaction.EnabledSet || cfg.Compaction.Enabled {
 		t.Fatalf("disable was not preserved: %+v", cfg.Compaction)
 	}
-	xdg := &Config{Compaction: Compaction{Enabled: true, EnabledSet: true}}
-	if Merge(xdg, cfg).Compaction.Enabled {
+	if cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
+		t.Fatalf("project-local tuning survived: %+v", cfg.Compaction)
+	}
+	xdg := &Config{Compaction: Compaction{
+		Enabled:          true,
+		EnabledSet:       true,
+		ThresholdPercent: 70,
+		KeepTokens:       12000,
+	}}
+	merged := Merge(xdg, cfg)
+	if merged.Compaction.Enabled {
 		t.Fatal("project-local disable did not override XDG enable")
+	}
+	if merged.Compaction.ThresholdPercent != 70 || merged.Compaction.KeepTokens != 12000 {
+		t.Fatalf("trusted tuning did not survive: %+v", merged.Compaction)
 	}
 }
 

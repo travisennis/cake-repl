@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -115,28 +116,40 @@ func Load(path string) (*Config, error) {
 }
 
 // LoadProject loads automatically discovered project defaults. A project file is
-// untrusted provenance, so it cannot select an executable and cannot enable the
-// metered, session-mutating compactor. ignored names each key dropped for that
-// reason, in a stable order, and reports key presence even when its value is
-// empty. A project file may still disable compaction and tune its thresholds.
+// untrusted provenance, so it cannot select an executable, cannot enable the
+// metered, session-mutating compactor, and cannot tune its thresholds. ignored
+// names each key dropped for that reason, in a stable order, and reports key
+// presence even when its value is empty. A project file may still disable
+// compaction. See ADR 006 and ADR 024.
 func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	cfg, meta, err := load(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	if meta.IsDefined("cake-bin") {
+	if definedFold(meta, "cake-bin") {
 		ignored = append(ignored, "cake-bin")
 	}
 	cfg.CakeBin = ""
-	if meta.IsDefined("compaction", "cake-compact-bin") {
+	if definedFold(meta, "compaction", "cake-compact-bin") {
 		ignored = append(ignored, "compaction.cake-compact-bin")
 	}
 	cfg.Compaction.CakeCompactBin = ""
-	if meta.IsDefined("compaction", "enabled") && cfg.Compaction.Enabled {
+	if definedFold(meta, "compaction", "enabled") && cfg.Compaction.Enabled {
 		// Disabling is allowed to win; enabling is not.
 		ignored = append(ignored, "compaction.enabled")
 		cfg.Compaction.Enabled = false
 		cfg.Compaction.EnabledSet = false
+	}
+	// Tuning is ignored too: an untrusted file must not be able to turn an
+	// already-enabled metered operation up. Clearing the value lets the trusted
+	// layer's non-zero merge win. See ADR 024.
+	if definedFold(meta, "compaction", "threshold-percent") {
+		ignored = append(ignored, "compaction.threshold-percent")
+		cfg.Compaction.ThresholdPercent = 0
+	}
+	if definedFold(meta, "compaction", "keep-tokens") {
+		ignored = append(ignored, "compaction.keep-tokens")
+		cfg.Compaction.KeepTokens = 0
 	}
 	return cfg, ignored, nil
 }
@@ -150,9 +163,34 @@ func load(path string) (*Config, toml.MetaData, error) {
 		}
 		return nil, meta, err
 	}
-	cfg.ToolColorSet = meta.IsDefined("tool-color")
-	cfg.Compaction.EnabledSet = meta.IsDefined("compaction", "enabled")
+	cfg.ToolColorSet = definedFold(meta, "tool-color")
+	cfg.Compaction.EnabledSet = definedFold(meta, "compaction", "enabled")
 	return cfg, meta, nil
+}
+
+// definedFold reports whether a TOML key path was supplied, matching each
+// segment case-insensitively. The decoder matches struct tags case-insensitively,
+// but MetaData.IsDefined is case-sensitive; presence checks must use the same
+// rule as decoding, or a differently spelled key could decode into the struct
+// while its presence check missed it. That matters most for the untrusted
+// project-local layer, where a missed key would survive provenance stripping.
+func definedFold(meta toml.MetaData, path ...string) bool {
+	for _, key := range meta.Keys() {
+		if len(key) != len(path) {
+			continue
+		}
+		match := true
+		for i := range path {
+			if !strings.EqualFold(key[i], path[i]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 // Merge applies src values to dst for each non-zero field in src. dst is

@@ -163,8 +163,10 @@ way.
   from `after_tokens` as an estimate. A failure, cancellation, or other result
   keeps the session and figure and warns. The REPL never reads session files;
   `-no-session` disables the feature; and the untrusted project-local config
-  layer cannot enable it or choose its executable. See
-  [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+  layer cannot enable it, choose its executable, or tune it. See
+  [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md)
+  and
+  [`docs/adr/024-ignore-project-local-compaction-tuning.md`](docs/adr/024-ignore-project-local-compaction-tuning.md).
 - **Graceful cancellation.** Cancel sends SIGTERM then SIGKILL after a grace
   period (kill outright on Windows). Cancellation is classified from whether
   `cmd.Cancel` successfully signaled the process and, on POSIX, whether the

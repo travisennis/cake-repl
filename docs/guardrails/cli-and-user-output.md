@@ -36,14 +36,16 @@ commands or help text (`internal/app/commands.go`), key bindings
   plain startup warning naming the file and key, even with `-no-color`.
   Executable precedence is hardcoded `cake` < XDG/explicit `-config` <
   `-cake-bin` (including trusted relative paths). The same untrusted layer cannot
-  enable compaction (`enabled = true`) or set `compaction.cake-compact-bin`; both
-  are ignored with a warning, while `enabled = false` and the threshold/keep
-  values still apply. Explicit `-config` may select the project file;
-  `-no-config` skips file values and warnings. Other project-local keys retain
-  their existing behavior. See
+  enable compaction (`enabled = true`), set `compaction.cake-compact-bin`, or
+  tune `threshold-percent`/`keep-tokens`; each is ignored with a warning, while
+  `enabled = false` still applies. Explicit `-config` may select the project
+  file; `-no-config` skips file values and warnings. Other project-local keys
+  retain their existing behavior. See
   [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md)
   and
-  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md).
+  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
+  narrowed by
+  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md).
   Session-specific values must stay out of config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
   `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
