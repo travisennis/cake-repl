@@ -64,7 +64,7 @@ internal/app/            Bubble Tea state machine (the REPL itself).
   model.go               Model struct, layout, timeline render cache.
   update.go              Event/key/command handling (the Update loop).
   session.go             sessionState: pure run-mode state machine.
-  compaction.go          Between-turn trigger, gate, and compactor result handling (ADR 023).
+  compaction.go          Between-turn trigger and ceiling policy, gate, and compactor result handling (ADR 023, ADR 025).
   commands.go            Slash-command parsing + HelpText.
   completion.go          Tab completion for slash commands.
   keys.go                Key bindings.
@@ -154,19 +154,26 @@ way.
   exited and been reaped. See
   [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
 - **Compaction is opt-in, between-turns, and in place.** A completed turn whose
-  newest complete `turn_usage` figure reaches a five-point headroom below the
-  configured threshold starts one model-owned `cake-compact` subprocess through
-  `internal/compact`. The compactor re-checks the session and decides; a
-  `compacted:false` result is a silent no-op. Only a document that says
-  `compacted:true` and `in_place:true` with the pinned session id is applied: the
-  REPL keeps `ResumeID`, appends one shared marker, and seeds the status context
-  from `after_tokens` as an estimate. A failure, cancellation, or other result
-  keeps the session and figure and warns. The REPL never reads session files;
-  `-no-session` disables the feature; and the untrusted project-local config
-  layer cannot enable it, choose its executable, or tune it. See
-  [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md)
+  newest complete `turn_usage` figure reaches the configured trigger starts one
+  model-owned `cake-compact` subprocess through `internal/compact`. Absolute
+  mode uses `max-context-tokens` as a quality ceiling and `trigger-tokens` as
+  the line; the effective trigger is capped at 75% of the model window when the
+  window is below the ceiling, and only that trigger (never the ceiling) is
+  passed as `-threshold-tokens`. Without the absolute fields the legacy percent
+  fallback keeps its five-point headroom and passes `-threshold-percent`.
+  Exactly one threshold mode reaches the compactor. The compactor re-checks the
+  session and decides; a `compacted:false` result is a silent no-op. Only a
+  document that says `compacted:true` and `in_place:true` with the pinned
+  session id is applied: the REPL keeps `ResumeID`, appends one shared marker,
+  and seeds the status context from `after_tokens` as an estimate. A failure,
+  cancellation, or other result keeps the session and figure and warns. The
+  REPL never reads session files; `-no-session` disables the feature; and the
+  untrusted project-local config layer cannot enable it, choose its executable,
+  or tune any threshold, including the absolute fields. See
+  [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
+  [`docs/adr/024-ignore-project-local-compaction-tuning.md`](docs/adr/024-ignore-project-local-compaction-tuning.md),
   and
-  [`docs/adr/024-ignore-project-local-compaction-tuning.md`](docs/adr/024-ignore-project-local-compaction-tuning.md).
+  [`docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md`](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
 - **Graceful cancellation.** Cancel sends SIGTERM then SIGKILL after a grace
   period (kill outright on Windows). Cancellation is classified from whether
   `cmd.Cancel` successfully signaled the process and, on POSIX, whether the

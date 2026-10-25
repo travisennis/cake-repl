@@ -161,3 +161,7 @@ quality claim.
 - [ADR 024](024-ignore-project-local-compaction-tuning.md) partially supersedes
   this ADR's provenance rule: the automatic project-local layer may no longer
   tune `threshold-percent` or `keep-tokens`; it may only disable compaction.
+- [ADR 025](025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md)
+  extends this ADR's trigger policy with an absolute quality ceiling and
+  trigger line. The in-place, gating, result, and estimated-status semantics
+  above are unchanged; the provenance rule is narrowed further.

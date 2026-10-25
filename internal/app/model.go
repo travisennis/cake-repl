@@ -66,12 +66,16 @@ type Config struct {
 }
 
 // CompactionConfig is the resolved `[compaction]` configuration. Bin is the
-// external compactor executable, ThresholdPercent is the context-window
-// percentage it compacts at, and KeepTokens is its retained-tail target. See
-// ADR 023.
+// external compactor executable, MaxContextTokens is the quality ceiling for
+// absolute mode, TriggerTokens is the absolute compaction line, and
+// ThresholdPercent/KeepTokens are the percent fallback and retained-tail target.
+// The ceiling is policy only and is never passed to the compactor. See ADR 023
+// and ADR 025.
 type CompactionConfig struct {
 	Enabled          bool
 	Bin              string
+	MaxContextTokens int
+	TriggerTokens    int
 	ThresholdPercent int
 	KeepTokens       int
 }

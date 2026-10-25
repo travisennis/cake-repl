@@ -70,20 +70,144 @@ func TestShouldCompactAfter(t *testing.T) {
 	}
 }
 
+func TestShouldCompactAfterAbsolute(t *testing.T) {
+	ready := func(tokens, window int) Model {
+		m := laidOut(160, 24)
+		m.cfg.Compaction = CompactionConfig{
+			Enabled:          true,
+			Bin:              "cake-compact",
+			MaxContextTokens: 400_000,
+			TriggerTokens:    350_000,
+			ThresholdPercent: 10, // percent mode would fire below 100k; absolute mode must not.
+			KeepTokens:       20_000,
+		}
+		m.session.OnTaskStart(cake.TaskStart{SessionID: compactionSessionID, TaskID: "t-1"})
+		m.session.OnTaskComplete(success(compactionSessionID))
+		m.applyEvent(cake.TurnUsage{
+			Usage:         cake.Usage{InputTokens: tokens},
+			UsagePresence: "complete",
+			ContextWindow: window,
+		})
+		m.sawComplete = true
+		return m
+	}
+
+	tests := []struct {
+		name   string
+		tokens int
+		window int
+		want   bool
+	}{
+		{"below the configured trigger", 349_999, 1_000_000, false},
+		{"at the configured trigger", 350_000, 1_000_000, true},
+		{"above the ceiling still fires", 500_000, 1_000_000, true},
+		{"percent mode is ignored in absolute mode", 100_000, 1_000_000, false},
+		{"window at the ceiling stays below the configured trigger", 349_999, 400_000, false},
+		{"window at the ceiling fires at the configured trigger", 350_000, 400_000, true},
+		{"window below the ceiling stays below the 75 percent cap", 149_999, 200_000, false},
+		{"window below the ceiling fires at the 75 percent cap", 150_000, 200_000, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := ready(tt.tokens, tt.window)
+			if got := m.shouldCompactAfter(cake.Result{ExitCode: 0}); got != tt.want {
+				t.Fatalf("shouldCompactAfter = %v, want %v (context %+v)", got, tt.want, m.session.Context)
+			}
+		})
+	}
+
+	t.Run("incomplete absolute config disables the trigger", func(t *testing.T) {
+		m := ready(900_000, 1_000_000)
+		m.cfg.Compaction.TriggerTokens = 0
+		if m.shouldCompactAfter(cake.Result{ExitCode: 0}) {
+			t.Fatal("partial absolute config fell back to percent mode")
+		}
+	})
+}
+
+func TestResolveCompactionTrigger(t *testing.T) {
+	m := laidOut(160, 24)
+	m.cfg.Compaction = CompactionConfig{
+		Enabled:          true,
+		MaxContextTokens: 400_000,
+		TriggerTokens:    350_000,
+		ThresholdPercent: 80,
+	}
+
+	tests := []struct {
+		name   string
+		window int
+		want   int
+	}{
+		{"large window uses the configured trigger", 1_000_000, 350_000},
+		{"window at the ceiling uses the configured trigger", 400_000, 350_000},
+		{"window just below the ceiling uses the cap", 399_999, 299_999},
+		{"window well below the ceiling uses the cap", 200_000, 150_000},
+		{"tiny window stays below itself", 1_000, 750},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			trigger, ok := m.resolveCompactionTrigger(tt.window)
+			if !ok || !trigger.absolute {
+				t.Fatalf("resolveCompactionTrigger(%d) = %+v, %v, want absolute", tt.window, trigger, ok)
+			}
+			if trigger.tokens != tt.want {
+				t.Fatalf("trigger = %d, want %d", trigger.tokens, tt.want)
+			}
+			if trigger.tokens > tt.window {
+				t.Fatalf("trigger %d exceeds window %d", trigger.tokens, tt.window)
+			}
+		})
+	}
+
+	t.Run("percent fallback keeps the five-point headroom", func(t *testing.T) {
+		m.cfg.Compaction.MaxContextTokens = 0
+		m.cfg.Compaction.TriggerTokens = 0
+		trigger, ok := m.resolveCompactionTrigger(200_000)
+		if !ok || trigger.absolute || trigger.percent != 75 {
+			t.Fatalf("percent fallback = %+v, %v, want 75%%", trigger, ok)
+		}
+	})
+}
+
 // compactionModel returns a model whose last turn completed with a context over
 // the trigger, as finishRun sees it.
 func compactionModel(t *testing.T, bin string) Model {
 	t.Helper()
+	return compactionModelWithConfig(t, CompactionConfig{
+		Enabled:          true,
+		Bin:              bin,
+		ThresholdPercent: 80,
+		KeepTokens:       20000,
+	}, 170_000, 200_000)
+}
+
+// absoluteCompactionModel returns the same completed-turn model under an
+// absolute 400k ceiling / 350k trigger.
+func absoluteCompactionModel(t *testing.T, bin string, tokens, window int) Model {
+	t.Helper()
+	return compactionModelWithConfig(t, CompactionConfig{
+		Enabled:          true,
+		Bin:              bin,
+		MaxContextTokens: 400_000,
+		TriggerTokens:    350_000,
+		ThresholdPercent: 80,
+		KeepTokens:       20_000,
+	}, tokens, window)
+}
+
+func compactionModelWithConfig(t *testing.T, cfg CompactionConfig, tokens, window int) Model {
+	t.Helper()
 	m := laidOut(160, 24)
-	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: bin, ThresholdPercent: 80, KeepTokens: 20000}
+	m.cfg.Compaction = cfg
 	m.cfg.CakeBin = "/opt/bin/cake"
 	m.cfg.Model = "test-model"
 	m.cfg.Profile = "test-profile"
 	m.session.OnTaskStart(cake.TaskStart{SessionID: compactionSessionID, TaskID: "t-1"})
 	m.applyEvent(cake.TurnUsage{
-		Usage:         cake.Usage{InputTokens: 170_000},
+		Usage:         cake.Usage{InputTokens: tokens},
 		UsagePresence: "complete",
-		ContextWindow: 200_000,
+		ContextWindow: window,
 	})
 	m.applyEvent(cake.TaskComplete{Subtype: "success", SessionID: compactionSessionID, TaskID: "t-1"})
 	m.running = true
@@ -220,6 +344,69 @@ JSON
 	}
 	if strings.Contains(string(raw), "-fork") {
 		t.Fatalf("compactor was asked to fork: %s", raw)
+	}
+	if strings.Contains(string(raw), "-force") {
+		t.Fatalf("compactor was asked to force: %s", raw)
+	}
+}
+
+// TestFinishRunAbsoluteCompactionArgs checks the absolute trigger reaches the
+// compactor as one -threshold-tokens flag carrying the same line the REPL used,
+// including the window fallback, and that no percent, force, or fork flag leaks
+// into the invocation.
+func TestFinishRunAbsoluteCompactionArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		tokens      int
+		window      int
+		wantTrigger string
+	}{
+		{"configured trigger on a large window", 360_000, 1_000_000, "350000"},
+		{"window fallback caps the trigger", 200_000, 200_000, "150000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			argsPath := filepath.Join(t.TempDir(), "args")
+			t.Setenv("ARGS_FILE", argsPath)
+			bin := writeFakeCompactor(t, `
+printf '%s\n' "$@" >> "$ARGS_FILE"
+cat <<'JSON'
+{"compacted":true,"source_session_id":"11111111-2222-3333-4444-555555555555","session_id":"11111111-2222-3333-4444-555555555555","in_place":true,"checkpoint_id":"c-1","boundary":4,"before_tokens":360000,"after_tokens":24000,"window":1000000,"retained_count":4}
+JSON
+`)
+			m := absoluteCompactionModel(t, bin, tt.tokens, tt.window)
+
+			tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+			m = tm.(Model)
+			if !m.compacting {
+				t.Fatal("finishRun did not start an absolute compaction")
+			}
+			tm, _ = m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
+			m = tm.(Model)
+			if m.session.Context == nil || m.session.Context.Tokens != 24_000 || !m.session.Context.Estimated {
+				t.Fatalf("context = %+v, want the estimated after_tokens", m.session.Context)
+			}
+
+			raw, err := os.ReadFile(argsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Fields(string(raw))
+			want := []string{
+				"compact", "-json", "-threshold", "-threshold-tokens", tt.wantTrigger,
+				"-keep-tokens", "20000", "-cake-bin", "/opt/bin/cake",
+				"-summarizer-model", "test-model", "-summarizer-profile", "test-profile",
+				"--", compactionSessionID,
+			}
+			if strings.Join(got, " ") != strings.Join(want, " ") {
+				t.Fatalf("compactor args = %v, want %v", got, want)
+			}
+			for _, forbidden := range []string{"-threshold-percent", "-force", "-fork"} {
+				if strings.Contains(string(raw), forbidden) {
+					t.Fatalf("absolute compactor invocation carried %s: %s", forbidden, raw)
+				}
+			}
+		})
 	}
 }
 

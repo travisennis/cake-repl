@@ -75,4 +75,8 @@ project-local tuning allowance and the residual-risk bullet no longer apply.
   bullet are replaced by this decision.
 - [ADR 006](006-project-local-config-cannot-select-the-cake-executable.md)
   defines the untrusted-provenance rule this decision extends.
+- [ADR 025](025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md)
+  extends the ignored tuning keys to `max-context-tokens` and
+  `trigger-tokens`; the rule that the untrusted layer may only disable
+  compaction is unchanged.
 - cake-repl task 119 (opt-in between-turn compaction) is the implementation.

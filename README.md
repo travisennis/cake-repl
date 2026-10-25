@@ -268,7 +268,7 @@ down. The status line and timeline only show it shortened.
 ## Context compaction (experimental)
 
 cake-repl can compact context between prompts. After a successful turn whose
-newest context measurement approaches the configured threshold, it runs the
+newest context measurement reaches the configured trigger, it runs the
 external `cake-compact` binary, which summarizes retired history and appends an
 in-place checkpoint to the same cake session. The session id does not change, so
 the next prompt resumes the same session; replay still shows the raw transcript
@@ -276,17 +276,42 @@ plus one `context compacted …` marker. The feature is opt-in, off by default,
 and experimental: summary quality has not been qualified.
 
 ```toml
+# Absolute mode: a quality ceiling and the line where compaction fires. Both
+# must be set together, both positive, and trigger-tokens < max-context-tokens.
+# 400000/350000 are recommended starting values, not built-in defaults.
 [compaction]
 enabled = true
 cake-compact-bin = "cake-compact"
+max-context-tokens = 400000
+trigger-tokens = 350000
+keep-tokens = 20000
+```
+
+- In absolute mode the REPL fires when the newest complete `turn_usage` input
+  figure reaches `trigger-tokens`. It does not subtract a percentage headroom.
+  `cake-compact` receives that same effective line as `-threshold-tokens`; the
+  ceiling itself is never passed. The compactor re-checks the session and
+  compacts only when it agrees; a no-op is silent.
+- If the model's context window is smaller than `max-context-tokens`, the
+  effective trigger is the smaller of `trigger-tokens` and 75% of the window.
+  The 75% cap keeps the same five-point response/tool headroom as percent mode
+  and never puts the trigger above the window.
+- Without the two absolute fields, the percent fallback is unchanged: the REPL
+  fires five percentage points below `threshold-percent`, and `cake-compact`
+  receives `-threshold-percent`. Existing configs keep their behavior.
+
+```toml
+# Percent fallback, used only when max-context-tokens and trigger-tokens are
+# both unset. The REPL fires five points below threshold-percent.
+[compaction]
+enabled = true
 threshold-percent = 80
 keep-tokens = 20000
 ```
 
-- The REPL triggers five percentage points below `threshold-percent`, because
-  the live `turn_usage` figure does not include the response and tool results
-  that will be in the session. `cake-compact` re-checks the session and compacts
-  only when it agrees; a no-op is silent.
+- When either absolute field is set, both must be positive and
+  `trigger-tokens` must be below `max-context-tokens`; otherwise startup fails
+  with a config error naming the field. Setting only one is also an error.
 - The summary is a metered model call made by `cake-compact` through cake. It
   uses the REPL's `-model` and `-profile` when set; with neither, cake's own
   default model applies.
@@ -299,10 +324,13 @@ keep-tokens = 20000
   `context compacted 118k -> 24k, 4 records retained` notice. A failure,
   cancellation, or non-in-place result keeps the current session and context
   figure and shows one warning. The REPL never reads or writes cake session
-  files.
+  files. `after_tokens` is an estimate that excludes fixed request overhead, so
+  the first post-compaction status can read lower than the next provider input;
+  a later complete `turn_usage` replaces it.
 - `-no-session` disables compaction with a startup warning. The automatically
   loaded project-local `.cake-repl.toml` cannot enable compaction, choose
-  `cake-compact-bin`, or tune its thresholds; only XDG config or an explicit
+  `cake-compact-bin`, or tune `threshold-percent`, `keep-tokens`,
+  `max-context-tokens`, or `trigger-tokens`; only XDG config or an explicit
   `-config` can. A project may only disable compaction.
 - `cake-compact` must be installed, and the configured `cake` must support
   `cake sessions checkpoint`. The compactor inherits the REPL's environment and
@@ -312,9 +340,9 @@ keep-tokens = 20000
 - Compaction only happens between prompts. A single long tool loop that fills
   the window before the turn ends is not covered; that needs a request-boundary
   mechanism inside Cake. See
-  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md)
-  and
-  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md).
+  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
+  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md), and
+  [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
 
 ## Config file
 
@@ -326,8 +354,9 @@ file are overridden by CLI flags.
 Config files are loaded from two locations. Project-local values take
 precedence over XDG-level values, except that the automatic project-local layer
 cannot select `cake-bin`, cannot enable `compaction`, cannot set
-`compaction.cake-compact-bin`, and cannot tune `threshold-percent` or
-`keep-tokens`; it may only disable compaction.
+`compaction.cake-compact-bin`, and cannot tune `threshold-percent`,
+`keep-tokens`, `max-context-tokens`, or `trigger-tokens`; it may only disable
+compaction.
 
 | Path | Priority |
 |---|---|
@@ -341,11 +370,12 @@ default paths. Pass `--no-config` to skip config file loading entirely.
 The automatically loaded `.cake-repl.toml` cannot select the executable: its
 `cake-bin` key is ignored with a plain startup warning naming the file and key.
 It also cannot enable context compaction, set `compaction.cake-compact-bin`, or
-tune `threshold-percent`/`keep-tokens`; each is ignored with a warning. It may
-disable compaction. Set the executable, enable compaction, and tune it in XDG
-config, an explicitly selected `-config` file, or `-cake-bin`. Explicitly
-selecting `.cake-repl.toml` with `-config` allows its `cake-bin` and compaction
-values. `-no-config` skips file values and these warnings.
+tune `threshold-percent`, `keep-tokens`, `max-context-tokens`, or
+`trigger-tokens`; each is ignored with a warning. It may disable compaction. Set
+the executable, enable compaction, and tune it in XDG config, an explicitly
+selected `-config` file, or `-cake-bin`. Explicitly selecting
+`.cake-repl.toml` with `-config` allows its `cake-bin` and compaction values.
+`-no-config` skips file values and these warnings.
 
 ### Format
 
@@ -376,6 +406,11 @@ tool-color = true
 [compaction]
 enabled = false
 cake-compact-bin = "cake-compact"
+# Absolute trigger: set both or neither. Recommended starting values are
+# 400000/350000; trigger-tokens must be below max-context-tokens.
+# max-context-tokens = 400000
+# trigger-tokens = 350000
+# Percent fallback when both absolute fields are unset (default: 80).
 threshold-percent = 80
 keep-tokens = 20000
 ```
@@ -386,8 +421,8 @@ Hardcoded defaults < XDG config < project-local config < CLI flags.
 For `cake-bin`, precedence is hardcoded `cake` < XDG/explicit `-config` file <
 `-cake-bin`; the automatic project-local layer is excluded. The same exclusion
 applies to `compaction.enabled = true`, `compaction.cake-compact-bin`,
-`threshold-percent`, and `keep-tokens`; the project-local layer may only disable
-compaction. Trusted relative
+`max-context-tokens`, `trigger-tokens`, `threshold-percent`, and `keep-tokens`;
+the project-local layer may only disable compaction. Trusted relative
 executable paths keep their usual resolution. A CLI flag always wins over the
 same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
@@ -486,12 +521,14 @@ validation is available with `just release-check`.
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
 - Context compaction is best-effort and between turns only. The live `turn_usage`
-  measurement excludes the finished turn's response and tool results, so the
-  REPL triggers on a headroom below the configured threshold and the compactor
-  makes the final call. A compaction that a user cancels or that fails after its
-  append may already have changed the session; the next complete `turn_usage`
-  reports the real context. A single long tool loop that fills the window before
-  the prompt ends is not covered.
+  measurement excludes the finished turn's response and tool results, so percent
+  mode triggers on a headroom below the configured threshold and the compactor
+  makes the final call; absolute mode triggers at `trigger-tokens` (or the 75%
+  window cap) without additional headroom. The `after_tokens` status is an
+  estimate that excludes fixed request overhead. A compaction that a user
+  cancels or that fails after its append may already have changed the session;
+  the next complete `turn_usage` reports the real context. A single long tool
+  loop that fills the window before the prompt ends is not covered.
 - Suspension recovery covers catchable stop signals. Because the stop uses
   SIGSTOP, the shell reports the resumed job as `suspended (signal)`; continuing
   it in the background (`bg`) puts the REPL back in charge of the terminal while

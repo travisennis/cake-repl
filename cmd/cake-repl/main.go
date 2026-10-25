@@ -309,6 +309,8 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 	cfg.Compaction = app.CompactionConfig{
 		Enabled:          compaction.Enabled,
 		Bin:              compaction.CakeCompactBin,
+		MaxContextTokens: compaction.MaxContextTokens,
+		TriggerTokens:    compaction.TriggerTokens,
 		ThresholdPercent: compaction.ThresholdPercent,
 		KeepTokens:       compaction.KeepTokens,
 	}
@@ -469,6 +471,10 @@ func projectConfigWarning(key, path string) string {
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.cake-compact-bin in project-local config %q; use XDG config or -config to select the compactor", path)
 	case "compaction.enabled":
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.enabled = true in project-local config %q; enable compaction in XDG config or an explicit -config", path)
+	case "compaction.max-context-tokens":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.max-context-tokens in project-local config %q; tune compaction in XDG config or an explicit -config", path)
+	case "compaction.trigger-tokens":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.trigger-tokens in project-local config %q; tune compaction in XDG config or an explicit -config", path)
 	case "compaction.threshold-percent":
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.threshold-percent in project-local config %q; tune compaction in XDG config or an explicit -config", path)
 	case "compaction.keep-tokens":

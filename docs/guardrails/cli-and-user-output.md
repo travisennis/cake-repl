@@ -30,22 +30,25 @@ commands or help text (`internal/app/commands.go`), key bindings
 - **Config file shape.** TOML config supports only stable REPL defaults:
   `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`,
   `tool-color`, and the opt-in `[compaction]` policy table (`enabled`,
-  `cake-compact-bin`, `threshold-percent`, `keep-tokens`). Merge order is
+  `cake-compact-bin`, `max-context-tokens`, `trigger-tokens`,
+  `threshold-percent`, `keep-tokens`). Merge order is
   hardcoded defaults < XDG config < project-local config < CLI flags, except
   `cake-bin`: the automatically loaded `.cake-repl.toml` key is ignored with a
   plain startup warning naming the file and key, even with `-no-color`.
   Executable precedence is hardcoded `cake` < XDG/explicit `-config` <
   `-cake-bin` (including trusted relative paths). The same untrusted layer cannot
   enable compaction (`enabled = true`), set `compaction.cake-compact-bin`, or
-  tune `threshold-percent`/`keep-tokens`; each is ignored with a warning, while
-  `enabled = false` still applies. Explicit `-config` may select the project
-  file; `-no-config` skips file values and warnings. Other project-local keys
-  retain their existing behavior. See
+  tune `threshold-percent`/`keep-tokens`/`max-context-tokens`/`trigger-tokens`;
+  each is ignored with a warning, while `enabled = false` still applies.
+  Explicit `-config` may select the project file; `-no-config` skips file values
+  and warnings. Other project-local keys retain their existing behavior. See
   [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md)
   and
   [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
   narrowed by
-  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md).
+  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md) and extended
+  to the absolute trigger by
+  [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
   Session-specific values must stay out of config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
   `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
@@ -118,7 +121,9 @@ in plain text like every other surface.
   `compaction` record seeds the field from its `estimated_input.after_tokens`,
   and a live compactor success seeds it from the result's `after_tokens`;
   either is prefixed with `~` (for example `~24k/200k`) because it is an estimate
-  rather than a provider measurement, and a newer complete `turn_usage`,
+  rather than a provider measurement, and it excludes fixed request overhead, so
+  the first post-compaction status can read lower than the next provider input.
+  A newer complete `turn_usage`,
   replayed after the checkpoint or reported by a live turn, replaces it. Each
   checkpoint also adds exactly one `i` info marker at its physical timeline
   position, for example `context compacted 118k -> 24k, 4 records retained`, and

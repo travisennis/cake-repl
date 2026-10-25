@@ -46,6 +46,11 @@ type Options struct {
 	// CakeBin is passed through as -cake-bin; empty lets the compactor resolve
 	// its own default the same way cake-repl did.
 	CakeBin string
+	// ThresholdTokens is an absolute trigger for the compactor. When positive it
+	// is passed as -threshold-tokens and ThresholdPercent is omitted, so exactly
+	// one threshold mode reaches the compactor. Zero falls back to
+	// ThresholdPercent.
+	ThresholdTokens int
 	// ThresholdPercent and KeepTokens are passed through. Zero omits the flag
 	// and lets the compactor apply its own default.
 	ThresholdPercent int
@@ -65,7 +70,13 @@ type Options struct {
 // Args returns the compactor CLI arguments.
 func (o Options) Args() []string {
 	args := []string{"compact", "-json", "-threshold"}
-	if o.ThresholdPercent > 0 {
+	// Exactly one threshold mode: the absolute line when configured, otherwise
+	// the window percentage. Passing both would make the compactor silently
+	// prefer the absolute value, obscuring which policy the REPL used.
+	switch {
+	case o.ThresholdTokens > 0:
+		args = append(args, "-threshold-tokens", strconv.Itoa(o.ThresholdTokens))
+	case o.ThresholdPercent > 0:
 		args = append(args, "-threshold-percent", strconv.Itoa(o.ThresholdPercent))
 	}
 	if o.KeepTokens > 0 {

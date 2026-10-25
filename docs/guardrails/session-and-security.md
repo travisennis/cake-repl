@@ -63,24 +63,32 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Between-turn compaction is an opt-in external operation.** The `[compaction]`
   table (disabled by default) enables `cake-compact compact -json -threshold`
   after a successfully completed turn whose newest complete `turn_usage` figure
-  reaches five percentage points below `threshold-percent`. The compactor
-  re-checks the session and appends an in-place checkpoint; the REPL never reads
-  or writes the session file and never passes `-fork`. At most one compaction
-  runs, and prompt submission plus `/new`, `/resume`, and `/sessions` are
-  refused until its child has exited and been reaped. Ctrl+C and quitting cancel
-  it, `/exit` cancels and then exits, and Ctrl+N cancels and starts a new
-  session. Only a completed turn triggers it (a canceled or failed run does
-  not), `-no-session` disables it at startup with a warning, and success keeps
-  `ResumeID` unchanged with an estimated status figure. A `compacted:false`
-  no-op is silent; a failure, cancellation, or non-in-place result keeps the
-  session and figure and warns. The automatically loaded project-local
-  `.cake-repl.toml` cannot enable compaction, select its executable, or tune its
-  thresholds (ADR 006, extended by
+  reaches the configured trigger. In absolute mode (`max-context-tokens` and
+  `trigger-tokens` both set) the REPL fires at the trigger line, capped at 75%
+  of the model window when the window is below the ceiling; the ceiling itself
+  is policy and is never passed. Without the absolute fields the legacy
+  `threshold-percent` trigger keeps its five-point headroom. Exactly one
+  threshold flag reaches the compactor: `-threshold-tokens` with the effective
+  absolute line, or `-threshold-percent`. The compactor re-checks the session
+  and appends an in-place checkpoint; the REPL never reads or writes the session
+  file and never passes `-fork` or `-force`. At most one compaction runs, and
+  prompt submission plus `/new`, `/resume`, and `/sessions` are refused until
+  its child has exited and been reaped. Ctrl+C and quitting cancel it, `/exit`
+  cancels and then exits, and Ctrl+N cancels and starts a new session. Only a
+  completed turn triggers it (a canceled or failed run does not), `-no-session`
+  disables it at startup with a warning, and success keeps `ResumeID` unchanged
+  with an estimated status figure. A `compacted:false` no-op is silent; a
+  failure, cancellation, or non-in-place result keeps the session and figure and
+  warns. The automatically loaded project-local `.cake-repl.toml` cannot enable
+  compaction, select its executable, or tune any threshold, including
+  `max-context-tokens` and `trigger-tokens` (ADR 006, extended by
   [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md)
   and narrowed by
-  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md)); it may only
-  disable compaction. If two REPLs race, Cake's
-  append lock serializes writers and the loser warns. See
+  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md); the absolute
+  trigger is
+  [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md));
+  it may only disable compaction. If two REPLs race, Cake's append lock
+  serializes writers and the loser warns. See
   [cake-integration-and-stream-json.md](cake-integration-and-stream-json.md) for
   the subprocess contract.
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
@@ -195,8 +203,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - `just test-race` for any `runner.go` change, and for the session-listing
   lifecycle (cancellation, request identity, `WaitDelay`).
 - For between-turn compaction, cover the config provenance and merge rules
-  (project-local cannot enable, select the executable, or tune it), the
-  trigger headroom and every disqualifying run, the gated state, in-place
+  (project-local cannot enable, select the executable, or tune percent or
+  absolute values), the absolute trigger line and its 75% window cap, the
+  percent fallback headroom, every disqualifying run, the gated state, in-place
   success and estimated context, a no-op, a non-zero exit, a non-in-place
   document, and cancellation through Ctrl+C and Ctrl+N. Use fake `cake-compact`
   scripts; never a real model call.
@@ -226,12 +235,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   session. Keep the gate closed until the child is reaped, even after Ctrl+C.
 - **Letting a project file turn on metered compaction.** The automatically
   loaded `.cake-repl.toml` may only disable compaction; `enabled = true`,
-  `cake-compact-bin`, `threshold-percent`, and `keep-tokens` must be ignored
-  with a warning. Enabling or tuning there would let a cloned repository spend
-  the user's quota and mutate the session without the user opting in. Key
-  presence must be matched case-insensitively, as TOML decoding does; a
-  case-sensitive metadata lookup misses `[Compaction] Enabled = true` and lets
-  it through.
+  `cake-compact-bin`, `threshold-percent`, `keep-tokens`, `max-context-tokens`,
+  and `trigger-tokens` must be ignored with a warning. Enabling or tuning there
+  would let a cloned repository spend the user's quota and mutate the session
+  without the user opting in. Key presence must be matched case-insensitively,
+  as TOML decoding does; a case-sensitive metadata lookup misses
+  `[Compaction] Enabled = true` and lets it through.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Reopening terminal injection.** Adding a render path that bypasses

@@ -870,6 +870,12 @@ func TestStartupCompactionConfig(t *testing.T) {
 	disabledTuned := enabledTuned
 	disabledTuned.Enabled = false
 
+	const absoluteXDG = "[compaction]\nenabled = true\nmax-context-tokens = 400000\ntrigger-tokens = 350000\nkeep-tokens = 12000\n"
+	absoluteTuned := enabled
+	absoluteTuned.MaxContextTokens = 400000
+	absoluteTuned.TriggerTokens = 350000
+	absoluteTuned.KeepTokens = 12000
+
 	tests := []struct {
 		name          string
 		xdg           string
@@ -882,6 +888,24 @@ func TestStartupCompactionConfig(t *testing.T) {
 	}{
 		{name: "disabled by default", want: defaults},
 		{name: "XDG enables and tunes", xdg: enableXDG, want: enabledTuned},
+		{name: "XDG enables absolute mode", xdg: absoluteXDG, want: absoluteTuned},
+		{
+			name:     "project cannot tune absolute thresholds",
+			xdg:      absoluteXDG,
+			local:    "[compaction]\nmax-context-tokens = 900000\ntrigger-tokens = 1\n",
+			want:     absoluteTuned,
+			wantWarn: []string{"ignoring compaction.max-context-tokens", "ignoring compaction.trigger-tokens"},
+		},
+		{
+			name:    "invalid absolute trigger is rejected",
+			xdg:     "[compaction]\nenabled = true\nmax-context-tokens = 400000\ntrigger-tokens = 400000\n",
+			wantErr: "trigger-tokens",
+		},
+		{
+			name:    "partial absolute config is rejected",
+			xdg:     "[compaction]\nenabled = true\nmax-context-tokens = 400000\n",
+			wantErr: "must be set together",
+		},
 		{
 			name:     "project cannot enable or select the executable",
 			local:    "[compaction]\nenabled = true\ncake-compact-bin = \"/tmp/untrusted\"\n",

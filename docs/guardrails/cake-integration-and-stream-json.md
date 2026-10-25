@@ -68,11 +68,14 @@ consumes cake events. This is the project's core external contract.
   seeds the estimate. See
   [cli-and-user-output.md](cli-and-user-output.md) for the rendered forms.
 - **External compactor (`internal/compact`).** The only non-cake executable the
-  REPL runs. `cake-compact compact -json -threshold` is invoked with
-  `-threshold-percent`, `-keep-tokens`, `-cake-bin` when cake-repl has one,
-  `-summarizer-model` and `-summarizer-profile` from the model and profile the
-  REPL was configured with (each omitted when unset), and `-- <session-id>`.
-  Never pass `-fork`: the integration is in place only. The one JSON document is
+  REPL runs. `cake-compact compact -json -threshold` is invoked with exactly one
+  threshold mode: `-threshold-tokens` carrying the effective absolute line in
+  absolute mode, or `-threshold-percent` in the legacy fallback. It also gets
+  `-keep-tokens`, `-cake-bin` when cake-repl has one, `-summarizer-model` and
+  `-summarizer-profile` from the model and profile the REPL was configured with
+  (each omitted when unset), and `-- <session-id>`. The absolute quality ceiling
+  is never passed as the trigger. Never pass `-fork` or `-force`: the
+  integration is in place and threshold-gated only. The one JSON document is
   decoded field by field (`Document`) with unknown fields ignored; `in_place` is
   read rather than assumed. Exit 0 with a document is success or a silent no-op
   (`compacted:false`); a nonzero exit is a failure whose bounded stderr tail is
@@ -82,7 +85,9 @@ consumes cake events. This is the project's core external contract.
   line. The child inherits the REPL's environment and runs in the same `-cwd`, so
   `CAKE_DATA_DIR` selects the same root and a relative `-cake-bin` resolves in
   that directory; the REPL does not reimplement Cake's data-directory layout.
-  See [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md).
+  See [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md)
+  and
+  [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
   and the versioned `sessions list --json` envelope) is the only contract; it is
@@ -157,8 +162,11 @@ consumes cake events. This is the project's core external contract.
   has a different id; retargeting to it silently abandons the session the user
   is in. The REPL keeps its pin and warns instead.
 - **Reading session files to decide when to compact.** The trigger uses the
-  stream's `turn_usage`; the compactor re-checks the session. A REPL-side session
-  reader would cross the engine boundary and duplicate Cake's projection rules.
+  stream's `turn_usage`; in absolute mode the line is `trigger-tokens`, capped at
+  75% of the model window when the window is below the ceiling, and in percent
+  mode it is five points below `threshold-percent`. The compactor re-checks the
+  session. A REPL-side session reader would cross the engine boundary and
+  duplicate Cake's projection rules.
 
 ## Related docs
 

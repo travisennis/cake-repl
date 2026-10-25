@@ -54,6 +54,32 @@ func TestArgs(t *testing.T) {
 	}
 }
 
+// TestArgsPrefersThresholdTokens checks that absolute mode passes exactly one
+// threshold flag: the compactor's -threshold-tokens replaces the percent form
+// even when both fields are populated.
+func TestArgsPrefersThresholdTokens(t *testing.T) {
+	args := Options{
+		SessionID:        "11111111-2222-3333-4444-555555555555",
+		ThresholdTokens:  350000,
+		ThresholdPercent: 80,
+		KeepTokens:       20000,
+	}.Args()
+	want := []string{
+		"compact", "-json", "-threshold",
+		"-threshold-tokens", "350000",
+		"-keep-tokens", "20000",
+		"--", "11111111-2222-3333-4444-555555555555",
+	}
+	if !slices.Equal(args, want) {
+		t.Fatalf("Args() = %v, want %v", args, want)
+	}
+	for _, arg := range args {
+		if arg == "-threshold-percent" {
+			t.Fatalf("absolute mode also passed -threshold-percent: %v", args)
+		}
+	}
+}
+
 func TestCompactAppliesThresholdAndDecodesDocument(t *testing.T) {
 	argsPath := filepath.Join(t.TempDir(), "args")
 	t.Setenv("ARGS_FILE", argsPath)

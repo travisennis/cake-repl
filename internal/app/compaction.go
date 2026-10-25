@@ -11,12 +11,28 @@ import (
 )
 
 // compactionTriggerHeadroomPercent is how far below the compactor's own
-// threshold the REPL starts it. A complete turn_usage measures the prompt the
-// model saw, not the response and tool results that follow it; those items land
-// in the session before the compactor reads it. Triggering a little early lets
-// the compactor's fuller session estimate cross its real threshold, while the
-// compactor stays the authority and returns compacted:false when it does not.
+// threshold the REPL starts it in percent mode. A complete turn_usage measures
+// the prompt the model saw, not the response and tool results that follow it;
+// those items land in the session before the compactor reads it. Triggering a
+// little early lets the compactor's fuller session estimate cross its real
+// threshold, while the compactor stays the authority and returns
+// compacted:false when it does not.
 const compactionTriggerHeadroomPercent = 5
+
+// compactionWindowFallbackPercent caps an absolute trigger when the model
+// window is smaller than the configured quality ceiling. It matches the
+// effective line of the default percent mode (80 - 5), so a small window still
+// leaves headroom for the response and tool results and the trigger can never
+// sit above the window.
+const compactionWindowFallbackPercent = 75
+
+// compactionTrigger is one resolved trigger line: either an absolute token
+// count (absolute mode) or a window percentage (the legacy fallback).
+type compactionTrigger struct {
+	absolute bool
+	tokens   int
+	percent  int
+}
 
 // compactionDoneMsg delivers the terminal state of one compactor subprocess.
 // req is the request identity; a result whose identity no longer matches is
@@ -52,11 +68,47 @@ func (m Model) shouldCompactAfter(res cake.Result) bool {
 	if c == nil || c.Tokens <= 0 || c.Window <= 0 {
 		return false
 	}
-	trigger := m.compactionTriggerPercent()
-	if trigger <= 0 {
+	trigger, ok := m.resolveCompactionTrigger(c.Window)
+	if !ok {
 		return false
 	}
-	return c.Tokens*100 >= c.Window*trigger
+	if trigger.absolute {
+		return c.Tokens >= trigger.tokens
+	}
+	return c.Tokens*100 >= c.Window*trigger.percent
+}
+
+// resolveCompactionTrigger resolves the configured trigger for a positive
+// window. Absolute mode requires both absolute fields and a trigger below the
+// ceiling; an incomplete absolute config disables the trigger rather than
+// silently falling back to a percentage. When the window is smaller than the
+// ceiling, the effective trigger is capped at compactionWindowFallbackPercent
+// of the window, so it never exceeds the window. Percent mode preserves the
+// five-point headroom and is the fallback when both absolute fields are unset.
+func (m Model) resolveCompactionTrigger(window int) (compactionTrigger, bool) {
+	c := m.cfg.Compaction
+	if c.MaxContextTokens != 0 || c.TriggerTokens != 0 {
+		if window <= 0 || c.MaxContextTokens <= 0 || c.TriggerTokens <= 0 ||
+			c.TriggerTokens >= c.MaxContextTokens {
+			return compactionTrigger{}, false
+		}
+		tokens := c.TriggerTokens
+		if window < c.MaxContextTokens {
+			safe := window * compactionWindowFallbackPercent / 100
+			if safe < tokens {
+				tokens = safe
+			}
+		}
+		if tokens <= 0 {
+			return compactionTrigger{}, false
+		}
+		return compactionTrigger{absolute: true, tokens: tokens}, true
+	}
+	percent := m.compactionTriggerPercent()
+	if percent <= 0 {
+		return compactionTrigger{}, false
+	}
+	return compactionTrigger{percent: percent}, true
 }
 
 // compactionTriggerPercent is the configured threshold less the measurement
@@ -76,10 +128,19 @@ func (m Model) compactionTriggerPercent() int {
 // startCompaction launches one in-place compaction as a Bubble Tea command. The
 // model-owned context is canceled by Ctrl+C, quit, and Ctrl+N; the gate stays
 // closed until the result is reaped. It returns a nil command, leaving state
-// untouched, when there is no pinned session to compact.
+// untouched, when there is no pinned session or no resolvable trigger.
 func (m Model) startCompaction() (Model, tea.Cmd) {
 	mode, sessionID := m.session.RunOptions()
 	if mode != cake.RunResume || sessionID == "" {
+		return m, nil
+	}
+
+	window := 0
+	if m.session.Context != nil {
+		window = m.session.Context.Window
+	}
+	trigger, ok := m.resolveCompactionTrigger(window)
+	if !ok {
 		return m, nil
 	}
 
@@ -94,11 +155,15 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 		Cwd:               m.cfg.Cwd,
 		SessionID:         sessionID,
 		CakeBin:           m.cfg.CakeBin,
-		ThresholdPercent:  m.cfg.Compaction.ThresholdPercent,
 		KeepTokens:        m.cfg.Compaction.KeepTokens,
 		SummarizerModel:   m.cfg.Model,
 		SummarizerProfile: m.cfg.Profile,
 		DebugLog:          m.cfg.DebugLog,
+	}
+	if trigger.absolute {
+		opts.ThresholdTokens = trigger.tokens
+	} else {
+		opts.ThresholdPercent = m.cfg.Compaction.ThresholdPercent
 	}
 	run := func() tea.Msg {
 		return compactionDoneMsg{req: req, sessionID: sessionID, res: compact.Compact(ctx, opts)}

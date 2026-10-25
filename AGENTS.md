@@ -18,13 +18,16 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   read cake session files, parse its human text, or import its internals.
 - **compaction contract**: the opt-in between-turn compactor is run only through
   `internal/compact` as `cake-compact compact -json -threshold … <session-id>`,
-  never with `-fork`, and only its one JSON document is decoded. The session id
-  stays pinned; an `in_place:false` or mismatched result is rejected. Only
-  trusted config (XDG or an explicit `-config`) may enable or tune it; the
+  with exactly one threshold mode: `-threshold-tokens` for the absolute
+  `max-context-tokens`/`trigger-tokens` policy or `-threshold-percent` for the
+  legacy fallback. The ceiling is never passed as the trigger, and the
+  compactor is never run with `-fork`; only its one JSON document is decoded. The
+  session id stays pinned; an `in_place:false` or mismatched result is rejected.
+  Only trusted config (XDG or an explicit `-config`) may enable or tune it; the
   automatic project-local layer may only disable it. See
-  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md)
-  and
-  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md).
+  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
+  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md), and
+  [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.

@@ -295,9 +295,36 @@ keep-tokens = 12000
 	}
 }
 
+func TestLoadCompactionAbsoluteTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`
+[compaction]
+enabled = true
+max-context-tokens = 400000
+trigger-tokens = 350000
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load = %v", err)
+	}
+	want := Compaction{
+		Enabled:          true,
+		EnabledSet:       true,
+		MaxContextTokens: 400000,
+		TriggerTokens:    350000,
+	}
+	if cfg.Compaction != want {
+		t.Fatalf("Compaction = %+v, want %+v", cfg.Compaction, want)
+	}
+}
+
 func TestMergeCompactionDefaultsAndOverrides(t *testing.T) {
 	base := DefaultCompaction()
 	if base.Enabled || base.CakeCompactBin != DefaultCakeCompactBin ||
+		base.MaxContextTokens != 0 || base.TriggerTokens != 0 ||
 		base.ThresholdPercent != DefaultCompactionThresholdPercent ||
 		base.KeepTokens != DefaultCompactionKeepTokens {
 		t.Fatalf("defaults = %+v", base)
@@ -308,8 +335,15 @@ func TestMergeCompactionDefaultsAndOverrides(t *testing.T) {
 	if !got.Enabled || got.ThresholdPercent != 60 {
 		t.Fatalf("file values not applied: %+v", got)
 	}
-	if got.CakeCompactBin != DefaultCakeCompactBin || got.KeepTokens != DefaultCompactionKeepTokens {
+	if got.CakeCompactBin != DefaultCakeCompactBin || got.KeepTokens != DefaultCompactionKeepTokens ||
+		got.MaxContextTokens != 0 || got.TriggerTokens != 0 {
 		t.Fatalf("untouched defaults changed: %+v", got)
+	}
+
+	absolute := &Config{Compaction: Compaction{MaxContextTokens: 400000, TriggerTokens: 350000}}
+	got = MergeCompaction(base, absolute)
+	if got.MaxContextTokens != 400000 || got.TriggerTokens != 350000 {
+		t.Fatalf("absolute values not applied: %+v", got)
 	}
 	if got := MergeCompaction(base, nil); got != base {
 		t.Fatalf("nil file changed defaults: %+v", got)
@@ -334,6 +368,8 @@ func TestLoadProjectCannotEnableOrSelectCompactor(t *testing.T) {
 [compaction]
 enabled = true
 cake-compact-bin = "/tmp/untrusted-compactor"
+max-context-tokens = 500000
+trigger-tokens = 1000
 threshold-percent = 50
 keep-tokens = 5000
 `), 0o600); err != nil {
@@ -347,6 +383,8 @@ keep-tokens = 5000
 	wantIgnored := []string{
 		"compaction.cake-compact-bin",
 		"compaction.enabled",
+		"compaction.max-context-tokens",
+		"compaction.trigger-tokens",
 		"compaction.threshold-percent",
 		"compaction.keep-tokens",
 	}
@@ -354,6 +392,7 @@ keep-tokens = 5000
 		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
 	}
 	if cfg.Compaction.Enabled || cfg.Compaction.CakeCompactBin != "" ||
+		cfg.Compaction.MaxContextTokens != 0 || cfg.Compaction.TriggerTokens != 0 ||
 		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
 		t.Fatalf("project-local security or tuning keys survived: %+v", cfg.Compaction)
 	}
@@ -364,12 +403,15 @@ keep-tokens = 5000
 			Enabled:          true,
 			EnabledSet:       true,
 			CakeCompactBin:   "trusted-compactor",
+			MaxContextTokens: 400000,
+			TriggerTokens:    350000,
 			ThresholdPercent: 80,
 			KeepTokens:       20000,
 		},
 	}
 	merged := Merge(trusted, cfg)
 	if !merged.Compaction.Enabled || merged.Compaction.CakeCompactBin != "trusted-compactor" ||
+		merged.Compaction.MaxContextTokens != 400000 || merged.Compaction.TriggerTokens != 350000 ||
 		merged.Compaction.ThresholdPercent != 80 || merged.Compaction.KeepTokens != 20000 {
 		t.Fatalf("trusted values did not survive: %+v", merged.Compaction)
 	}
@@ -386,6 +428,8 @@ Cake-Bin = "/tmp/untrusted-cake"
 [Compaction]
 Enabled = true
 Cake-Compact-Bin = "/tmp/untrusted-compactor"
+Max-Context-Tokens = 500000
+Trigger-Tokens = 1000
 Threshold-Percent = 1
 Keep-Tokens = 1
 `), 0o600); err != nil {
@@ -400,6 +444,8 @@ Keep-Tokens = 1
 		"cake-bin",
 		"compaction.cake-compact-bin",
 		"compaction.enabled",
+		"compaction.max-context-tokens",
+		"compaction.trigger-tokens",
 		"compaction.threshold-percent",
 		"compaction.keep-tokens",
 	}
@@ -407,6 +453,7 @@ Keep-Tokens = 1
 		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
 	}
 	if cfg.CakeBin != "" || cfg.Compaction.Enabled || cfg.Compaction.CakeCompactBin != "" ||
+		cfg.Compaction.MaxContextTokens != 0 || cfg.Compaction.TriggerTokens != 0 ||
 		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
 		t.Fatalf("case-variant project keys survived: cake-bin=%q compaction=%+v", cfg.CakeBin, cfg.Compaction)
 	}
@@ -431,26 +478,34 @@ func TestLoadProjectCaseVariantDisableIsAllowed(t *testing.T) {
 
 func TestLoadProjectCanDisableCompaction(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
-	if err := os.WriteFile(path, []byte("[compaction]\nenabled = false\nthreshold-percent = 60\nkeep-tokens = 5000\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[compaction]\nenabled = false\nthreshold-percent = 60\nkeep-tokens = 5000\nmax-context-tokens = 400000\ntrigger-tokens = 350000\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, ignored, err := LoadProject(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantIgnored := []string{"compaction.threshold-percent", "compaction.keep-tokens"}
+	wantIgnored := []string{
+		"compaction.max-context-tokens",
+		"compaction.trigger-tokens",
+		"compaction.threshold-percent",
+		"compaction.keep-tokens",
+	}
 	if strings.Join(ignored, ",") != strings.Join(wantIgnored, ",") {
 		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
 	}
 	if !cfg.Compaction.EnabledSet || cfg.Compaction.Enabled {
 		t.Fatalf("disable was not preserved: %+v", cfg.Compaction)
 	}
-	if cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
+	if cfg.Compaction.MaxContextTokens != 0 || cfg.Compaction.TriggerTokens != 0 ||
+		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
 		t.Fatalf("project-local tuning survived: %+v", cfg.Compaction)
 	}
 	xdg := &Config{Compaction: Compaction{
 		Enabled:          true,
 		EnabledSet:       true,
+		MaxContextTokens: 400000,
+		TriggerTokens:    350000,
 		ThresholdPercent: 70,
 		KeepTokens:       12000,
 	}}
@@ -458,7 +513,8 @@ func TestLoadProjectCanDisableCompaction(t *testing.T) {
 	if merged.Compaction.Enabled {
 		t.Fatal("project-local disable did not override XDG enable")
 	}
-	if merged.Compaction.ThresholdPercent != 70 || merged.Compaction.KeepTokens != 12000 {
+	if merged.Compaction.MaxContextTokens != 400000 || merged.Compaction.TriggerTokens != 350000 ||
+		merged.Compaction.ThresholdPercent != 70 || merged.Compaction.KeepTokens != 12000 {
 		t.Fatalf("trusted tuning did not survive: %+v", merged.Compaction)
 	}
 }
@@ -471,10 +527,18 @@ func TestCompactionValidate(t *testing.T) {
 	}{
 		{"disabled ignores values", Compaction{}, false},
 		{"valid", Compaction{Enabled: true, CakeCompactBin: "cake-compact", ThresholdPercent: 80}, false},
+		{"valid absolute", Compaction{Enabled: true, CakeCompactBin: "cake-compact", MaxContextTokens: 400000, TriggerTokens: 350000, ThresholdPercent: 80}, false},
+		{"absolute trigger adjacent to ceiling", Compaction{Enabled: true, CakeCompactBin: "cake-compact", MaxContextTokens: 400000, TriggerTokens: 399999, ThresholdPercent: 80}, false},
 		{"missing binary", Compaction{Enabled: true, ThresholdPercent: 80}, true},
 		{"threshold too low", Compaction{Enabled: true, CakeCompactBin: "x", ThresholdPercent: 0}, true},
 		{"threshold too high", Compaction{Enabled: true, CakeCompactBin: "x", ThresholdPercent: 101}, true},
 		{"negative keep", Compaction{Enabled: true, CakeCompactBin: "x", ThresholdPercent: 80, KeepTokens: -1}, true},
+		{"absolute missing trigger", Compaction{Enabled: true, CakeCompactBin: "x", MaxContextTokens: 400000, ThresholdPercent: 80}, true},
+		{"absolute missing ceiling", Compaction{Enabled: true, CakeCompactBin: "x", TriggerTokens: 350000, ThresholdPercent: 80}, true},
+		{"absolute negative ceiling", Compaction{Enabled: true, CakeCompactBin: "x", MaxContextTokens: -1, TriggerTokens: 350000, ThresholdPercent: 80}, true},
+		{"absolute negative trigger", Compaction{Enabled: true, CakeCompactBin: "x", MaxContextTokens: 400000, TriggerTokens: -1, ThresholdPercent: 80}, true},
+		{"absolute trigger equals ceiling", Compaction{Enabled: true, CakeCompactBin: "x", MaxContextTokens: 400000, TriggerTokens: 400000, ThresholdPercent: 80}, true},
+		{"absolute trigger above ceiling", Compaction{Enabled: true, CakeCompactBin: "x", MaxContextTokens: 400000, TriggerTokens: 400001, ThresholdPercent: 80}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

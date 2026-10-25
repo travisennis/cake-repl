@@ -38,20 +38,30 @@ type Config struct {
 // `[compaction]` table. Enabled is false by default and is the only field whose
 // false value is meaningful, so EnabledSet records whether the file actually
 // supplied the key.
+//
+// MaxContextTokens and TriggerTokens select absolute mode when either is
+// non-zero; both must then be positive and the trigger must be below the
+// ceiling. When both are zero, the legacy ThresholdPercent trigger applies.
 type Compaction struct {
-	Enabled          bool   `toml:"enabled"`
-	EnabledSet       bool   `toml:"-"`
-	CakeCompactBin   string `toml:"cake-compact-bin"`
-	ThresholdPercent int    `toml:"threshold-percent"`
-	KeepTokens       int    `toml:"keep-tokens"`
+	Enabled        bool   `toml:"enabled"`
+	EnabledSet     bool   `toml:"-"`
+	CakeCompactBin string `toml:"cake-compact-bin"`
+	// MaxContextTokens is the quality ceiling, not a compactor threshold. It is
+	// never passed to the compactor.
+	MaxContextTokens int `toml:"max-context-tokens"`
+	// TriggerTokens is the absolute context line at which the REPL compacts.
+	TriggerTokens int `toml:"trigger-tokens"`
+
+	ThresholdPercent int `toml:"threshold-percent"`
+	KeepTokens       int `toml:"keep-tokens"`
 }
 
 const (
 	// DefaultCakeCompactBin is the compactor executable resolved on PATH when
 	// the config does not name one.
 	DefaultCakeCompactBin = "cake-compact"
-	// DefaultCompactionThresholdPercent is the context-window percentage at
-	// which the compactor itself compacts.
+	// DefaultCompactionThresholdPercent is the fallback trigger percentage when
+	// the absolute trigger fields are unset. The REPL fires five points below it.
 	DefaultCompactionThresholdPercent = 80
 	// DefaultCompactionKeepTokens is the retained-tail target; zero would let
 	// the compactor apply its own window-relative default.
@@ -70,13 +80,26 @@ func DefaultCompaction() Compaction {
 
 // Validate checks the effective compaction settings. Only values that cannot
 // describe a trigger are rejected; zero means "use the default" and is resolved
-// before validation. The compactor is validated only when it can run.
+// before validation, except that the two absolute fields must be set together.
+// The compactor is validated only when it can run.
 func (c Compaction) Validate() error {
 	if !c.Enabled {
 		return nil
 	}
 	if c.CakeCompactBin == "" {
 		return errMissingCompactor
+	}
+	if c.MaxContextTokens < 0 {
+		return fmt.Errorf("compaction.max-context-tokens must be greater than zero, got %d", c.MaxContextTokens)
+	}
+	if c.TriggerTokens < 0 {
+		return fmt.Errorf("compaction.trigger-tokens must be greater than zero, got %d", c.TriggerTokens)
+	}
+	if (c.MaxContextTokens == 0) != (c.TriggerTokens == 0) {
+		return errors.New("compaction.max-context-tokens and compaction.trigger-tokens must be set together")
+	}
+	if c.MaxContextTokens > 0 && c.TriggerTokens >= c.MaxContextTokens {
+		return fmt.Errorf("compaction.trigger-tokens (%d) must be less than compaction.max-context-tokens (%d)", c.TriggerTokens, c.MaxContextTokens)
 	}
 	if c.ThresholdPercent < 1 || c.ThresholdPercent > 100 {
 		return fmt.Errorf("compaction.threshold-percent must be between 1 and 100, got %d", c.ThresholdPercent)
@@ -142,7 +165,15 @@ func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	}
 	// Tuning is ignored too: an untrusted file must not be able to turn an
 	// already-enabled metered operation up. Clearing the value lets the trusted
-	// layer's non-zero merge win. See ADR 024.
+	// layer's non-zero merge win. See ADR 024 and ADR 025.
+	if definedFold(meta, "compaction", "max-context-tokens") {
+		ignored = append(ignored, "compaction.max-context-tokens")
+		cfg.Compaction.MaxContextTokens = 0
+	}
+	if definedFold(meta, "compaction", "trigger-tokens") {
+		ignored = append(ignored, "compaction.trigger-tokens")
+		cfg.Compaction.TriggerTokens = 0
+	}
 	if definedFold(meta, "compaction", "threshold-percent") {
 		ignored = append(ignored, "compaction.threshold-percent")
 		cfg.Compaction.ThresholdPercent = 0
@@ -235,6 +266,12 @@ func mergeCompaction(dst *Compaction, src Compaction) {
 	}
 	if src.CakeCompactBin != "" {
 		dst.CakeCompactBin = src.CakeCompactBin
+	}
+	if src.MaxContextTokens != 0 {
+		dst.MaxContextTokens = src.MaxContextTokens
+	}
+	if src.TriggerTokens != 0 {
+		dst.TriggerTokens = src.TriggerTokens
 	}
 	if src.ThresholdPercent != 0 {
 		dst.ThresholdPercent = src.ThresholdPercent
