@@ -70,7 +70,7 @@ keep-tokens = 20000
   subtract a percentage headroom. The effective trigger is `trigger-tokens`,
   capped at 75% of the model window when the window is smaller than the
   ceiling; the cap is documented and never set above the window. The 75% cap
-  keeps the same five-point response/tool headroom as percent mode.
+  matches the default percent mode's effective line (80 − 5).
 - **Compactor call.** The compactor is invoked with exactly one threshold
   flag: `-threshold-tokens <effective-trigger>` in absolute mode,
   `-threshold-percent <threshold-percent>` in percent mode. The ceiling is

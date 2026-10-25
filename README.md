@@ -294,8 +294,8 @@ keep-tokens = 20000
   compacts only when it agrees; a no-op is silent.
 - If the model's context window is smaller than `max-context-tokens`, the
   effective trigger is the smaller of `trigger-tokens` and 75% of the window.
-  The 75% cap keeps the same five-point response/tool headroom as percent mode
-  and never puts the trigger above the window.
+  The 75% cap matches the default percent mode's effective line (80 − 5) and
+  never puts the trigger above the window.
 - Without the two absolute fields, the percent fallback is unchanged: the REPL
   fires five percentage points below `threshold-percent`, and `cake-compact`
   receives `-threshold-percent`. Existing configs keep their behavior.
@@ -332,7 +332,8 @@ keep-tokens = 20000
   `cake-compact-bin`, or tune `threshold-percent`, `keep-tokens`,
   `max-context-tokens`, or `trigger-tokens`; only XDG config or an explicit
   `-config` can. A project may only disable compaction.
-- `cake-compact` must be installed, and the configured `cake` must support
+- `cake-compact` must be installed, must support `-threshold-tokens` for
+  absolute mode, and the configured `cake` must support
   `cake sessions checkpoint`. The compactor inherits the REPL's environment and
   runs in the same `-cwd`, so `CAKE_DATA_DIR` selects the same root and a
   relative `-cake-bin` resolves in that directory. A missing binary or verb is a

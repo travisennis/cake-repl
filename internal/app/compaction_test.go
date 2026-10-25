@@ -160,6 +160,15 @@ func TestResolveCompactionTrigger(t *testing.T) {
 		})
 	}
 
+	t.Run("configured trigger below the window cap wins", func(t *testing.T) {
+		m.cfg.Compaction.MaxContextTokens = 500_000
+		m.cfg.Compaction.TriggerTokens = 350_000
+		trigger, ok := m.resolveCompactionTrigger(480_000)
+		if !ok || !trigger.absolute || trigger.tokens != 350_000 {
+			t.Fatalf("trigger = %+v, %v, want 350000", trigger, ok)
+		}
+	})
+
 	t.Run("percent fallback keeps the five-point headroom", func(t *testing.T) {
 		m.cfg.Compaction.MaxContextTokens = 0
 		m.cfg.Compaction.TriggerTokens = 0
