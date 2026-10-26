@@ -77,10 +77,11 @@ consumes cake events. This is the project's core external contract.
   is never passed as the trigger. Never pass `-fork` or `-force`: the
   integration is in place and threshold-gated only. The one JSON document is
   decoded field by field (`Document`) with unknown fields ignored; `in_place` is
-  read rather than assumed. Exit 0 with a document is success or a silent no-op
-  (`compacted:false`); a nonzero exit is a failure whose bounded stderr tail is
-  shown; cancellation is a warning. The process is the same subprocess discipline
-  as a cake run: model-owned context, SIGTERM then `WaitDelay`, bounded
+  read rather than assumed. Exit 0 with a document is success or a no-op
+  (`compacted:false`); the no-op still resolves the live start notice with a
+  skip row in the timeline. A nonzero exit is a failure whose bounded stderr
+  tail is shown; cancellation is a warning. The process is the same subprocess
+  discipline as a cake run: model-owned context, SIGTERM then `WaitDelay`, bounded
   stdout/stderr, no session-file reads by the REPL, and a content-free debug log
   line. The child inherits the REPL's environment and runs in the same `-cwd`, so
   `CAKE_DATA_DIR` selects the same root and a relative `-cake-bin` resolves in

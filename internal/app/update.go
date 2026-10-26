@@ -270,6 +270,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		if m.compacting {
+			// The spinner tick is already flowing while a task or compaction is
+			// in flight, so it also refreshes the elapsed-seconds display without
+			// starting a second timer chain. Use the tick's own time when present
+			// so a test can advance it deterministically.
+			now := msg.Time
+			if now.IsZero() {
+				now = time.Now()
+			}
+			m.refreshCompactionElapsed(now)
+		}
 		return m, cmd
 
 	case compactionDoneMsg:

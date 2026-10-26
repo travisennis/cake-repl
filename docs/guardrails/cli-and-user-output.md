@@ -111,7 +111,10 @@ in plain text like every other surface.
   model, optional context, and cwd context; the model is the identity cake
   reported on the stream once available (the `[[models]]` entry name, falling
   back to the provider model ID), else the `-model`/config value, and a new
-  session or resume switch drops the reported identity (ADR 014). The context
+  session or resume switch drops the reported identity (ADR 014). While the
+  between-turn compactor runs, the state segment carries its whole-second
+  elapsed age (`[ <spinner> compacting 12s ]`), refreshed from the spinner tick
+  the REPL already runs, not from a second timer. The context
   field is cake's newest complete main-agent `turn_usage` measurement, rendered
   compactly as `132k/1M` (the attempt's input tokens over the configured
   window) or as a bare `132k` when the model configures no window. Partial usage
@@ -129,7 +132,13 @@ in plain text like every other surface.
   position, for example `context compacted 118k -> 24k, 4 records retained`, and
   never expands the checkpoint's retained tail into duplicate conversation or
   tool items. Replay and the live result share one formatter and wording; the
-  live path appends its own marker at the end of the compacted turn. The session
+  live path appends its own marker at the end of the compacted turn. A live
+  compaction first shows one `context compaction started · Ctrl+C cancels`
+  notice, synced in the same update that starts the child, and resolves that
+  notice into the one outcome row (success marker, warning, or an explicit
+  `context compaction skipped: …` row for a no-op) when the result is reaped.
+  No start notice may outlive the operation. See
+  [ADR 026](../adr/026-show-compaction-progress-in-the-repl.md). The session
   field names the id cake
   reported for the current session and carries none after a retarget until the
   new target reports one, while the next-run field names the pinned target. It
@@ -137,7 +146,11 @@ in plain text like every other surface.
   textarea is framed as
   a focused composer with ready/running/compacting state and concise submit,
   newline, and help hints; it names the operation that is in flight while a
-  task or compaction runs, and its borders remain visible without color. While
+  task or compaction runs, including the compactor's elapsed age
+  (`prompt · compacting 12s`), and its borders remain visible without color.
+  While the compactor runs the footer hints name `Ctrl+C cancel` and
+  `Ctrl+N new session` instead of submit, because the prompt gate is closed.
+  While
   the TUI is running, the terminal title is `cake-repl: <absolute working directory>`,
   using the directory selected by `-cwd` or the startup directory by default.
   The title carries a `[working]` prefix while a task is in flight, a

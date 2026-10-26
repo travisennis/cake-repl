@@ -1,16 +1,31 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/ui"
 )
+
+// compactionStartIndex returns the live start notice's index, or -1 when the
+// timeline carries none.
+func compactionStartIndex(m Model) int {
+	for i := len(m.items) - 1; i >= 0; i-- {
+		if m.items[i].Kind == ui.KindInfo && strings.HasPrefix(m.items[i].Text, compactionStartPrefix) {
+			return i
+		}
+	}
+	return -1
+}
 
 const compactionSessionID = "11111111-2222-3333-4444-555555555555"
 
@@ -289,12 +304,24 @@ JSON
 	if m.running {
 		t.Fatal("run state survived finishRun")
 	}
-	if line := m.statusLine(); !strings.Contains(line, "compacting") {
-		t.Errorf("status line = %q, want compacting state", line)
+	if idx := compactionStartIndex(m); idx < 0 {
+		t.Fatal("finishRun did not add a compaction start notice")
+	} else if got := m.items[idx].Text; got != compactionStartText {
+		t.Errorf("start notice = %q, want %q", got, compactionStartText)
+	}
+	if line := m.statusLine(); !strings.Contains(line, "compacting 0s") {
+		t.Errorf("status line = %q, want elapsed compacting state", line)
+	}
+	if state := m.activityState(); state != "compacting 0s" {
+		t.Errorf("composer state = %q, want compacting 0s", state)
+	}
+	if hint := m.composerHint(); !strings.Contains(hint, "Ctrl+C cancel") {
+		t.Errorf("composer hint = %q, want the cancellation hint", hint)
 	}
 	if title, ok := titleSetBy(m.titleCmd()); !ok || !strings.HasPrefix(title, "[compacting] ") {
 		t.Errorf("compacting title = %q, %v", title, ok)
 	}
+	assertCacheMatchesFullRender(t, &m, "after compaction start")
 
 	// Prompt submission and session-target changes stay closed while it runs.
 	m.input.SetValue("next prompt")
@@ -319,6 +346,12 @@ JSON
 	if m.compacting {
 		t.Fatal("compaction state survived the result")
 	}
+	if idx := compactionStartIndex(m); idx >= 0 {
+		t.Fatalf("start notice survived the result: %+v", m.items[idx])
+	}
+	if line := m.statusLine(); strings.Contains(line, "compacting") {
+		t.Errorf("status line kept the busy state: %q", line)
+	}
 	if mode, id := m.session.RunOptions(); mode != cake.RunResume || id != compactionSessionID {
 		t.Fatalf("session changed to %v %q", mode, id)
 	}
@@ -333,9 +366,22 @@ JSON
 		it.Text != "context compacted 170k -> 24k, 4 records retained" {
 		t.Fatalf("timeline notice = %+v", it)
 	}
+	markers := 0
+	for _, it := range m.items {
+		if it.Kind == ui.KindInfo && strings.HasPrefix(it.Text, "context compacted") {
+			markers++
+		}
+	}
+	if markers != 1 {
+		t.Fatalf("timeline has %d completion markers, want 1: %+v", markers, m.items)
+	}
 	if title, ok := titleSetBy(m.titleCmd()); !ok || strings.HasPrefix(title, "[") {
 		t.Errorf("post-compaction title = %q, %v", title, ok)
 	}
+	if hint := m.composerHint(); !strings.Contains(hint, "Ctrl+S submit") {
+		t.Errorf("post-compaction hint = %q, want the submit hint back", hint)
+	}
+	assertCacheMatchesFullRender(t, &m, "after compaction result")
 
 	raw, err := os.ReadFile(argsPath)
 	if err != nil {
@@ -436,9 +482,16 @@ JSON
 	if m.session.Context == nil || *m.session.Context != before {
 		t.Fatalf("context = %+v, want unchanged %+v", m.session.Context, before)
 	}
-	if it := lastItem(t, m); it.Kind != ui.KindComplete {
-		t.Fatalf("no-op added a timeline item: %+v", it)
+	if idx := compactionStartIndex(m); idx >= 0 {
+		t.Fatalf("no-op left the start notice pending: %+v", m.items[idx])
 	}
+	if it := lastItem(t, m); it.Kind != ui.KindInfo || it.Text != "context compaction skipped: below threshold" {
+		t.Fatalf("no-op notice = %+v", it)
+	}
+	if line := m.statusLine(); strings.Contains(line, "compacting") {
+		t.Errorf("no-op left the busy state: %q", line)
+	}
+	assertCacheMatchesFullRender(t, &m, "after compaction no-op")
 }
 
 func TestCompactionFailureKeepsSessionAndWarns(t *testing.T) {
@@ -465,6 +518,9 @@ func TestCompactionFailureKeepsSessionAndWarns(t *testing.T) {
 		!strings.Contains(it.Text, "unavailable; upgrade cake") {
 		t.Fatalf("failure notice = %+v", it)
 	}
+	if idx := compactionStartIndex(m); idx >= 0 {
+		t.Fatalf("failure left the start notice pending: %+v", m.items[idx])
+	}
 }
 
 func TestCompactionRejectsNonInPlaceResult(t *testing.T) {
@@ -490,6 +546,9 @@ JSON
 	if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "did not append in place") {
 		t.Fatalf("non-in-place notice = %+v", it)
 	}
+	if idx := compactionStartIndex(m); idx >= 0 {
+		t.Fatalf("non-in-place result left the start notice pending: %+v", m.items[idx])
+	}
 }
 
 func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
@@ -499,13 +558,18 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = tm.(Model)
 	done := runCompactionCmd(cmd)
+	before := len(m.items)
 
 	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = tm.(Model)
 	// Cancellation is reported once, when the child is reaped; the keypress
-	// itself adds no notice, matching the run path.
-	if it := lastItem(t, m); it.Kind != ui.KindComplete {
-		t.Fatalf("ctrl+c added a timeline notice: %+v", it)
+	// itself adds no notice, matching the run path. The start notice is still
+	// pending while the child drains.
+	if got := len(m.items); got != before {
+		t.Fatalf("ctrl+c changed the timeline from %d to %d items", before, got)
+	}
+	if idx := compactionStartIndex(m); idx < 0 {
+		t.Fatal("ctrl+c removed the pending start notice before the child was reaped")
 	}
 	if !m.compacting {
 		t.Fatal("cancel reopened the gate before the child was reaped")
@@ -522,6 +586,9 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 	}
 	if it := lastItem(t, m); it.Kind != ui.KindWarning || it.Text != "context compaction canceled" {
 		t.Fatalf("canceled notice = %+v", it)
+	}
+	if idx := compactionStartIndex(m); idx >= 0 {
+		t.Fatalf("canceled result left the start notice pending: %+v", m.items[idx])
 	}
 	if m.session.Context == nil || m.session.Context.Tokens != 170_000 {
 		t.Fatalf("context changed on cancellation: %+v", m.session.Context)
@@ -608,5 +675,183 @@ func TestCompactionSkippedForNoSession(t *testing.T) {
 	}
 	if _, err := os.Stat(argsPath); !os.IsNotExist(err) {
 		t.Fatalf("compactor was invoked for -no-session: %v", err)
+	}
+}
+
+// TestCompactionElapsedAdvancesOnSpinnerTick checks the visible age is driven by
+// the spinner chain the REPL already runs: no second timer is started, and the
+// status line and composer agree on the value.
+func TestCompactionElapsedAdvancesOnSpinnerTick(t *testing.T) {
+	bin := writeFakeCompactor(t, `exec sleep 30`)
+	m := compactionModel(t, bin)
+
+	tm, _ := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
+	start := m.compactionStart
+	if start.IsZero() {
+		t.Fatal("compaction start time was not recorded")
+	}
+	if line := m.statusLine(); !strings.Contains(line, "compacting 0s") {
+		t.Fatalf("initial status line = %q, want compacting 0s", line)
+	}
+
+	tm, cmd := m.Update(spinner.TickMsg{Time: start.Add(5 * time.Second)})
+	m = tm.(Model)
+	if m.compactionElapsed != 5*time.Second {
+		t.Errorf("elapsed = %v, want 5s", m.compactionElapsed)
+	}
+	if cmd == nil {
+		t.Fatal("spinner tick chain stopped while compacting")
+	}
+	if line := m.statusLine(); !strings.Contains(line, "compacting 5s") {
+		t.Errorf("status line = %q, want compacting 5s", line)
+	}
+	if state := m.activityState(); state != "compacting 5s" {
+		t.Errorf("composer state = %q, want compacting 5s", state)
+	}
+}
+
+func TestCompactionElapsedText(t *testing.T) {
+	tests := []struct {
+		in   time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{-time.Second, "0s"},
+		{time.Second, "1s"},
+		{59 * time.Second, "59s"},
+		{60 * time.Second, "1m00s"},
+		{65 * time.Second, "1m05s"},
+		{time.Hour, "1h00m00s"},
+	}
+	for _, tt := range tests {
+		if got := compactionElapsedText(tt.in); got != tt.want {
+			t.Errorf("compactionElapsedText(%v) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestCompactionViewNarrowNoColor drives the real View at narrow widths under
+// the Ascii profile: the pending start notice, cancellation hint, and elapsed
+// state must be on screen without overflow or escapes, and the resolved view
+// must replace the notice with the one outcome row.
+func TestCompactionViewNarrowNoColor(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	for _, width := range []int{24, 32, 60} {
+		t.Run(fmt.Sprintf("width %d", width), func(t *testing.T) {
+			bin := writeFakeCompactor(t, `
+cat <<'JSON'
+{"compacted":true,"source_session_id":"11111111-2222-3333-4444-555555555555","session_id":"11111111-2222-3333-4444-555555555555","in_place":true,"checkpoint_id":"c-1","boundary":4,"before_tokens":170000,"after_tokens":24000,"window":200000,"retained_count":4}
+JSON
+`)
+			m := compactionModel(t, bin)
+			m.width, m.height = width, 30
+			m.layout()
+
+			tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+			m = tm.(Model)
+			pending := m.View()
+			assertNoANSIOrOverflow(t, pending, width)
+			for _, want := range []string{"context compaction", "Ctrl+C", "compacting 0s"} {
+				if !strings.Contains(pending, want) {
+					t.Errorf("pending view missing %q:\n%s", want, pending)
+				}
+			}
+
+			// Advance the existing spinner clock and check the elapsed age is
+			// visible at this width too; the PTY capture combines the same states.
+			tm, _ = m.Update(spinner.TickMsg{Time: m.compactionStart.Add(3 * time.Second)})
+			m = tm.(Model)
+			progress := m.View()
+			assertNoANSIOrOverflow(t, progress, width)
+			if !strings.Contains(progress, "compacting 3s") {
+				t.Errorf("progress view missing compacting 3s:\n%s", progress)
+			}
+
+			tm, _ = m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
+			m = tm.(Model)
+			resolved := m.View()
+			assertNoANSIOrOverflow(t, resolved, width)
+			if !strings.Contains(resolved, "context compacted") {
+				t.Errorf("resolved view missing the outcome row:\n%s", resolved)
+			}
+			if strings.Contains(resolved, "context compaction started") {
+				t.Errorf("resolved view kept the start notice:\n%s", resolved)
+			}
+		})
+	}
+}
+
+// assertNoANSIOrOverflow checks one rendered frame for the two properties the
+// no-color narrow captures promise: no ANSI escapes and no row wider than the
+// terminal.
+func assertNoANSIOrOverflow(t *testing.T, view string, width int) {
+	t.Helper()
+	if strings.Contains(view, "\x1b[") {
+		t.Errorf("Ascii view contains ANSI escapes:\n%q", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line %d cells wide, want <= %d: %q", w, width, line)
+		}
+	}
+}
+
+// TestCompactionSuccessAfterClearIsStillReported checks that /clear during a
+// compaction leaves no stale start row, and that the success outcome is still
+// reported once the child is reaped.
+func TestCompactionSuccessAfterClearIsStillReported(t *testing.T) {
+	bin := writeFakeCompactor(t, `
+cat <<'JSON'
+{"compacted":true,"source_session_id":"11111111-2222-3333-4444-555555555555","session_id":"11111111-2222-3333-4444-555555555555","in_place":true,"checkpoint_id":"c-1","boundary":4,"before_tokens":170000,"after_tokens":24000,"window":200000,"retained_count":4}
+JSON
+`)
+	m := compactionModel(t, bin)
+
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
+	done := runCompactionCmd(cmd)
+
+	tm, _ = m.execCommand(Command{Kind: CmdClear})
+	m = tm.(Model)
+	if len(m.items) != 0 {
+		t.Fatalf("timeline after /clear = %+v, want empty", m.items)
+	}
+
+	tm, _ = m.Update(waitForCompaction(t, done))
+	m = tm.(Model)
+	if it := lastItem(t, m); it.Kind != ui.KindInfo ||
+		it.Text != "context compacted 170k -> 24k, 4 records retained" {
+		t.Fatalf("post-clear outcome = %+v", it)
+	}
+	if compactionStartIndex(m) >= 0 {
+		t.Fatal("start notice reappeared after /clear")
+	}
+	assertCacheMatchesFullRender(t, &m, "after post-clear compaction result")
+}
+
+// TestCompactionNoOpAfterClearStaysSilent preserves the old silent no-op when
+// the start notice it would have resolved was cleared away.
+func TestCompactionNoOpAfterClearStaysSilent(t *testing.T) {
+	bin := writeFakeCompactor(t, `
+cat <<'JSON'
+{"compacted":false,"reason":"below threshold","source_session_id":"11111111-2222-3333-4444-555555555555"}
+JSON
+`)
+	m := compactionModel(t, bin)
+
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
+	done := runCompactionCmd(cmd)
+
+	tm, _ = m.execCommand(Command{Kind: CmdClear})
+	m = tm.(Model)
+	tm, _ = m.Update(waitForCompaction(t, done))
+	m = tm.(Model)
+	if len(m.items) != 0 {
+		t.Fatalf("cleared no-op added a timeline item: %+v", m.items)
 	}
 }

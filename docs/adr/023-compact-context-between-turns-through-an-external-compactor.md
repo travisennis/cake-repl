@@ -165,3 +165,9 @@ quality claim.
   extends this ADR's trigger policy with an absolute quality ceiling and
   trigger line. The in-place, gating, result, and estimated-status semantics
   above are unchanged; the provenance rule is narrowed further.
+- [ADR 026](026-show-compaction-progress-in-the-repl.md) partially supersedes
+  this ADR's no-op silence and its description of the visible compacting state:
+  a live compaction shows a start notice with elapsed seconds and a Ctrl+C
+  hint, and resolves it into one outcome row (including an explicit skip for a
+  no-op). The session pin, gate, cancellation, and result semantics above are
+  unchanged.

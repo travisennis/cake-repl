@@ -24,7 +24,7 @@ func (m Model) View() string {
 		m.width,
 		m.activityState(),
 		m.input.LineCount(),
-		"Ctrl+S submit · Enter newline · /help",
+		m.composerHint(),
 	)
 	return strings.Join([]string{
 		body,
@@ -66,18 +66,34 @@ func (m Model) browserView() string {
 }
 
 // activityState names the state shown by the composer: a live task, the
-// between-turn compactor, or idle. The status line uses "idle" instead of
-// "ready", but the two surfaces must never disagree about which operation is
-// in flight.
+// between-turn compactor with its whole-second age, or idle. The status line
+// uses "idle" instead of "ready", but the two surfaces must never disagree
+// about which operation is in flight or how long it has been running.
 func (m Model) activityState() string {
 	switch {
 	case m.running:
 		return "running"
 	case m.compacting:
-		return "compacting"
+		return m.compactionStateLabel()
 	default:
 		return "ready"
 	}
+}
+
+// compactionStateLabel names the in-flight compactor and its whole-second age.
+// The status line and composer share it so the two surfaces cannot disagree.
+func (m Model) compactionStateLabel() string {
+	return "compacting " + compactionElapsedText(m.compactionElapsed)
+}
+
+// composerHint names the actions that still work in the current state. While
+// the compactor runs the prompt gate is closed, so the footer advertises the two
+// keys that do something instead of the submit hint that would be refused.
+func (m Model) composerHint() string {
+	if m.compacting {
+		return "Ctrl+C cancel · Ctrl+N new session"
+	}
+	return "Ctrl+S submit · Enter newline · /help"
 }
 
 func (m Model) statusLine() string {
@@ -91,7 +107,7 @@ func (m Model) statusLine() string {
 	case m.running:
 		state = m.spin.View() + " running"
 	case m.compacting:
-		state = m.spin.View() + " compacting"
+		state = m.spin.View() + " " + m.compactionStateLabel()
 	}
 
 	mode, resumeID := m.session.RunOptions()

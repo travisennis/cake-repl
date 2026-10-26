@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/list"
@@ -131,6 +132,12 @@ type Model struct {
 	// a compactionDoneMsg reaps it, even after a cancel.
 	compacting       bool
 	compactionCancel context.CancelFunc
+	// compactionStart is when the current compactor was launched and
+	// compactionElapsed is its whole-second age, refreshed from the spinner tick
+	// the REPL already runs while busy. Both are zero when no compaction is
+	// pending, so the status line and composer omit the age. See ADR 026.
+	compactionStart   time.Time
+	compactionElapsed time.Duration
 	// compactionSeq allocates a request identity for one compaction and
 	// compactionReq is the identity whose result may still be applied. A
 	// canceled or superseded run cannot touch the status line or context of a
@@ -551,6 +558,45 @@ func (m Model) lastAssistantMarkdown() (text string, ok bool) {
 // trimmed off the timeline simply starts a fresh one.
 func (m *Model) lastItemIsReasoning() bool {
 	return len(m.items) > 0 && m.items[len(m.items)-1].Kind == ui.KindReasoning
+}
+
+// removeItemAt removes one item and its cached rendering, adjusting pending
+// call indices the same way trimFront and insertItemAt do. It resolves the live
+// compaction start notice once its outcome is known. The surviving slices are
+// copied so the removed item and its rendered string are not kept reachable
+// through the old backing arrays.
+func (m *Model) removeItemAt(idx int) {
+	if idx < 0 || idx >= len(m.items) {
+		return
+	}
+	kept := make([]ui.Item, len(m.items)-1)
+	copy(kept, m.items[:idx])
+	copy(kept[idx:], m.items[idx+1:])
+	m.items = kept
+
+	for callID, callIdx := range m.pendingCalls {
+		switch {
+		case callIdx == idx:
+			delete(m.pendingCalls, callID)
+		case callIdx > idx:
+			m.pendingCalls[callID] = callIdx - 1
+		}
+	}
+
+	if !m.ready {
+		return
+	}
+	if len(m.rendered) == len(m.items)+1 {
+		keptRenders := make([]string, len(m.rendered)-1)
+		copy(keptRenders, m.rendered[:idx])
+		copy(keptRenders[idx:], m.rendered[idx+1:])
+		m.rendered = keptRenders
+		m.timelineDirty = true
+		return
+	}
+	// The cache was not in step with items (an item appended before the first
+	// layout); rebuild it rather than leave a removed row in the payload.
+	m.rebuildTimeline()
 }
 
 // insertItemAt inserts an item at the given index, shifting subsequent items

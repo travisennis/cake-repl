@@ -14,8 +14,9 @@ instead.
 Labeled user and assistant sections anchor the conversation. Assistant response
 bodies have no decorative prefix, so multiline terminal selections can be copied
 cleanly; operational events remain compact and visually distinct.
-The status line leads with current idle/running state, followed by labeled
-session, next-run, model, context, and working-directory context. The model
+The status line leads with current idle/running/compacting state (with the
+compactor's elapsed seconds while one runs), followed by labeled session,
+next-run, model, context, and working-directory context. The model
 shown is the identity cake reports on the stream once available — the
 `[[models]]` entry name, falling back to the provider model ID — and otherwise
 the `-model`/config value. The context segment reports the newest complete
@@ -291,7 +292,8 @@ keep-tokens = 20000
   figure reaches `trigger-tokens`. It does not subtract a percentage headroom.
   `cake-compact` receives that same effective line as `-threshold-tokens`; the
   ceiling itself is never passed. The compactor re-checks the session and
-  compacts only when it agrees; a no-op is silent.
+  compacts only when it agrees. A no-op resolves the start notice with an
+  explicit `context compaction skipped: …` row instead of staying silent.
 - If the model's context window is smaller than `max-context-tokens`, the
   effective trigger is the smaller of `trigger-tokens` and 75% of the window.
   The 75% cap matches the default percent mode's effective line (80 − 5) and
@@ -315,18 +317,28 @@ keep-tokens = 20000
 - The summary is a metered model call made by `cake-compact` through cake. It
   uses the REPL's `-model` and `-profile` when set; with neither, cake's own
   default model applies.
-- While compaction runs, the composer, status line, and terminal title show
-  `compacting`, prompt submission is rejected, and `/new`, `/resume`, and
-  `/sessions` are refused. `Ctrl+C` cancels the child; `/exit` cancels and then
-  exits; `Ctrl+N` cancels and starts a new session.
-- On success the status context becomes the compactor's estimate (`~24k/200k`)
-  until a newer complete measurement replaces it, and the timeline shows one
-  `context compacted 118k -> 24k, 4 records retained` notice. A failure,
+- A compaction announces itself as soon as it starts: the timeline gains a
+  `context compaction started · Ctrl+C cancels` row, the composer and status
+  line read `compacting <elapsed>` with whole seconds, the composer footer
+  names `Ctrl+C cancel · Ctrl+N new session`, and the terminal title carries
+  the `[compacting]` prefix. Prompt submission is rejected, and
+  `/new`, `/resume`, and `/sessions` are refused. `Ctrl+C` cancels the child;
+  `/exit` cancels and then exits; `Ctrl+N` cancels and starts a new session.
+  The elapsed display is driven by the spinner the REPL already runs, so it
+  adds no second timer and stops when the operation ends.
+- When the result arrives, the start row is resolved into exactly one outcome
+  row at the end of the timeline (`Ctrl+N` instead clears the timeline and
+  discards the old result): on success the status context becomes the
+  compactor's estimate (`~24k/200k`) until a newer complete measurement
+  replaces it, and the row reads
+  `context compacted 118k -> 24k, 4 records retained`. A failure,
   cancellation, or non-in-place result keeps the current session and context
-  figure and shows one warning. The REPL never reads or writes cake session
-  files. `after_tokens` is an estimate that excludes fixed request overhead, so
-  the first post-compaction status can read lower than the next provider input;
-  a later complete `turn_usage` replaces it.
+  figure and shows one warning. A no-op shows the explicit skip row unless the
+  start row is already gone (`Ctrl+N`, `/clear`, or the `-max-timeline-items`
+  cap). The REPL never reads or writes cake session files. `after_tokens` is an
+  estimate that excludes fixed request overhead, so the first post-compaction
+  status can read lower than the next provider input; a later complete
+  `turn_usage` replaces it.
 - `-no-session` disables compaction with a startup warning. The automatically
   loaded project-local `.cake-repl.toml` cannot enable compaction, choose
   `cake-compact-bin`, or tune `threshold-percent`, `keep-tokens`,
@@ -342,8 +354,10 @@ keep-tokens = 20000
   the window before the turn ends is not covered; that needs a request-boundary
   mechanism inside Cake. See
   [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
-  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md), and
-  [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
+  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md),
+  [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md),
+  and
+  [ADR 026](docs/adr/026-show-compaction-progress-in-the-repl.md).
 
 ## Config file
 

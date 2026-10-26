@@ -73,13 +73,23 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   and appends an in-place checkpoint; the REPL never reads or writes the session
   file and never passes `-fork` or `-force`. At most one compaction runs, and
   prompt submission plus `/new`, `/resume`, and `/sessions` are refused until
-  its child has exited and been reaped. Ctrl+C and quitting cancel it, `/exit`
-  cancels and then exits, and Ctrl+N cancels and starts a new session. Only a
-  completed turn triggers it (a canceled or failed run does not), `-no-session`
-  disables it at startup with a warning, and success keeps `ResumeID` unchanged
-  with an estimated status figure. A `compacted:false` no-op is silent; a
-  failure, cancellation, or non-in-place result keeps the session and figure and
-  warns. The automatically loaded project-local `.cake-repl.toml` cannot enable
+  its child has exited and been reaped. A start appends one timeline notice and
+  syncs the viewport in the same update, so a long child is visible from the
+  moment it starts; the status line and composer carry its whole-second elapsed
+  age from the existing spinner tick, and the composer footer names Ctrl+C.
+  Ctrl+C and quitting cancel it, `/exit` cancels and then exits, and Ctrl+N
+  cancels and starts a new session. Only a completed turn triggers it (a
+  canceled or failed run does not), `-no-session` disables it at startup with a
+  warning, and success keeps `ResumeID` unchanged with an estimated status
+  figure. Except after Ctrl+N, which clears the timeline and discards the old
+  result, every path ends with the start notice gone: success, failure, and
+  cancellation append one outcome row even when `/clear` already removed the
+  notice, while a no-op appends its explicit `compacted:false` skip row only
+  when the start row is still there. `/clear` or the timeline cap can remove
+  that row first. A failure, cancellation, or non-in-place result keeps the
+  session and figure and warns.
+  See [ADR 026](../adr/026-show-compaction-progress-in-the-repl.md). The
+  automatically loaded project-local `.cake-repl.toml` cannot enable
   compaction, select its executable, or tune any threshold, including
   `max-context-tokens` and `trigger-tokens` (ADR 006, extended by
   [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md)
@@ -207,8 +217,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   absolute values), the absolute trigger line and its 75% window cap, the
   percent fallback headroom, every disqualifying run, the gated state, in-place
   success and estimated context, a no-op, a non-zero exit, a non-in-place
-  document, and cancellation through Ctrl+C and Ctrl+N. Use fake `cake-compact`
-  scripts; never a real model call.
+  document, and cancellation through Ctrl+C and Ctrl+N. Include a delayed fake
+  compactor whose start notice, advancing elapsed seconds, and resolution are
+  captured at a narrow width and without color, and cover `/clear` before the
+  result. Use fake `cake-compact` scripts; never a real model call.
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
 - Terminal behavior around a suspend has no unit-test surface beyond the step
   order and mode sequences, so a change there needs the driven session in
@@ -233,6 +245,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Reopening the session-lock race.** Accepting a prompt, or retargeting
   `/new`/`/resume`/`/sessions`, while the compactor still holds or is writing the
   session. Keep the gate closed until the child is reaped, even after Ctrl+C.
+- **Leaving the compaction start notice pending.** Treating the start notice as
+  permanent history, or dropping it without reporting the outcome, leaves the
+  timeline claiming work is in progress after the child is gone. Resolve it on
+  every path except Ctrl+N, which clears the timeline; success, failure, and
+  cancellation still append their row after `/clear`, while a no-op may stay
+  silent only when its start row is already gone.
 - **Letting a project file turn on metered compaction.** The automatically
   loaded `.cake-repl.toml` may only disable compaction; `enabled = true`,
   `cake-compact-bin`, `threshold-percent`, `keep-tokens`, `max-context-tokens`,

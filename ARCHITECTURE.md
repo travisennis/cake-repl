@@ -161,13 +161,17 @@ way.
   window is below the ceiling, and only that trigger (never the ceiling) is
   passed as `-threshold-tokens`. Without the absolute fields the legacy percent
   fallback keeps its five-point headroom and passes `-threshold-percent`.
-  Exactly one threshold mode reaches the compactor. The compactor re-checks the
-  session and decides; a `compacted:false` result is a silent no-op. Only a
-  document that says `compacted:true` and `in_place:true` with the pinned
-  session id is applied: the REPL keeps `ResumeID`, appends one shared marker,
-  and seeds the status context from `after_tokens` as an estimate. A failure,
-  cancellation, or other result keeps the session and figure and warns. The
-  REPL never reads session files; `-no-session` disables the feature; and the
+  Exactly one threshold mode reaches the compactor. While it runs, the timeline
+  shows one start notice, the status line and composer carry its elapsed
+  seconds, and the composer names Ctrl+C; the start notice is resolved into one
+  outcome row when the child is reaped. The compactor re-checks the session and
+  decides; a `compacted:false` result resolves the notice with an explicit skip
+  row. Only a document that says `compacted:true` and `in_place:true` with the
+  pinned session id is applied: the REPL keeps `ResumeID`, appends one shared
+  marker, and seeds the status context from `after_tokens` as an estimate. A
+  failure, cancellation, or other result keeps the session and figure and
+  warns. The REPL never reads session files; `-no-session` disables the
+  feature; and the
   untrusted project-local config layer cannot enable it, choose its executable,
   or tune any threshold, including the absolute fields. See
   [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),

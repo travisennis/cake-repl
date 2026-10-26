@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/travisennis/cake-repl/internal/cake"
@@ -25,6 +27,17 @@ const compactionTriggerHeadroomPercent = 5
 // leaves headroom for the response and tool results and the trigger can never
 // sit above the window.
 const compactionWindowFallbackPercent = 75
+
+// compactionStartPrefix marks the live compaction start notice in the timeline.
+// The completion path finds that row and resolves it into the outcome, so a
+// started row never keeps reading as pending; completed and replayed markers use
+// different wording and never carry it. See ADR 026.
+const compactionStartPrefix = "context compaction started"
+
+// compactionStartText is the one timeline notice shown before the compactor is
+// launched. The Ctrl+C hint is repeated in the composer footer so it stays
+// visible after the timeline scrolls.
+const compactionStartText = compactionStartPrefix + " · Ctrl+C cancels"
 
 // compactionTrigger is one resolved trigger line: either an absolute token
 // count (absolute mode) or a window percentage (the legacy fallback).
@@ -149,6 +162,8 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	m.compactionReq = m.compactionSeq
 	m.compactionCancel = cancel
 	m.compacting = true
+	m.compactionStart = time.Now()
+	m.compactionElapsed = 0
 	req := m.compactionReq
 	opts := compact.Options{
 		Bin:               m.cfg.Compaction.Bin,
@@ -168,6 +183,13 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	run := func() tea.Msg {
 		return compactionDoneMsg{req: req, sessionID: sessionID, res: compact.Compact(ctx, opts)}
 	}
+	// The start notice is synced here, not left for the next event: the finished
+	// turn's Update has already pushed its completion row, and no spinner tick
+	// pushes a viewport payload. Without this sync a long compaction would show
+	// a busy status line and composer but no timeline start until the result
+	// lands. See ADR 026.
+	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: compactionStartText})
+	m.syncViewport()
 	// The title picks up the compacting marker in the same transition. The
 	// spinner needs no new tick: finishRun runs while the finished turn's tick
 	// is still pending, and the handler keeps that chain alive while compacting.
@@ -175,8 +197,9 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 }
 
 // finishCompaction applies one compactor result. In-place success keeps the
-// session pin unchanged, appends one shared marker, and seeds the status context
-// from the compactor's estimate. A no-op is silent; a failure, cancellation, or
+// session pin unchanged, resolves the start notice into one shared marker, and
+// seeds the status context from the compactor's estimate. A no-op resolves the
+// start notice with an explicit skip notice; a failure, cancellation, or
 // non-in-place result keeps the session and status figure and warns.
 func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	if msg.req != m.compactionReq {
@@ -184,6 +207,8 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	}
 	m.compacting = false
 	m.compactionCancel = nil
+	m.compactionStart = time.Time{}
+	m.compactionElapsed = 0
 
 	// Ctrl+N moved to a new session while the canceled child was draining; its
 	// result belongs before that boundary.
@@ -199,7 +224,9 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	mode, sessionID := m.session.RunOptions()
 	if mode != cake.RunResume || sessionID != msg.sessionID {
 		// The target changed while the child was draining; its result belongs to
-		// the session the REPL left.
+		// the session the REPL left. Drop the pending start row so it cannot
+		// keep reading as in progress after the operation is over.
+		m.removeCompactionStart()
 		if m.exitAfter {
 			return m.quit()
 		}
@@ -211,9 +238,9 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	case msg.res.Document != nil && msg.res.ExitCode == 0:
 		m.applyCompactionDocument(msg.sessionID, *msg.res.Document)
 	case msg.res.Canceled:
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "context compaction canceled"})
+		m.finishCompactionNotice(ui.Item{Kind: ui.KindWarning, Text: "context compaction canceled"})
 	default:
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: compactionFailureText(msg.res, m.cfg.OutputLimit)})
+		m.finishCompactionNotice(ui.Item{Kind: ui.KindWarning, Text: compactionFailureText(msg.res, m.cfg.OutputLimit)})
 	}
 
 	m.syncViewport()
@@ -230,10 +257,14 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) {
 	if !doc.Compacted {
 		m.logDebug("compaction: no-op: " + doc.Reason)
+		m.skipCompactionNotice(ui.Item{
+			Kind: ui.KindInfo,
+			Text: compactionSkippedText(doc.Reason, m.cfg.OutputLimit),
+		})
 		return
 	}
 	if !doc.InPlace || doc.SessionID != sessionID {
-		m.appendItem(ui.Item{
+		m.finishCompactionNotice(ui.Item{
 			Kind: ui.KindWarning,
 			Text: "context compaction did not append in place; keeping session " + ui.ShortID(sessionID),
 		})
@@ -243,10 +274,87 @@ func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) 
 	// session's last known window is kept. The estimate is marked so the status
 	// line renders it with "~".
 	m.session.OnCompactionEstimate(doc.AfterTokens, doc.Window)
-	m.appendItem(ui.Item{
+	m.finishCompactionNotice(ui.Item{
 		Kind: ui.KindInfo,
 		Text: compactionMarker(doc.BeforeTokens, doc.AfterTokens, doc.RetainedCount),
 	})
+}
+
+// removeCompactionStart removes the live start notice and reports whether one
+// was still on the timeline. Ctrl+N, /clear, or the timeline cap can drop it
+// before the result is reaped, so the completion path cannot assume it is there.
+func (m *Model) removeCompactionStart() bool {
+	for i := len(m.items) - 1; i >= 0; i-- {
+		if m.items[i].Kind == ui.KindInfo && strings.HasPrefix(m.items[i].Text, compactionStartPrefix) {
+			m.removeItemAt(i)
+			return true
+		}
+	}
+	return false
+}
+
+// finishCompactionNotice resolves the live start notice into one outcome row.
+// The row is appended at the end instead of updated in place so an action the
+// user attempted while the gate was closed (a rejected submit or /new) stays
+// before the outcome. With no start notice left, the outcome is still appended: a
+// success, failure, or cancellation must remain visible even after /clear.
+func (m *Model) finishCompactionNotice(it ui.Item) {
+	m.removeCompactionStart()
+	m.appendItem(it)
+}
+
+// skipCompactionNotice resolves the start notice when the compactor declined.
+// A no-op is expected behavior, so it stays silent when the row it would have
+// resolved is already gone; otherwise the row becomes the explicit skip.
+func (m *Model) skipCompactionNotice(it ui.Item) {
+	if m.removeCompactionStart() {
+		m.appendItem(it)
+	}
+}
+
+// compactionSkippedText names a no-op result. The compactor re-checks every
+// eligible turn, so a decline is routine; the reason is the compactor's short
+// explanation, bounded here and sanitized by the render boundary.
+func compactionSkippedText(reason string, outputLimit int) string {
+	text := "context compaction skipped"
+	if reason = strings.TrimSpace(reason); reason != "" {
+		text += ": " + ui.TruncateOutput(reason, outputLimit)
+	}
+	return text
+}
+
+// refreshCompactionElapsed records the whole-second age of the running
+// compactor. The spinner tick is the clock the REPL already runs while a task or
+// compaction is in flight, so this adds no second timer and stops with the
+// spinner chain when the REPL goes idle.
+func (m *Model) refreshCompactionElapsed(now time.Time) {
+	if !m.compacting || m.compactionStart.IsZero() {
+		return
+	}
+	elapsed := now.Sub(m.compactionStart)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	m.compactionElapsed = elapsed.Truncate(time.Second)
+}
+
+// compactionElapsedText formats the running compactor's whole-second age for
+// the one-row status line and composer title. Whole seconds keep it short on a
+// narrow terminal and change at most once per second, however often the
+// spinner frame renders.
+func compactionElapsedText(d time.Duration) string {
+	secs := int64(d / time.Second)
+	if secs < 0 {
+		secs = 0
+	}
+	switch {
+	case secs < 60:
+		return fmt.Sprintf("%ds", secs)
+	case secs < 3600:
+		return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
+	default:
+		return fmt.Sprintf("%dh%02dm%02ds", secs/3600, (secs/60)%60, secs%60)
+	}
 }
 
 // compactionFailureText renders the one diagnostic for a failed compactor run.
