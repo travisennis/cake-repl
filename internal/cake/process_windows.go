@@ -36,3 +36,9 @@ func killGroup(pid int) error {
 func processGone(err error) bool {
 	return errors.Is(err, os.ErrProcessDone)
 }
+
+// Stop is a no-op on Windows, which has no SIGSTOP.
+func (r *Run) Stop() error { return nil }
+
+// Continue is a no-op on Windows, which has no SIGCONT.
+func (r *Run) Continue() error { return nil }

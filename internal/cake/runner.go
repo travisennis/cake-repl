@@ -54,6 +54,9 @@ type Options struct {
 	SystemPrompt string
 	AddDirs      []string
 	DebugLog     io.Writer
+	// Registry tracks this run so a suspend can stop and continue its process
+	// group. Nil means the run is not tracked.
+	Registry *Registry
 
 	afterWait func()
 	replay    bool
@@ -69,6 +72,7 @@ type ReplayOptions struct {
 	Cwd       string
 	SessionID string
 	DebugLog  io.Writer
+	Registry  *Registry
 }
 
 // Replay launches cake's supported stream-json session replay command. Replay
@@ -80,6 +84,7 @@ func Replay(opts ReplayOptions) (*Run, error) {
 		Cwd:      opts.Cwd,
 		ResumeID: opts.SessionID,
 		DebugLog: opts.DebugLog,
+		Registry: opts.Registry,
 		replay:   true,
 	})
 }
@@ -340,6 +345,9 @@ func Start(opts Options) (*Run, error) {
 		return nil, fmt.Errorf("starting %s: %w", opts.Bin, err)
 	}
 	run.pid = cmd.Process.Pid
+	if opts.Registry != nil {
+		opts.Registry.Add(run)
+	}
 
 	go func() {
 		// Release the context once the run is over; Run.Cancel is the only
@@ -372,6 +380,9 @@ func Start(opts Options) (*Run, error) {
 
 		waitErr := cmd.Wait()
 		run.markExited()
+		if opts.Registry != nil {
+			opts.Registry.Remove(run)
+		}
 		if opts.afterWait != nil {
 			opts.afterWait()
 		}

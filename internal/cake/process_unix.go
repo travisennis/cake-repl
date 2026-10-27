@@ -31,6 +31,23 @@ func killGroup(pid int) error {
 	return signalGroup(pid, syscall.SIGKILL)
 }
 
+// Stop pauses the run for a REPL suspend. A finished run is not signaled.
+func (r *Run) Stop() error {
+	return r.signal(syscall.SIGSTOP)
+}
+
+// Continue resumes a run paused by Stop. A finished run is not signaled.
+func (r *Run) Continue() error {
+	return r.signal(syscall.SIGCONT)
+}
+
+func (r *Run) signal(sig syscall.Signal) error {
+	if r == nil || r.pid <= 0 || r.exited.Load() {
+		return nil
+	}
+	return signalGroup(r.pid, sig)
+}
+
 // processGone reports whether err means the target no longer exists. A group
 // signal can race a run that exited between the registry snapshot and the
 // signal; that race is accepted, but it must not be logged as a failure.

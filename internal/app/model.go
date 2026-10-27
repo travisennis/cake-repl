@@ -48,8 +48,11 @@ type Config struct {
 	// for a bare `-resume`. It asks the user to choose a session instead of
 	// naming one: nothing is hydrated and no session is pinned until a row is
 	// picked. See ADR 021.
-	StartupPicker    bool
-	DebugLog         io.Writer
+	StartupPicker bool
+	DebugLog      io.Writer
+	// Runs tracks live and replay engine subprocesses so the suspend cycle can
+	// stop and continue their process groups. Nil leaves them untracked.
+	Runs             *cake.Registry
 	HistoryFile      string
 	OutputLimit      int
 	MaxTimelineItems int

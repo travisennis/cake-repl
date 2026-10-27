@@ -158,6 +158,7 @@ func startReplayCmd(cfg Config) tea.Cmd {
 			Cwd:       cfg.Cwd,
 			SessionID: cfg.ResumeID,
 			DebugLog:  cfg.DebugLog,
+			Registry:  cfg.Runs,
 		})
 		return replayStartedMsg{run: run, err: err}
 	}
@@ -850,6 +851,7 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 		ForkID:       m.cfg.ForkID,
 		NoSession:    m.cfg.NoSession,
 		DebugLog:     m.cfg.DebugLog,
+		Registry:     m.cfg.Runs,
 	})
 	if err != nil {
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})

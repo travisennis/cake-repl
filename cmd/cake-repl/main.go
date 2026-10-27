@@ -368,6 +368,12 @@ func run() (err error) {
 		cfg.DebugLog = &syncWriter{w: logFile}
 	}
 
+	// Track live and replay engine runs so an external suspend can pause them
+	// before the REPL stops its own process group. See ADR 027.
+	logf := suspendLogf(cfg.DebugLog)
+	runs := cake.NewRegistry(logf)
+	cfg.Runs = runs
+
 	// Inline mode renders in the normal buffer so recent terminal history stays
 	// visible above the REPL; the alternate screen restores the terminal on exit
 	// but hides that history for the whole session (ADR 015).
@@ -381,7 +387,7 @@ func run() (err error) {
 	// owns raw mode. Release the terminal before stopping and re-own it after
 	// SIGCONT; only meaningful when this process owns a terminal. See ADR 018.
 	if stdoutIsTerminal() {
-		stopSuspend := watchSuspend(p, *f.inline, suspendLogf(cfg.DebugLog))
+		stopSuspend := watchSuspend(p, *f.inline, runs, logf)
 		defer stopSuspend()
 	}
 	m, err := p.Run()
@@ -418,6 +424,13 @@ func run() (err error) {
 type terminalProgram interface {
 	ReleaseTerminal() error
 	RestoreTerminal() error
+}
+
+// engineRuns is the slice of the engine registry the suspend watcher drives. It
+// is declared here so the Unix and Windows suspend files share one signature.
+type engineRuns interface {
+	StopAll()
+	ContinueAll()
 }
 
 // suspendLogf returns the logger for terminal-lifecycle diagnostics. It writes

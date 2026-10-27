@@ -13,13 +13,15 @@ import (
 func recordingCycle(steps *[]string, releaseErr error) suspendCycle {
 	record := func(name string) { *steps = append(*steps, name) }
 	return suspendCycle{
-		release: func() error { record("release"); return releaseErr },
-		park:    func() { record("park") },
-		stop:    func() { record("stop") },
-		unpark:  func() { record("unpark") },
-		modes:   func() { record("modes") },
-		restore: func() error { record("restore"); return nil },
-		logf:    func(string, ...any) {},
+		release:      func() error { record("release"); return releaseErr },
+		park:         func() { record("park") },
+		stopRuns:     func() { record("stopRuns") },
+		stop:         func() { record("stop") },
+		continueRuns: func() { record("continueRuns") },
+		unpark:       func() { record("unpark") },
+		modes:        func() { record("modes") },
+		restore:      func() error { record("restore"); return nil },
+		logf:         func(string, ...any) {},
 	}
 }
 
@@ -32,7 +34,7 @@ func TestSuspendCycleRunsStepsInOrder(t *testing.T) {
 	if stopped := recordingCycle(&steps, nil).run(); !stopped {
 		t.Fatal("run() reported the process did not stop, want it to have stopped")
 	}
-	want := []string{"release", "park", "stop", "unpark", "modes", "restore"}
+	want := []string{"release", "park", "stopRuns", "stop", "continueRuns", "unpark", "modes", "restore"}
 	if strings.Join(steps, ",") != strings.Join(want, ",") {
 		t.Errorf("steps = %v, want %v", steps, want)
 	}
@@ -57,13 +59,15 @@ func TestSuspendCycleSkipsStopWhenReleaseFails(t *testing.T) {
 func TestSuspendCycleLogsFailures(t *testing.T) {
 	var logged []string
 	cycle := suspendCycle{
-		release: func() error { return errors.New("no terminal") },
-		park:    func() {},
-		stop:    func() {},
-		unpark:  func() {},
-		modes:   func() {},
-		restore: func() error { return nil },
-		logf:    func(format string, args ...any) { logged = append(logged, format) },
+		release:      func() error { return errors.New("no terminal") },
+		park:         func() {},
+		stopRuns:     func() {},
+		stop:         func() {},
+		continueRuns: func() {},
+		unpark:       func() {},
+		modes:        func() {},
+		restore:      func() error { return nil },
+		logf:         func(format string, args ...any) { logged = append(logged, format) },
 	}
 	cycle.run()
 	if len(logged) != 1 || !strings.Contains(logged[0], "releasing the terminal failed") {
@@ -112,7 +116,7 @@ func TestMouseSequenceReenablesReporting(t *testing.T) {
 // stop function.
 func TestWatchSuspendInstallsAndRemovesHandler(t *testing.T) {
 	prog := &stubProgram{}
-	stop := watchSuspend(prog, false, func(string, ...any) {})
+	stop := watchSuspend(prog, false, stubRuns{}, func(string, ...any) {})
 	if stop == nil {
 		t.Fatal("watchSuspend returned a nil stop function")
 	}
@@ -125,3 +129,9 @@ type stubProgram struct{}
 func (s *stubProgram) ReleaseTerminal() error { return nil }
 
 func (s *stubProgram) RestoreTerminal() error { return nil }
+
+// stubRuns satisfies engineRuns for the watcher wiring test.
+type stubRuns struct{}
+
+func (stubRuns) StopAll()     {}
+func (stubRuns) ContinueAll() {}

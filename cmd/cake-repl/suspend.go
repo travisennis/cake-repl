@@ -14,18 +14,21 @@ import (
 // is injected so the ordering contract is unit-testable without a terminal or a
 // real signal.
 //
-// Order is the contract. The terminal is released before the process stops, or
-// the shell resumes a program that still believes it owns raw mode; the modes
-// Bubble Tea does not restore are written back while its renderer is still
-// stopped; and the terminal is re-acquired last.
+// Order is the contract. The terminal is released before anything stops, or the
+// shell resumes a program that still believes it owns raw mode; each detached
+// engine run is paused before the REPL's own group stops, or engine work keeps
+// running unwatched; the modes Bubble Tea does not restore are written back
+// while its renderer is still stopped; and the terminal is re-acquired last.
 type suspendCycle struct {
-	release func() error // give the terminal back before stopping
-	park    func()       // anchor the live region for the resume repaint
-	stop    func()       // stop the process group; returns when it is continued
-	unpark  func()       // return to the buffer that owns the live region
-	modes   func()       // re-enable the modes RestoreTerminal leaves off
-	restore func() error // re-own the terminal
-	logf    func(string, ...any)
+	release      func() error // give the terminal back before stopping
+	park         func()       // anchor the live region for the resume repaint
+	stopRuns     func()       // pause tracked engine process groups
+	stop         func()       // stop the REPL's group; returns when continued
+	continueRuns func()       // resume engine process groups after SIGCONT
+	unpark       func()       // return to the buffer that owns the live region
+	modes        func()       // re-enable the modes RestoreTerminal leaves off
+	restore      func() error // re-own the terminal
+	logf         func(string, ...any)
 }
 
 // run performs one cycle. It reports whether the process stopped: when the
@@ -37,7 +40,9 @@ func (c suspendCycle) run() bool {
 		return false
 	}
 	c.park()
+	c.stopRuns()
 	c.stop() // returns after SIGCONT
+	c.continueRuns()
 	c.unpark()
 	// Write the missing modes before RestoreTerminal restarts the renderer, so
 	// no frame can be written between our two sequences and half a mode.
@@ -52,7 +57,7 @@ func (c suspendCycle) run() bool {
 // per signal. inline selects the anchoring the resume repaint needs when the
 // REPL renders outside the alternate screen. The returned function removes the
 // handler; call it once the program has returned.
-func watchSuspend(prog terminalProgram, inline bool, logf func(string, ...any)) func() {
+func watchSuspend(prog terminalProgram, inline bool, runs engineRuns, logf func(string, ...any)) func() {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTSTP)
 	done := make(chan struct{})
@@ -67,6 +72,13 @@ func watchSuspend(prog terminalProgram, inline bool, logf func(string, ...any)) 
 			suspendCycle{
 				release: prog.ReleaseTerminal,
 				park:    func() { writeTerminal(parkSequence(inline)) },
+				// The engine is in its own session, so stop it explicitly before
+				// the REPL's group stops; it resumes after SIGCONT.
+				stopRuns: func() {
+					if runs != nil {
+						runs.StopAll()
+					}
+				},
 				// Stop the whole process group outright. SIGTSTP cannot be
 				// re-raised here to do it: once this program has taken SIGTSTP
 				// with signal.Notify, the runtime keeps the signal blocked and
@@ -80,6 +92,11 @@ func watchSuspend(prog terminalProgram, inline bool, logf func(string, ...any)) 
 					err := syscall.Kill(0, syscall.SIGSTOP)
 					if err != nil {
 						logf("suspend: stopping the process group failed: %v; resuming", err)
+					}
+				},
+				continueRuns: func() {
+					if runs != nil {
+						runs.ContinueAll()
 					}
 				},
 				unpark:  func() { writeTerminal(leaveParkSequence(inline)) },
