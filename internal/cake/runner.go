@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -56,8 +57,9 @@ type Options struct {
 
 	afterWait func()
 	replay    bool
-	// waitDelay overrides cmd.WaitDelay so a test can widen the SIGTERM grace
-	// window; zero keeps the production default (see Start).
+	// waitDelay overrides the grace window between Cancel's SIGTERM and the
+	// REPL's process-group SIGKILL; zero keeps the production default (see
+	// Start). cmd.WaitDelay is set one second later as a PID-only fallback.
 	waitDelay time.Duration
 }
 
@@ -168,6 +170,14 @@ type Run struct {
 	Events <-chan Event
 	Result <-chan Result
 	cancel context.CancelFunc
+	// pid is the engine's process id and, after Setsid, its process-group id.
+	// exited becomes true once cmd.Wait has reaped it; every group signal checks
+	// it first so a finished run is not signaled.
+	pid    int
+	exited atomic.Bool
+
+	mu         sync.Mutex
+	graceTimer *time.Timer
 }
 
 // Cancel asks the cake process to stop (SIGTERM, then SIGKILL after a grace
@@ -176,6 +186,42 @@ func (r *Run) Cancel() {
 	if r.cancel != nil {
 		r.cancel()
 	}
+}
+
+// armGroupKill starts the REPL-owned grace timer. cmd.WaitDelay is a later,
+// PID-only fallback, so this timer is the primary bound for a leader that
+// ignores SIGTERM and for a descendant that still holds the stdout pipe.
+func (r *Run) armGroupKill(delay time.Duration, logf io.Writer) {
+	if r == nil || r.pid <= 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.exited.Load() || r.graceTimer != nil {
+		return
+	}
+	r.graceTimer = time.AfterFunc(delay, func() {
+		if r.exited.Load() {
+			return
+		}
+		if err := killGroup(r.pid); err != nil && !processGone(err) && logf != nil {
+			fmt.Fprintf(logf, "cancel: killing process group %d failed: %v\n", r.pid, err)
+		}
+	})
+}
+
+// markExited records that cmd.Wait has reaped the process and stops the grace
+// timer so a reaped pid is not signaled later.
+func (r *Run) markExited() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.exited.Store(true)
+	if r.graceTimer != nil {
+		r.graceTimer.Stop()
+	}
+	r.mu.Unlock()
 }
 
 // stderrLimit bounds how much stderr is retained for error display; older
@@ -246,7 +292,23 @@ func Start(opts Options) (*Run, error) {
 	// exited-but-unreaped process.
 	var cancelRequested atomic.Bool
 
+	// grace is the window between SIGTERM and the REPL-owned group SIGKILL.
+	// cmd.WaitDelay is deliberately one second later: its kill is PID-only and
+	// can race the leader's reaping, while the group kill is the primary bound.
+	grace := opts.waitDelay
+	if grace <= 0 {
+		grace = 3 * time.Second
+	}
+	cmd.WaitDelay = grace + time.Second
+
+	events := make(chan Event, 64)
+	result := make(chan Result, 1)
+	run := &Run{Events: events, Result: result, cancel: cancel}
+
 	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return errors.New("process has not started")
+		}
 		// Only record a successful signal. If the process has already
 		// exited, os/exec treats os.ErrProcessDone as a natural completion
 		// and Wait synchronizes with this callback before returning.
@@ -256,18 +318,13 @@ func Start(opts Options) (*Run, error) {
 		} else {
 			err = cmd.Process.Signal(syscall.SIGTERM)
 		}
-		if err == nil {
-			cancelRequested.Store(true)
+		if err != nil {
+			return err
 		}
-		return err
-	}
-	// WaitDelay bounds the grace window after SIGTERM before cake is killed.
-	// Production keeps the 3s default; a test that exercises a TERM-handling
-	// child widens it via Options.waitDelay so load cannot starve the handler
-	// past the window and turn a graceful exit into a signal kill.
-	cmd.WaitDelay = opts.waitDelay
-	if cmd.WaitDelay <= 0 {
-		cmd.WaitDelay = 3 * time.Second
+		if cancelRequested.CompareAndSwap(false, true) && runtime.GOOS != "windows" {
+			run.armGroupKill(grace, opts.DebugLog)
+		}
+		return nil
 	}
 
 	stdout, err := cmd.StdoutPipe()
@@ -282,9 +339,7 @@ func Start(opts Options) (*Run, error) {
 		cancel()
 		return nil, fmt.Errorf("starting %s: %w", opts.Bin, err)
 	}
-
-	events := make(chan Event, 64)
-	result := make(chan Result, 1)
+	run.pid = cmd.Process.Pid
 
 	go func() {
 		// Release the context once the run is over; Run.Cancel is the only
@@ -316,6 +371,7 @@ func Start(opts Options) (*Run, error) {
 		}
 
 		waitErr := cmd.Wait()
+		run.markExited()
 		if opts.afterWait != nil {
 			opts.afterWait()
 		}
@@ -345,7 +401,7 @@ func Start(opts Options) (*Run, error) {
 		result <- res
 	}()
 
-	return &Run{Events: events, Result: result, cancel: cancel}, nil
+	return run, nil
 }
 
 func canceledExit(exitErr *exec.ExitError, cancelRequested bool) bool {

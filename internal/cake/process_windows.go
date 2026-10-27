@@ -2,9 +2,37 @@
 
 package cake
 
-import "os/exec"
+import (
+	"errors"
+	"os"
+	"os/exec"
+	"syscall"
+)
 
 // configureProcess is a no-op on Windows, which has no POSIX session or
 // controlling-terminal equivalent. A child can still reach the console through
 // CONIN$ and CONOUT$, so this boundary claims no Windows isolation. See ADR 027.
 func configureProcess(_ *exec.Cmd) {}
+
+// signalGroup terminates the process on Windows. There is no process-group
+// equivalent, so the second argument is ignored.
+func signalGroup(pid int, _ syscall.Signal) error {
+	if pid <= 0 {
+		return nil
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return p.Kill()
+}
+
+// killGroup has no group to target on Windows; it terminates the process.
+func killGroup(pid int) error {
+	return signalGroup(pid, 0)
+}
+
+// processGone reports whether err means the target no longer exists.
+func processGone(err error) bool {
+	return errors.Is(err, os.ErrProcessDone)
+}

@@ -70,9 +70,22 @@ func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, 
 		cmd.Dir = opts.Cwd
 	}
 	configureProcess(cmd)
-	// Bound completion: the exec context kills the helper on cancellation, and
-	// WaitDelay stops Wait from blocking on a process that will not exit or on a
-	// pipe a descendant still holds (sessionsWaitDelay).
+	// Cancellation kills the listing's whole process group outright; a listing
+	// holds no state to flush. Treat an already-gone helper as a successful
+	// cancellation so exec does not replace the natural exit with its default
+	// kill error.
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		err := killGroup(cmd.Process.Pid)
+		if processGone(err) {
+			return nil
+		}
+		return err
+	}
+	// Bound completion: WaitDelay stops Wait from blocking on a process that
+	// will not exit or on a pipe a descendant still holds (sessionsWaitDelay).
 	cmd.WaitDelay = opts.waitDelay
 	if cmd.WaitDelay <= 0 {
 		cmd.WaitDelay = sessionsWaitDelay
