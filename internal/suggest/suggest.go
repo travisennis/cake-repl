@@ -144,9 +144,14 @@ func Suggest(ctx context.Context, opts Options) Result {
 	switch {
 	case err == nil:
 		res.ExitCode = 0
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		// The fixed timeout fired: a hung suggester is a failure, not a user
+		// cancellation, and the caller reports it once.
+		res.ExitCode = exitCode(cmd)
+		res.Err = fmt.Errorf("suggester timed out: %w", ctx.Err())
 	case ctx.Err() != nil:
-		// A canceled or timed-out request is expected: the user typed, started a
-		// new turn, or asked to stop. It is never a user-visible failure.
+		// A canceled request is expected: the user typed, started a new turn, or
+		// asked to stop. It is never a user-visible failure.
 		res.ExitCode = exitCode(cmd)
 		res.Canceled = true
 	case errors.As(err, &exitErr):

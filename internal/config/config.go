@@ -178,10 +178,11 @@ func Load(path string) (*Config, error) {
 
 // LoadProject loads automatically discovered project defaults. A project file is
 // untrusted provenance, so it cannot select an executable, cannot enable the
-// metered, session-mutating compactor, and cannot tune its thresholds. ignored
-// names each key dropped for that reason, in a stable order, and reports key
-// presence even when its value is empty. A project file may still disable
-// compaction. See ADR 006 and ADR 024.
+// metered, session-mutating compactor or the metered suggester, and cannot tune
+// the compactor's thresholds. ignored names each key dropped for that reason, in
+// a stable order, and reports key presence even when its value is empty. A
+// project file may still disable compaction or suggestions. See ADR 006, ADR
+// 024, and ADR 028.
 func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	cfg, meta, err := load(path)
 	if err != nil {

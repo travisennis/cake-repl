@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,6 +123,37 @@ func TestFinishSuggestionAppliesDocument(t *testing.T) {
 	}
 }
 
+func TestSuggestionFromFakeBinary(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "fake-cake-suggest")
+	script := "#!/bin/sh\nprintf '%s\\n' '{\"suggested\":true,\"suggestion\":\"Add a test for the new path.\",\"session_id\":\"" +
+		suggestionSessionID + "\"}'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ready := suggestionReady(t)
+	ready.cfg.Suggestions.Bin = bin
+	m, cmd := ready.maybeStartSuggestion()
+	if cmd == nil {
+		t.Fatal("maybeStartSuggestion returned no command")
+	}
+
+	msg := cmd()
+	done, ok := msg.(suggestionDoneMsg)
+	if !ok {
+		t.Fatalf("command produced %T, want suggestionDoneMsg", msg)
+	}
+	updated, _ := m.Update(done)
+	m = updated.(Model)
+
+	if m.input.Placeholder != "Add a test for the new path." || !m.suggestionActive() {
+		t.Fatalf("ghost = %q (active %v), want the fake suggester's document", m.input.Placeholder, m.suggestionActive())
+	}
+	if got := m.composerHint(); got != "Ctrl+S use suggestion \u00b7 type to dismiss" {
+		t.Fatalf("composerHint = %q", got)
+	}
+}
+
 func TestSuggestionDismissedByTyping(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
 	m = finishSuggestionForTest(t, m, suggest.Result{
@@ -215,12 +247,12 @@ func TestSuggestionDraftWinsOverLateResult(t *testing.T) {
 
 func TestSuggestionFailureWarnsOnce(t *testing.T) {
 	m := suggestionReady(t)
-	for i := 0; i < 2; i++ {
+	for _, res := range []suggest.Result{
+		{ExitCode: 1, Stderr: "cake-suggest: boom"},
+		{ExitCode: -1, Err: errors.New("suggester timed out")},
+	} {
 		m = startSuggestionForTest(t, m)
-		m = finishSuggestionForTest(t, m, suggest.Result{
-			ExitCode: 1,
-			Stderr:   "cake-suggest: boom",
-		})
+		m = finishSuggestionForTest(t, m, res)
 	}
 	warnings := 0
 	for _, it := range m.items {

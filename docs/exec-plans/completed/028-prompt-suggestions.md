@@ -31,16 +31,20 @@ user message containing exactly the suggested text.
 
 - [x] (2026-10-27 17:45Z) Created task 127 and ADR 028.
 - [x] (2026-10-27 17:50Z) Wrote this ExecPlan.
-- [ ] Add the `[suggestions]` config table, validation, merge, and provenance
-  rules.
-- [ ] Add `internal/suggest` with the bounded subprocess and document decoding.
-- [ ] Add the app model state, trigger, result application, dismissal, and
-  cancellation behavior.
-- [ ] Add Go tests for config, subprocess, trigger, application, dismissal, and
-  stale results.
-- [ ] Update user and architecture docs, guardrails, and AGENTS.md.
-- [ ] Run the review and verification ladders, complete task 127, and move this
-  plan to `docs/exec-plans/completed/`.
+- [x] (2026-10-27) Added the `[suggestions]` config table, validation, merge,
+  and provenance rules.
+- [x] (2026-10-27) Added `internal/suggest` with the bounded subprocess and
+  document decoding.
+- [x] (2026-10-27) Added the app model state, trigger, result application,
+  dismissal, and cancellation behavior.
+- [x] (2026-10-27) Added Go tests for config, subprocess, trigger, application,
+  dismissal, and stale results.
+- [x] (2026-10-27) Updated user and architecture docs, guardrails, and
+  AGENTS.md.
+- [x] (2026-10-27) Ran preflight (three passes), applied its timeout, session-pin,
+  fake-binary wiring, and plan-accuracy fixes, and reran `just ci` green.
+- [x] (2026-10-27) Completed task 127, moved this plan to
+  `docs/exec-plans/completed/`, and committed the branch.
 
 ## Surprises & Discoveries
 
@@ -58,6 +62,23 @@ user message containing exactly the suggested text.
   "ghost suggestion" behavior the request describes, and it avoids prefilling
   real editable text that a first keystroke would append to.
   Evidence: `github.com/charmbracelet/bubbles/textarea` `placeholderView`.
+- Observation: a fixed-timeout context was initially classified as a silent
+  cancellation, contradicting ADR 028 and the README. `exec` returns an
+  `*exec.ExitError` for the terminated child, so the timeout must be checked
+  before the generic cancellation branch. Preflight added that branch and a
+  test; timeouts now produce the one visible warning the docs promise.
+  Evidence: `TestSuggestTimeoutIsReportedAsFailure`.
+- Observation: request-identity invalidation already covered every reachable
+  session change, but ADR 028 also promises an explicit pin check. Preflight
+  added the direct comparison as defense-in-depth; it cannot be reached by a
+  normal path because every session change clears the request first.
+  Evidence: `internal/app/suggestion.go` `finishSuggestion` and
+  `TestCanSuggest`/`TestSuggestionWrongSessionIgnored`.
+- Observation: a driven 100x30 headless tmux session against the checked-in fake
+  cake and a fake suggester confirmed the actual screen: the ghost, the footer
+  hint, Ctrl+S acceptance as a `YOU` row, and dismissal on typing. The Go tests
+  never drive the program or a terminal, so this is the rendering evidence.
+  Evidence: capture in the task 127 Acceptance Notes.
 
 ## Decision Log
 
@@ -89,15 +110,45 @@ user message containing exactly the suggested text.
   Rationale: suggestions run after every turn; a missing binary or broken
   document must be discoverable without adding a warning row after every turn.
   Date/Author: 2026-10-27 / Travis Ennis
+- Decision: classify a context-deadline timeout as a failure, not a
+  cancellation.
+  Rationale: the user did not ask to stop; ADR 028 and the README promise one
+  warning for a timeout, while cancellation stays silent.
+  Date/Author: 2026-10-27 / preflight review
+- Decision: compare the current pinned session with the request's session in
+  `finishSuggestion` even though identity invalidation already covers every
+  known session-change path.
+  Rationale: ADR 028 promises the fence explicitly, and defense-in-depth at the
+  application boundary keeps a future session transition from silently
+  bypassing it.
+  Date/Author: 2026-10-27 / preflight review
 
 ## Outcomes & Retrospective
 
-Implementation is in progress. The target outcome is an opt-in, non-blocking
-suggestion that is visibly a suggestion, accepts with `Ctrl+S`, dismisses on
-typing, and cannot cross a session or draft boundary. The main gap at
-completion will be live quality: `cake-suggest` is external, so this plan
-verifies the contract with fake binaries and does not claim that suggested
-prompts are useful until a real suggester is available.
+The feature is implemented and verified. An opt-in `[suggestions]` table now
+starts one bounded, read-only `cake-suggest` request after a clean completed
+turn (or after an automatic compaction settles). A usable result fills the
+empty composer with dim placeholder ghost text; `Ctrl+S` submits it as an
+ordinary prompt, any composer edit dismisses it, and stale, wrong-session, or
+draft-overwriting results are dropped. The request never gates input, is
+canceled by session changes and quit, and a broken suggester warns once per
+process. The default remains off, and the untrusted project-local config layer
+can only disable it.
+
+The implementation matches the request's user-visible intent without prefilled
+editable text: the ghost lives in the input's placeholder, so the first typed
+character cannot append to a suggestion. The one deliberate product gap is
+in-place editing of a suggestion; a user who wants to change one word must
+accept it first or type their own prompt. The larger external gap is live
+quality: `cake-suggest` does not exist yet, so only the contract, subprocess
+behavior, and UI path are proven. Fake binaries and a driven terminal session
+cover every path without a real cake or model call; the plan does not claim
+suggestion quality.
+
+Preflight found one real behavior defect (timeouts were silent) and one
+promised-but-implicit fence (session-pin comparison), plus a missing end-to-end
+fake-binary app test. All were fixed and validated. `just ci` is green, and the
+reviewed branch is ready for handoff.
 
 ## Context and Orientation
 
@@ -166,7 +217,7 @@ Third, extend `internal/app`. Add `Config.Suggestions` and a
 (`suggesting`, `suggestionSeq`, `suggestionReq`, `suggestionCancel`,
 `suggestionText`, `suggestionWarned`). Add `internal/app/suggestion.go` with
 the request/result message, `canSuggest`, `maybeStartSuggestion`,
-`startSuggestion`, `finishSuggestion`, `clearSuggestion`, `cancelSuggestion`,
+`finishSuggestion`, `clearSuggestion`, `cancelSuggestion`,
 `normalizeSuggestion`, and a failure text helper. Use a fixed 60-second
 context timeout. The request command returns a `suggestionDoneMsg`; the Update
 loop handles it without blocking.
@@ -297,7 +348,7 @@ The feature is accepted when all of these are observable:
   `just ci` pass.
 
 Tests that fail before the change and pass after it include
-`TestStartupSuggestionsConfig`, `TestSuggestAppliesDocument`,
+`TestStartupSuggestionsConfig`, `TestFinishSuggestionAppliesDocument`,
 `TestSuggestionDismissedByTyping`, `TestSubmitUsesSuggestionAsPrompt`, and
 `TestSuggestionStaleResultIgnored`.
 

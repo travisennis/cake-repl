@@ -406,8 +406,8 @@ cake-suggest-bin = "cake-suggest"
   was configured with, omitting either when unset. The suggester reads the
   session itself; cake-repl never reads or writes session files. The request is
   read-only, bounded, and model-owned: it never blocks prompt submission and is
-  canceled when the composer is used, a new session starts, the session target
-  changes, or the REPL quits.
+  canceled when the composer is edited, a new session starts, the session
+  target changes, or the REPL quits.
 - The result is one JSON document:
   `{"suggested":true,"suggestion":"…","session_id":"…","reason":""}`. Unknown
   fields are ignored. A `suggested:false` document, a cancellation, or a result

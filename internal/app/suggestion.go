@@ -47,8 +47,8 @@ func (m Model) canSuggest() bool {
 	if !m.cfg.Suggestions.Enabled || m.cfg.NoSession {
 		return false
 	}
-	if m.running || m.compacting || m.hydrating || m.replayPending || m.browserOpen ||
-		m.exitAfter || m.newSessionPending {
+	if m.running || m.compacting || m.hydrating || m.replayPending || m.replayRun != nil ||
+		m.browserOpen || m.exitAfter || m.newSessionPending {
 		return false
 	}
 	if m.suggesting || m.suggestionText != "" || m.input.Value() != "" {
@@ -133,6 +133,13 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 		// The user typed, started a run, opened the browser, or changed the
 		// session while the child was finishing. The result belongs to the state
 		// it started in.
+		return m
+	}
+	if _, pinned := m.session.RunOptions(); pinned != msg.sessionID {
+		// The composer is idle and empty, but the pin is no longer the session
+		// the suggester read. Identity invalidation should already have dropped
+		// this result; never apply across a session boundary regardless.
+		m.logDebug("suggestion: session pin changed")
 		return m
 	}
 

@@ -160,6 +160,22 @@ func TestSuggestCancellationReapsChild(t *testing.T) {
 	}
 }
 
+func TestSuggestTimeoutIsReportedAsFailure(t *testing.T) {
+	bin := writeFakeSuggester(t, `exec sleep 30`)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	res := Suggest(ctx, Options{Bin: bin, SessionID: "s-1", waitDelay: 500 * time.Millisecond})
+	if res.Canceled {
+		t.Fatalf("result = %+v, want a timeout failure rather than a silent cancellation", res)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "timed out") {
+		t.Fatalf("error = %v, want a timeout", res.Err)
+	}
+	if res.Document != nil {
+		t.Fatalf("timed-out run produced a document: %+v", res.Document)
+	}
+}
+
 func TestSuggestBoundsTeardownWhenDescendantHoldsStdout(t *testing.T) {
 	bin := writeFakeSuggester(t, `sleep 5 & printf '{"suggested":false}'; exit 0`)
 	start := time.Now()
