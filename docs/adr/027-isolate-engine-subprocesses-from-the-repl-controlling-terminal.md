@@ -85,16 +85,13 @@ of process attributes, so no equivalent guarantee is available there.
 
 Chosen option: every live, replay, and session-listing child the REPL spawns
 for cake runs in a new session with no controlling terminal, and the lifecycle
-consequences are handled explicitly. The opt-in compactor was left outside the
-original scope as a documented gap; the [amendment](#amendment-2026-10-27)
-below brings it under the same boundary without changing this decision.
+consequences are handled explicitly. The opt-in compactor is a separate,
+documented gap rather than part of this guarantee.
 
-- **Mechanism.** One process-attribute helper applies `SysProcAttr{Setsid: true}`
-  on `!windows` to the live run, replay, session listing, and (since the
-  amendment) the compactor. Windows leaves the attribute unset. One helper, not
-  an ad-hoc assignment at each spawn site, keeps the policy from drifting; it
-  lives in the leaf `internal/childproc` package so `internal/cake` and
-  `internal/compact` share it without depending on each other.
+- **Mechanism.** `internal/cake` applies one process-attribute helper to the live
+  run, replay, and session listing: `SysProcAttr{Setsid: true}` on `!windows`.
+  Windows leaves the attribute unset. One helper, not an ad-hoc assignment at
+  each spawn site, keeps the policy from drifting.
 - **Cancellation.** SIGTERM still goes to the child first, so cake can finish
   writing session records and stop its tools. A REPL-owned timer fires at the
   accepted three-second grace deadline; if the run has not been reaped by then,
@@ -139,9 +136,9 @@ below brings it under the same boundary without changing this decision.
 The explicit non-goals are a named terminal device (`/dev/ttysNNN`), signals from
 another same-user process, a descendant that leaves the engine's process group or
 session itself (`setpgid` or `setsid`), Windows console handles, and any claim of
-a general sandbox. The opt-in `cake-compact` child in `internal/compact` was
-outside this task's original scope and kept its previous topology; task 124
-closed that gap through the amendment below.
+a general sandbox. The opt-in `cake-compact` child in `internal/compact` is
+outside this task's scope and keeps its current topology; it is a known gap
+rather than an implied guarantee, tracked as task 124.
 
 ### Consequences
 
@@ -154,8 +151,8 @@ closed that gap through the amendment below.
 - Good: session identity is observable in tests without a terminal: a detached
   child's session id equals its own pid, while the REPL's does not.
 - Bad: tools that require a terminal now fail rather than prompt.
-- Bad: the compactor was a second, unaddressed terminal path until task 124
-  brought it under the same helper (see the amendment).
+- Bad: the compactor remains a second, unaddressed terminal path until it is
+  brought under the same helper; task 124 tracks that follow-up.
 - Bad: Windows gets no terminal-isolation guarantee; the existing topology is
   documented as the limit.
 - Bad: a terminal hangup or an abrupt REPL death no longer sends the engine the
@@ -171,7 +168,10 @@ closed that gap through the amendment below.
 ## Amendment (2026-10-27)
 
 Task 124 closed the gap this ADR recorded for the opt-in compactor. It applies
-the same decision to one more child; it does not introduce a new boundary.
+the same decision to one more child; it does not introduce a new boundary. The
+decision outcome, non-goals, and consequences above are left as the record of
+what was accepted; where they call the compactor a documented gap, this
+amendment closes it.
 
 - `internal/compact` calls the same helper before starting `cake-compact`, so the
   compactor and its descendants cannot open `/dev/tty` on POSIX. Windows remains
@@ -200,8 +200,8 @@ the same decision to one more child; it does not introduce a new boundary.
 - [ADR 019](019-cancel-and-bound-the-read-only-session-listing.md) defines the
   read-only listing lifecycle that this decision extends with the same process
   topology.
-- Task 124 brought the opt-in compactor under the same process boundary; see the
-  amendment above.
+- Task 124 tracks bringing the opt-in compactor under the same process boundary.
+  See the [amendment](#amendment-2026-10-27) above for its outcome.
 - [ADR 020](020-repaint-the-frame-after-content-changes-to-heal-terminal-side-scrolls.md)
   and [ADR 022](022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md)
   describe other terminal-boundary behavior that this decision does not change.

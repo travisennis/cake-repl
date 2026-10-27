@@ -87,7 +87,8 @@ func watchSuspend(prog terminalProgram, inline bool, runs engineRuns, logf func(
 				// the stop is reliable and fg resumes it with SIGCONT, which
 				// this call returns on. Signalling the whole group stops the
 				// REPL and any non-detached child together. The detached engine
-				// was already paused by stopRuns; this signal cannot reach it.
+				// was already paused by stopRuns; this signal cannot reach it or
+				// an in-flight compactor, which is detached and untracked too.
 				stop: func() {
 					err := syscall.Kill(0, syscall.SIGSTOP)
 					if err != nil {
