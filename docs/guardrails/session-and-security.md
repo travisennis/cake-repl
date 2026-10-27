@@ -168,34 +168,54 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
   and
   [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
+- **Engine terminal boundary (POSIX).** Every live prompt, replay, and session
+  listing starts in its own session with no controlling terminal
+  (`SysProcAttr{Setsid: true}` in `internal/cake/process_unix.go`), so a tool
+  that opens `/dev/tty` gets `ENXIO` instead of prompting over or changing the
+  REPL. One helper serves all three spawn sites; `Replay` inherits it through
+  `Start`. Windows is a no-op and claims no equivalent boundary, and the opt-in
+  compactor is outside it (task 124). Start failure is fail-closed: do not add a
+  pty fallback or an opt-out. See
+  [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - **Process lifecycle.** One cake process at a time, including while replay
-  hydration is active. Cancel = SIGTERM then SIGKILL after `WaitDelay` (kill
-  outright on Windows). stderr retained as a bounded tail for error display. The
-  read-only session listing is model-owned too: it is canceled when the browser
-  closes, when it is replaced, on quit, and by `main`'s teardown for an exit the
-  Update loop never observed, and `ListSessions` bounds its teardown
-  with `WaitDelay` (a hard kill — the listing has no state to flush) so a stuck
+  hydration is active. Cancel sends SIGTERM to the leader; a REPL-owned timer
+  sends SIGKILL to the detached process group at the grace deadline if
+  `cmd.Wait` has not reaped it, and `cmd.WaitDelay` is one second later as a
+  PID-only fallback (kill outright on Windows). stderr is retained as a bounded
+  tail for error display. The read-only session listing is model-owned too: it
+  is canceled when the browser closes, when it is replaced, on quit, and by
+  `main`'s teardown for an exit the Update loop never observed. `ListSessions`
+  cancels by killing the listing's group outright and bounds teardown with
+  `WaitDelay` (a hard kill — the listing has no state to flush), so a stuck
   helper, or a descendant holding the inherited stdout pipe, cannot hang the REPL.
   The external compactor follows the same model-owned lifecycle as a cake run:
-  SIGTERM then `WaitDelay`, a 1 MiB stdout cap, and a bounded stderr tail. See
-  [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md) and
-  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md).
+  SIGTERM then `WaitDelay`, a 1 MiB stdout cap, and a bounded stderr tail; it is
+  not covered by the terminal boundary. See
+  [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md),
+  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
+  and [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - **Terminal ownership across a suspend (security boundary).** The REPL owns raw
   input, the cursor, mouse reporting, and (by default) the alternate screen, so
   it must never stop or exit without giving them back. An external, catchable
   SIGTSTP is handled in `cmd/cake-repl/suspend.go`: the terminal is released
-  (`ReleaseTerminal`) before the process stops, the whole process group is
-  stopped with SIGSTOP (SIGTSTP cannot be re-raised once `signal.Notify` has
-  taken it; a group stop pauses the cake child with the REPL instead of leaving
-  it running unwatched), and after SIGCONT the modes Bubble Tea's
-  `RestoreTerminal` leaves off — mouse reporting — are written while the
-  renderer is still stopped, then the terminal is re-acquired. A release that
-  fails abandons the cycle and leaves the REPL running rather than stopping with
-  raw mode still enabled. Inline mode parks the suspension on the alternate
-  screen so the shell's own output cannot land in the live region. Uncatchable
-  SIGSTOP and a REPL killed while stopped are best-effort and documented, never
-  implied. See
-  [ADR 018](../adr/018-recover-terminal-ownership-around-an-external-suspend.md).
+  (`ReleaseTerminal`) before anything stops, each tracked live or replay engine
+  group is stopped with SIGSTOP (`Registry.StopAll`), and then the REPL's own
+  group is stopped (SIGTSTP cannot be re-raised once `signal.Notify` has taken
+  it; only `Registry.StopAll` reaches the detached engine, and the self-stop
+  then stops the REPL's own group). A run that registers while the registry is
+  suspended is paused by `Registry.Add`, closing the window before the self-stop.
+  After SIGCONT the engine groups are continued (`Registry.ContinueAll`)
+  before the modes Bubble Tea's `RestoreTerminal` leaves off — mouse reporting —
+  are written while the renderer is still stopped, then the terminal is
+  re-acquired. A release that fails abandons the cycle before either stop and
+  leaves the REPL running rather than stopping with raw mode still enabled. The
+  short-lived read-only listing is not tracked; it cannot touch the terminal but
+  can continue through a suspend. Inline mode parks the suspension on the
+  alternate screen so the shell's own output cannot land in the live region.
+  Uncatchable SIGSTOP and a REPL killed while stopped are best-effort and
+  documented, never implied. See
+  [ADR 018](../adr/018-recover-terminal-ownership-around-an-external-suspend.md)
+  and [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - **Replay isolation.** Replay is read-only and must not alter the session run
   mode or create a new session. Its late events are discarded after `Ctrl+N`,
   and a canceled replay is drained before another cake process starts.
@@ -210,8 +230,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `/session copy`, and the exit hint name the new target. Also covers
   `cmd/cake-repl` for the suspend cycle's step order and its safe failure on an
   unreleasable terminal.
-- `just test-race` for any `runner.go` change, and for the session-listing
-  lifecycle (cancellation, request identity, `WaitDelay`).
+- `just test-race` for any `runner.go`, process-helper, registry, or
+  session-listing change. Cover `Getsid` session identity for `Start`, `Replay`,
+  and `ListSessions`; the descendant group kill including a stdout-only pipe;
+  registry lifetime; and the suspend cycle's stop/continue order.
 - For between-turn compaction, cover the config provenance and merge rules
   (project-local cannot enable, select the executable, or tune percent or
   absolute values), the absolute trigger line and its 75% window cap, the
@@ -280,11 +302,16 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   arrived late — classify from the `cmd.Cancel` flag plus signal-terminated
   process status on POSIX, not the context. See `runner.go` for how the atomic
   flag preserves ordering.
-- **Zombie / runaway processes.** Removing the SIGKILL fallback or `WaitDelay`,
-  or allowing more than one concurrent run. For the read-only session listing,
-  the same applies to its `WaitDelay` bound and to the model-owned cancellation:
-  dropping either lets a slow listing keep running after the browser is closed or
-  the REPL exits.
+- **Zombie / runaway processes.** Removing the group-kill timer or the later
+  `WaitDelay` fallback, or allowing more than one concurrent run. For the
+  read-only session listing, the same applies to its group cancellation,
+  `WaitDelay` bound, and model-owned cancellation: dropping any lets a slow
+  listing keep running after the browser is closed or the REPL exits.
+- **Engine terminal corruption.** Dropping the `Setsid` helper, applying it
+  after `Start`, or adding a pty fallback lets a child reopen `/dev/tty` and
+  change modes, read input, or write over the frame. Do not treat a detached
+  child as a general sandbox; descendants can still call `setpgid` or `setsid`
+  themselves, and Windows console handles remain reachable.
 - **Stopping or exiting with the terminal still owned.** Stopping before
   releasing raw mode, the cursor, mouse reporting, or the alternate screen;
   assuming `RestoreTerminal` restores every mode (it restores bracketed paste

@@ -108,11 +108,13 @@ documented gap rather than part of this guarantee.
   explicit engine coordination: release the terminal, stop each tracked live or
   replay run's process group with SIGSTOP, stop the REPL's own group (unchanged),
   and after SIGCONT continue the engine groups before re-acquiring the terminal
-  and repainting. The read-only session listing is not tracked: it is bounded
-  only after it exits or is canceled, so a stuck listing can continue through a
-  suspend; it cannot touch the terminal, and closing or replacing the browser or
-  quitting still cancels it. A REPL killed while stopped can still leave an
-  engine stopped; that remains the documented ADR 018 limit.
+  and repainting. A run that registers between the stop snapshot and the REPL's
+  own stop is itself paused by the registry, so that window cannot leave engine
+  work running unwatched. The read-only session listing is not tracked: it is
+  bounded only after it exits or is canceled, so a stuck listing can continue
+  through a suspend; it cannot touch the terminal, and closing or replacing the
+  browser or quitting still cancels it. A REPL killed while stopped can still
+  leave an engine stopped; that remains the documented ADR 018 limit.
 - **Start failure is fail-closed.** If the child cannot be started with the
   attribute, starting the run fails and the error is shown. There is no silent
   unisolated retry.
@@ -176,7 +178,7 @@ rather than an implied guarantee, tracked as task 124.
   and [ADR 022](022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md)
   describe other terminal-boundary behavior that this decision does not change.
 - Task 093 records the reproduction and the acceptance evidence; the
-  [ExecPlan](../exec-plans/active/027-isolate-engine-subprocesses.md) carries the
+  [ExecPlan](../exec-plans/completed/027-isolate-engine-subprocesses.md) carries the
   implementation steps.
 - The relevant guardrail is
   [sessions, security, and subprocess lifecycle](../guardrails/session-and-security.md);

@@ -45,15 +45,18 @@ Update this section at every stopping point.
 - [x] (2026-10-27) Apply the branch review: align the group-kill timing, state
   the pipe-ownership policy, guard group signals, record the hangup and listing
   limits, correct the terminal evidence, and file the compactor follow-up.
-- [ ] Milestone 1: apply the process attribute to live, replay, and listing
-  spawns; add session-identity tests.
-- [ ] Milestone 2: make forced cancellation kill the process group and cover a
-  descendant that ignores SIGTERM.
-- [ ] Milestone 3: stop and continue live runs around an external suspend; cover
-  the cycle order and drive the behavior in a pane.
-- [ ] Milestone 4: capture terminal evidence in both render modes, verify on
-  Linux, update the durable docs, run `just ci` and preflight, and complete
-  task 093.
+- [x] (2026-10-27) Milestone 1: add `configureProcess` with `Setsid` to the
+  live, replay, and listing spawns; add Getsid session-identity tests.
+- [x] (2026-10-27) Milestone 2: add the REPL-owned grace timer, the process-group
+  SIGKILL, and tests for a descendant holding both pipes and stdout only.
+- [x] (2026-10-27) Milestone 3: add the registry, app/main wiring, and suspend
+  stop/continue order; cover registry lifetime and the cycle order.
+- [x] (2026-10-27) Run `just test-race` and `just ci`; capture macOS full-screen,
+  inline, pre-fix, and suspend evidence; verify Windows/Linux cross-builds.
+- [x] (2026-10-27) Milestone 4: update README, ARCHITECTURE, and the security
+  guardrail; run preflight and apply its four minor findings; move this plan to
+  the completed bucket.
+- [ ] Fill task 093's Acceptance Notes and complete the task.
 
 ## Surprises & Discoveries
 
@@ -67,9 +70,10 @@ Update this section at every stopping point.
   started `sleep 30` in the background and ignored SIGTERM left the descendant
   alive after a leader-only SIGTERM; a SIGTERM to the group reaped both.
   Evidence: the second probe transcript under `Artifacts and Notes`.
-- Observation: `syscall.Getsid` is available on macOS and Linux, so a test can
-  prove detachment without a terminal: a detached child's session id equals its
-  own pid. This makes the core mechanism CI-verifiable even though CI has no
+- Observation: macOS exposes `syscall.Getsid`, but Go's Linux `syscall`
+  package does not. The tests use a small `getSID` helper: `syscall.Getsid` on
+  macOS/BSD and `SYS_GETSID` on Linux. A detached child's session id equals its
+  own pid, so the core mechanism is CI-verifiable even though CI has no
   controlling terminal.
 - Observation: `exec.Cmd.WaitDelay` kills only the child pid. Racing a REPL-owned
   group-kill timer against it makes cleanup unreliable because the leader can be
@@ -93,6 +97,17 @@ Update this section at every stopping point.
 - Observation: the opt-in compactor (`internal/compact`) is a second subprocess
   path with the same exposure. It is deliberately out of this task's scope and
   is recorded as a known gap in ADR 027.
+- Observation (2026-10-27 implementation): removing the `configureProcess` call
+  from `Start` makes `TestStartDetachesSession` fail with `sid != pid`, so the
+  test observes the attribute rather than merely the process starting.
+- Observation (2026-10-27 drive-tui): the post-fix adverse wrapper records
+  `stty status=1` and `/dev/tty: Device not configured`, while the pane stays at
+  `-icanon -isig -echo`; the pre-fix master binary leaves it at
+  `icanon isig echo` and echoes `^[[A`. The suspend probe kept the timestamp log
+  at one line through the stop and grew it from one to five lines after `fg`.
+- Observation: Linux was cross-compiled through the GoReleaser snapshot and the
+  package tests compile for Linux, but no Linux host was available locally; CI
+  is Ubuntu and must be the execution check there.
 
 ## Decision Log
 
@@ -153,16 +168,66 @@ Update this section at every stopping point.
   Rationale: ADR 027 leaves the opt-in compactor outside this boundary; a
   separate task keeps the gap visible without changing this decision.
   Date/Author: 2026-10-27, Travis Ennis.
+- Decision: have `Run.Stop` and `Run.Continue` return the signal error and have
+  `Registry.StopAll`/`ContinueAll` log non-`ESRCH` failures; keep the method
+  names public and the registry's messages tagged `suspend:`.
+  Rationale: the registry owns the logging sink, while a swallowed error would
+  hide a failed engine pause; the names remain the interface shown above.
+  Date/Author: 2026-10-27, Travis Ennis (implementation clarification).
+- Decision: close the stop-snapshot/self-stop registration window with a
+  `suspended` flag and a cycle mutex: `StopAll` marks the registry suspended,
+  `Add` stops a run registered while suspended, and `ContinueAll` clears it.
+  Rationale: a queued start can register after the snapshot but before the
+  self-stop; the small state machine keeps that run from working unwatched
+  without holding the registry mutex across the group signal.
+  Date/Author: 2026-10-27, Travis Ennis (preflight finding).
 
 ## Outcomes & Retrospective
 
-Planning is complete. No behavior has changed yet, so there is no outcome to
-compare. At completion this section must state which platforms were exercised,
-which terminal captures were retained, whether any tool that needs `/dev/tty`
-surfaced in practice, and that the compactor follow-up (task 124) is still
-tracked. The expected result is that the pre-fix `stty` reproduction now fails
-harmlessly and that cancellation and suspend behavior remain indistinguishable
-to a user.
+Implemented. Every POSIX live, replay, and session-listing child now starts in
+its own session with no controlling terminal. The adverse wrapper that opens
+`/dev/tty` fails with `stty status=1` and `Device not configured`; the pane
+stays at `-icanon -isig -echo` in full-screen and inline modes, Up recalls
+history instead of echoing `^[[A`, and no mouse report appears as text. The
+pre-fix master binary leaves the same pane at `icanon isig echo` and echoes
+`^[[A`, so the comparison is retained in the task notes.
+
+Cancellation still gives cake a graceful window. A fake cake that ignores
+SIGTERM and leaves a descendant holding both pipes or only stdout is gone with
+the group at the configured grace deadline, `Result.Canceled` is true, and the
+stdout-only variant proves the group SIGKILL rather than the later `WaitDelay`
+did the work. A normal graceful exit stops the timer and leaves an intentionally
+backgrounded process that closed its pipes alone.
+
+Suspend pauses the detached engine. During the stopped interval the timestamp
+log did not grow (one line before, one line after one second), the shell owned
+the pane, and mouse reporting was off; after `fg` the log grew to five lines,
+mouse reporting returned, and the composer was raw and usable.
+
+Platforms: macOS arm64 with Go 1.27.3 was exercised end to end, including the
+full-screen, inline, pre-fix, and suspend captures. Windows cross-built through
+the GoReleaser snapshot but was not run, so no Windows isolation is claimed.
+Linux cross-built and its tests compile, but no Linux host was available
+locally; the Ubuntu CI job is the execution check there. No real cake was used.
+The `stty` wrapper is the tool-needing-terminal case that surfaced in practice;
+it failed harmlessly as designed. The opt-in compactor remains outside this
+boundary and task 124 still tracks it. No terminal captures were committed:
+they encode session ids and scratch paths and live only in the temporary
+directories named in the task notes.
+
+The registry also pauses a run that registers between the stop snapshot and the
+REPL's self-stop, so that window cannot leave engine work running unwatched.
+
+Preflight found no blockers or majors. It caught a stale suspend comment, a
+guardrail sentence that still implied the REPL's group stop reaches the detached
+engine, the registration window above, and the ADR's soon-to-move ExecPlan link;
+all four are fixed.
+
+The main lesson is that `cmd.WaitDelay` is not the bound for a manual stdout
+reader: the REPL-owned group timer is what makes a stdout-only descendant
+finite. The second is that process lifetime, not model state, must own registry
+membership; registration after `Start` and removal inside the wait goroutine
+kept every suspend signal on a live group.
 
 ## Context and Orientation
 
@@ -240,16 +305,17 @@ script through a temporary executable. Build the script with the existing
 `writeFakeCake` helper (`internal/cake/runner_test.go`), and reuse `waitForFile`
 and `killPIDFile` (`internal/cake/sessions_test.go`). The script writes `$$` to a
 file and then stays alive until the test has read it, so the pid cannot exit
-before `Getsid`. For `Start` and `Replay`, call `syscall.Getsid(pid)` after
-`waitForFile`, require `sid == pid`, then cancel the run and drain `Result`.
-For `ListSessions`, call it in a
-goroutine and follow the pattern in
-`TestListSessionsCancellationStopsHelper`: wait for the pid file, call `Getsid`,
-then cancel the context (or let the fake exit) and collect the result. Put the
-test file behind a `//go:build !windows` tag, because Windows provides neither
-`Getsid` nor a session concept; do not rely on a runtime skip for code that would
-not compile. Do not require a real cake. This milestone is complete when
-`go test ./internal/cake` passes and the new tests fail if `configureProcess` is
+before `Getsid`. For `Start` and `Replay`, call the test's `getSID` helper after
+`waitForFile`, require `sid == pid`, then cancel the run and drain `Result`. For
+`ListSessions`, call it in a goroutine and follow the pattern in
+`TestListSessionsCancellationStopsHelper`: wait for the pid file, call the
+helper, then cancel the context (or let the fake exit) and collect the result.
+Put the common test file behind a `//go:build !windows` tag and add small
+platform `getSID` helpers: `syscall.Getsid` on macOS/BSD and `SYS_GETSID` on
+Linux. Windows has neither a session concept nor the syscall, so do not rely on
+a runtime skip for code that would not compile. Do not require a real cake.
+This milestone is complete when `go test ./internal/cake` passes and the new
+tests fail if `configureProcess` is
 removed from the corresponding spawn site. Also update the `Options.waitDelay`
 comment in `internal/cake/runner.go`: it now sets the REPL's grace timer, and
 `cmd.WaitDelay` is one second longer.
@@ -298,6 +364,9 @@ while making a syscall, and it must tolerate a run that exits between the
 snapshot and the signal. That tolerance covers `ESRCH`; a run reaped between the
 snapshot and the signal can have its pid reused, so the narrow race is documented
 as an accepted limit rather than closed with platform-specific pid handles.
+`StopAll` marks the registry suspended before its snapshot, and `Add` uses a
+cycle mutex to stop a run that registers before the self-stop; `ContinueAll`
+clears the state. That closes the snapshot-to-self-stop window.
 `Start` registers a run after a successful start when `Options.Registry` is
 non-nil and removes it immediately after `cmd.Wait` returns, so registration
 follows process lifetime rather than model state. `ReplayOptions` gains the same
@@ -475,10 +544,10 @@ status/composer layout is unchanged. The same result holds in full-screen and
 inline modes with `-no-color`. The pre-fix binary still shows the corruption;
 retain that comparison in the task notes.
 
-Session identity must hold for all three spawns. `syscall.Getsid(pid)` returns
-the child's own pid for a live run, a replay, and a listing, and the tests fail
-if any spawn site loses the attribute. On Windows those tests are skipped and the
-plan claims no isolation.
+Session identity must hold for all three spawns. The test's `getSID` helper
+returns the child's own pid for a live run, a replay, and a listing, and the
+tests fail if any spawn site loses the attribute. On Windows those tests are
+skipped and the plan claims no isolation.
 
 Cancellation must remain graceful first. A fake cake that handles SIGTERM exits
 normally, `Canceled` is true, and no descendant is killed with the group because
@@ -541,6 +610,24 @@ wrapper's `stty` fails with `Device not configured`; because a successful run
 does not render captured stderr, record that failure in the wrapper's scratch
 log. The pane stays raw.
 
+Implementation evidence (2026-10-27, macOS arm64, Go 1.27.3):
+
+    post-fix adverse wrapper, full-screen and inline:
+      stty status=1 output=.../adverse-cake: line 2: /dev/tty: Device not configured
+      lflags: -icanon -isig -iexten -echo echoe -echok echoke -echonl echoctl
+      no ^[[A, no mouse-report text, composer accepts history and submits
+
+    pre-fix master binary (62cbead), same wrapper:
+      stty status=0 output=
+      lflags: icanon isig iexten echo echoe -echok echoke -echonl echoctl
+      ^[[A echoed into the status line
+
+    suspend pause proof (logging wrapper, FAKE_CAKE_DELAY=1):
+      pane command while stopped: zsh
+      mouse stopped: 0  mouse resumed: 1
+      event log lines: before=1 stopped1=1 stopped2=1 after=5
+      resumed lflags: -icanon -isig -iexten -echo ...
+
 ## Interfaces and Dependencies
 
 The following signatures are the intended shape; keep names stable so the tests
@@ -549,10 +636,14 @@ and the suspend wiring read the same way.
     // internal/cake/process_unix.go (!windows)
     func configureProcess(cmd *exec.Cmd)
     func signalGroup(pgid int, sig syscall.Signal) error // no-op when pgid <= 0
+    func killGroup(pid int) error
+    func processGone(err error) bool
 
     // internal/cake/process_windows.go (windows)
     func configureProcess(cmd *exec.Cmd)
     func signalGroup(pid int, sig syscall.Signal) error // kill the pid; no group
+    func killGroup(pid int) error
+    func processGone(err error) bool
 
     // internal/cake/runner.go
     type Options struct {
@@ -565,9 +656,10 @@ and the suspend wiring read the same way.
         exited atomic.Bool
     }
     // Stop and Continue are no-ops on Windows and when the run is reaped or pid
-    // is not positive; on POSIX they signal the run's process group.
-    func (r *Run) Stop()
-    func (r *Run) Continue()
+    // is not positive; on POSIX they signal the run's process group and return
+    // the signal error so Registry can log a non-ESRCH failure.
+    func (r *Run) Stop() error
+    func (r *Run) Continue() error
 
     // internal/cake/registry.go
     type Registry struct {
@@ -617,3 +709,11 @@ field, or a new user-visible command for this work.
   Ctrl+Z wording, compactor scope, and `setpgid` non-goal were corrected;
   milestone 1 now names the existing test helpers and the goroutine needed for
   `ListSessions`; and the compactor follow-up is task 124.
+- 2026-10-27: Implemented the plan on `fix/093-isolate-engine-subprocesses`.
+  `Run.Stop`/`Continue` return the signal error so the registry can log a
+  failed pause; `killGroup` and `processGone` are the platform helpers used by
+  the timer, listing cancellation, and registry. Linux needs a `SYS_GETSID` test
+  helper because its `syscall` package does not export `Getsid`; the test
+  binaries compile for Linux amd64/arm64 and Windows. The macOS terminal
+  evidence and the suspend log counts are recorded above; Linux execution
+  remains a CI check. The plan has moved to the completed bucket.

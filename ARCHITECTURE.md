@@ -57,7 +57,10 @@ internal/config/         TOML config-file loading for REPL startup defaults.
 internal/cake/           cake-as-engine: subprocess lifecycle + stream-json decoding.
   events.go              Typed live and replay event structs and the Event interface (the wire schema).
   parser.go              ParseLine: one NDJSON line -> typed Event (forward-compatible).
-  runner.go              Start/Replay: subprocess lifecycle, cancellation, stderr tail, ParseError events.
+  runner.go              Start/Replay: subprocess lifecycle, group cancellation, stderr tail, ParseError events.
+  process_unix.go        Setsid boundary, process-group signals, POSIX suspend hooks.
+  process_windows.go     No-op boundary and Windows process fallbacks.
+  registry.go            Live/replay run registry for suspend coordination.
 internal/compact/        External compactor: one documented subprocess and its result document.
   compact.go             Args, Compact: bounded subprocess lifecycle + document decoding.
 internal/app/            Bubble Tea state machine (the REPL itself).
@@ -178,18 +181,30 @@ way.
   [`docs/adr/024-ignore-project-local-compaction-tuning.md`](docs/adr/024-ignore-project-local-compaction-tuning.md),
   and
   [`docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md`](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
-- **Graceful cancellation.** Cancel sends SIGTERM then SIGKILL after a grace
-  period (kill outright on Windows). Cancellation is classified from whether
-  `cmd.Cancel` successfully signaled the process and, on POSIX, whether the
-  process was signal-terminated—not from `ctx.Err()`—so a late Ctrl+C cannot
-  relabel a finished run.
+- **Engine processes are detached from the REPL terminal.** On POSIX, every
+  live prompt, replay, and session listing starts in its own session with
+  `SysProcAttr{Setsid: true}` (one helper in `internal/cake/process_unix.go`),
+  so the child has no controlling terminal and `/dev/tty` fails with `ENXIO`.
+  Windows is a no-op and claims no equivalent boundary. Start failure is
+  fail-closed, and tools that need a terminal now fail rather than prompt over
+  the REPL; the opt-in compactor is not covered. See
+  [`ADR 027`](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
+- **Graceful cancellation.** Cancel sends SIGTERM to the child leader. A
+  REPL-owned timer fires at the grace deadline and sends SIGKILL to the detached
+  process group unless `cmd.Wait` has already reaped it; `cmd.WaitDelay` is one
+  second later as a redundant PID-only fallback. Cancellation is classified
+  from whether `cmd.Cancel` successfully signaled the process and, on POSIX,
+  whether the process was signal-terminated—not from `ctx.Err()`—so a late
+  Ctrl+C cannot relabel a finished run.
 - **The terminal is handed back before the process stops.** A catchable external
-  SIGTSTP is handled in `cmd/cake-repl`: the terminal is released before the
-  process stops, the process group (REPL and its cake child) is stopped with
-  SIGSTOP, and after SIGCONT the modes Bubble Tea's `RestoreTerminal` leaves off
-  are written before it re-acquires the terminal and repaints. Nothing in the
-  model changes, so the conversation survives, and the engine is paused rather
-  than killed. Inline mode parks the suspension on the alternate screen. See
+  SIGTSTP is handled in `cmd/cake-repl`: the terminal is released, each tracked
+  live or replay engine group is stopped with SIGSTOP, and the REPL's own group
+  is stopped; a run that registers during the stop is paused as it registers.
+  After SIGCONT the engine groups are continued before the modes
+  Bubble Tea's `RestoreTerminal` leaves off are written and the terminal is
+  re-acquired. The read-only listing is not tracked. Nothing in the model
+  changes, so the conversation survives, and the engine is paused rather than
+  killed. Inline mode parks the suspension on the alternate screen. See
   [`docs/adr/018-recover-terminal-ownership-around-an-external-suspend.md`](docs/adr/018-recover-terminal-ownership-around-an-external-suspend.md)
   and [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 
