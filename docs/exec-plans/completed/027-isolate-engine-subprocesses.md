@@ -1,10 +1,10 @@
 # Isolate cake subprocesses from the REPL terminal
 
-This ExecPlan is a living document. The sections `Progress`, `Surprises &
-Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to
-date as work proceeds. It must be maintained in accordance with
-`docs/workflow/exec-plans.md`. It is active and lives in
-`docs/exec-plans/active/`. The accepted decision is recorded in
+This ExecPlan records a completed cross-cutting change. Its `Progress`,
+`Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective`
+sections were kept up to date as work proceeded, per
+`docs/workflow/exec-plans.md`. It is complete and lives in
+`docs/exec-plans/completed/`. The accepted decision is recorded in
 `docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md`.
 
 ## Purpose / Big Picture
@@ -35,8 +35,7 @@ with `-no-color`.
 
 ## Progress
 
-Design is accepted and this plan is written; no implementation code exists yet.
-Update this section at every stopping point.
+Implementation and verification are complete; the progress record follows.
 
 - [x] (2026-10-26) Reproduce the `/dev/tty` path and record it in task 093.
 - [x] (2026-10-26) Probe `Setsid` versus `Setpgid` on macOS in a real pty; probe
@@ -253,9 +252,9 @@ The relevant code is:
   main passes engine settings into the model.
 - `cmd/cake-repl/main.go`: builds `app.Config`, creates the Bubble Tea program,
   and installs `watchSuspend` when stdout is a terminal.
-- `cmd/cake-repl/suspend.go`: `suspendCycle` (release → park → stop → unpark →
-  modes → restore) and `watchSuspend`. `suspend_windows.go` is the no-op
-  counterpart.
+- `cmd/cake-repl/suspend.go`: `suspendCycle` (release → park → stopRuns →
+  stop → continueRuns → unpark → modes → restore) and `watchSuspend`.
+  `suspend_windows.go` is the no-op counterpart.
 - `cmd/cake-repl/main_test.go` and `cmd/cake-repl/suspend_test.go`: the existing
   wiring and ordering tests.
 - `scripts/fake-cake.sh`: the checked-in fake engine used by tests and by the
@@ -652,8 +651,10 @@ and the suspend wiring read the same way.
     }
     type Run struct {
         // existing fields ...
-        pid    int
-        exited atomic.Bool
+        pid        int
+        exited     atomic.Bool
+        mu         sync.Mutex
+        graceTimer *time.Timer
     }
     // Stop and Continue are no-ops on Windows and when the run is reaped or pid
     // is not positive; on POSIX they signal the run's process group and return
@@ -663,9 +664,11 @@ and the suspend wiring read the same way.
 
     // internal/cake/registry.go
     type Registry struct {
-        mu   sync.Mutex
-        runs map[*Run]struct{}
-        logf func(string, ...any)
+        mu        sync.Mutex
+        runs      map[*Run]struct{}
+        logf      func(string, ...any)
+        cycleMu   sync.Mutex
+        suspended bool
     }
     func NewRegistry(logf func(string, ...any)) *Registry // nil logf discards
     func (r *Registry) Add(run *Run)
