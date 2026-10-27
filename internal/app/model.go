@@ -73,8 +73,9 @@ type Config struct {
 // external compactor executable, MaxContextTokens is the quality ceiling for
 // absolute mode, TriggerTokens is the absolute compaction line, and
 // ThresholdPercent/KeepTokens are the percent fallback and retained-tail target.
-// The ceiling is policy only and is never passed to the compactor. See ADR 023
-// and ADR 025.
+// The trigger and ceiling are between-turn targets, not in-invocation caps; the
+// ceiling is policy only and is never passed to the compactor. See ADR 023 and
+// ADR 025.
 type CompactionConfig struct {
 	Enabled          bool
 	Bin              string

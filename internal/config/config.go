@@ -41,15 +41,19 @@ type Config struct {
 //
 // MaxContextTokens and TriggerTokens select absolute mode when either is
 // non-zero; both must then be positive and the trigger must be below the
-// ceiling. When both are zero, the legacy ThresholdPercent trigger applies.
+// ceiling. Both are between-turn targets: the REPL checks them only after a
+// completed turn, so a single invocation can grow past them before the next
+// prompt. When both are zero, the legacy ThresholdPercent trigger applies.
 type Compaction struct {
 	Enabled        bool   `toml:"enabled"`
 	EnabledSet     bool   `toml:"-"`
 	CakeCompactBin string `toml:"cake-compact-bin"`
 	// MaxContextTokens is the quality ceiling, not a compactor threshold. It is
-	// never passed to the compactor.
+	// a between-turn target, never a live cap, and is never passed to the
+	// compactor.
 	MaxContextTokens int `toml:"max-context-tokens"`
-	// TriggerTokens is the absolute context line at which the REPL compacts.
+	// TriggerTokens is the absolute between-turn context line at which the REPL
+	// compacts. It is checked only after a completed turn.
 	TriggerTokens int `toml:"trigger-tokens"`
 
 	ThresholdPercent int `toml:"threshold-percent"`
@@ -61,7 +65,8 @@ const (
 	// the config does not name one.
 	DefaultCakeCompactBin = "cake-compact"
 	// DefaultCompactionThresholdPercent is the fallback trigger percentage when
-	// the absolute trigger fields are unset. The REPL fires five points below it.
+	// the absolute trigger fields are unset. The REPL fires five points below it
+	// after a completed turn.
 	DefaultCompactionThresholdPercent = 80
 	// DefaultCompactionKeepTokens is the retained-tail target; zero would let
 	// the compactor apply its own window-relative default.

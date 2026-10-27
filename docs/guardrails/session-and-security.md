@@ -63,7 +63,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Between-turn compaction is an opt-in external operation.** The `[compaction]`
   table (disabled by default) enables `cake-compact compact -json -threshold`
   after a successfully completed turn whose newest complete `turn_usage` figure
-  reaches the configured trigger. In absolute mode (`max-context-tokens` and
+  reaches the configured trigger. The trigger and ceiling are between-turn
+  targets, not in-invocation caps: a long tool loop can pass both before the
+  REPL regains control, and the next completed turn is the first opportunity to
+  compact. In absolute mode (`max-context-tokens` and
   `trigger-tokens` both set) the REPL fires at the trigger line, capped at 75%
   of the model window when the window is below the ceiling; the ceiling itself
   is policy and is never passed. Without the absolute fields the legacy

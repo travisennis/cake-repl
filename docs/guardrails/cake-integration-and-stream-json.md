@@ -74,7 +74,9 @@ consumes cake events. This is the project's core external contract.
   `-keep-tokens`, `-cake-bin` when cake-repl has one, `-summarizer-model` and
   `-summarizer-profile` from the model and profile the REPL was configured with
   (each omitted when unset), and `-- <session-id>`. The absolute quality ceiling
-  is never passed as the trigger. Never pass `-fork` or `-force`: the
+  is never passed as the trigger. The trigger is a between-turn target, not a
+  live cap: the REPL evaluates it after a completed turn, so one invocation can
+  grow past it before the compactor runs. Never pass `-fork` or `-force`: the
   integration is in place and threshold-gated only. The one JSON document is
   decoded field by field (`Document`) with unknown fields ignored; `in_place` is
   read rather than assumed. Exit 0 with a document is success or a no-op

@@ -31,7 +31,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`,
   `tool-color`, and the opt-in `[compaction]` policy table (`enabled`,
   `cake-compact-bin`, `max-context-tokens`, `trigger-tokens`,
-  `threshold-percent`, `keep-tokens`). Merge order is
+  `threshold-percent`, `keep-tokens`). The absolute trigger values are
+  between-turn targets, not live caps: the REPL checks them only after a
+  completed turn, from the newest complete `turn_usage`, so a long invocation
+  can pass both before the next prompt. Merge order is
   hardcoded defaults < XDG config < project-local config < CLI flags, except
   `cake-bin`: the automatically loaded `.cake-repl.toml` key is ignored with a
   plain startup warning naming the file and key, even with `-no-color`.

@@ -276,10 +276,24 @@ the next prompt resumes the same session; replay still shows the raw transcript
 plus one `context compacted …` marker. The feature is opt-in, off by default,
 and experimental: summary quality has not been qualified.
 
+`max-context-tokens` and `trigger-tokens` are **between-prompt targets, not
+in-invocation caps**. The REPL checks them only after a completed turn, from the
+newest complete `turn_usage` measurement. A single invocation can keep growing
+past both lines before Cake returns; the next boundary then compacts from that
+larger measurement. cake task 130 measured the gap offline on 2026-10-27 (see
+[Measured between-turn compaction overshoot](docs/compaction-overshoot.md)):
+2,153 invocations grew by a median +40,375 tokens (p99 +311,592; max 556,317);
+16 invocations crossed 400k from below, and all 16 were still above it at their
+last measured request. Active time above the line reached 38.8 minutes at 350k
+and 29.8 minutes at 400k. The planned core mechanism in tasks 034f/034g would
+compact at provider-request boundaries inside Cake; it has not landed.
+
 ```toml
 # Absolute mode: a quality ceiling and the line where compaction fires. Both
 # must be set together, both positive, and trigger-tokens < max-context-tokens.
-# 400000/350000 are recommended starting values, not built-in defaults.
+# These are between-turn targets, not live caps: a long tool loop can grow past
+# them before the REPL gets control back. 400000/350000 are recommended starting
+# values, not built-in defaults.
 [compaction]
 enabled = true
 cake-compact-bin = "cake-compact"
@@ -290,10 +304,12 @@ keep-tokens = 20000
 
 - In absolute mode the REPL fires when the newest complete `turn_usage` input
   figure reaches `trigger-tokens`. It does not subtract a percentage headroom.
-  `cake-compact` receives that same effective line as `-threshold-tokens`; the
-  ceiling itself is never passed. The compactor re-checks the session and
-  compacts only when it agrees. A no-op resolves the start notice with an
-  explicit `context compaction skipped: …` row instead of staying silent.
+  This check runs only after a completed turn; it is not a live cap during one
+  invocation. `cake-compact` receives that same effective line as
+  `-threshold-tokens`; the ceiling itself is never passed. The compactor
+  re-checks the session and compacts only when it agrees. A no-op resolves the
+  start notice with an explicit `context compaction skipped: …` row instead of
+  staying silent.
 - If the model's context window is smaller than `max-context-tokens`, the
   effective trigger is the smaller of `trigger-tokens` and 75% of the window.
   The 75% cap matches the default percent mode's effective line (80 − 5) and
@@ -350,9 +366,11 @@ keep-tokens = 20000
   runs in the same `-cwd`, so `CAKE_DATA_DIR` selects the same root and a
   relative `-cake-bin` resolves in that directory. A missing binary or verb is a
   visible warning, and there is no fallback to writing session files.
-- Compaction only happens between prompts. A single long tool loop that fills
-  the window before the turn ends is not covered; that needs a request-boundary
-  mechanism inside Cake. See
+- Compaction only happens between prompts. A single long tool loop can grow
+  past `trigger-tokens` and `max-context-tokens` before Cake returns; the next
+  prompt is the first opportunity to compact, and the next boundary uses the
+  larger measurement. A request-boundary mechanism inside Cake is planned in
+  core tasks 034f/034g and has not landed. See
   [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
   [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md),
   [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md),
@@ -422,7 +440,8 @@ tool-color = true
 enabled = false
 cake-compact-bin = "cake-compact"
 # Absolute trigger: set both or neither. Recommended starting values are
-# 400000/350000; trigger-tokens must be below max-context-tokens.
+# 400000/350000; trigger-tokens must be below max-context-tokens. These are
+# between-turn targets, not live caps; a long tool loop can pass both.
 # max-context-tokens = 400000
 # trigger-tokens = 350000
 # Percent fallback when both absolute fields are unset (default: 80).
@@ -549,7 +568,10 @@ validation is available with `just release-check`.
   still cancel it. A suspend pauses tracked live and replay runs; the short-lived
   read-only session listing and the compactor are not tracked and can continue
   through the stop.
-- Context compaction is best-effort and between turns only. The live `turn_usage`
+- Context compaction is best-effort and between turns only. The trigger is a
+  target, not an in-invocation cap: task 130 measured median +40,375, p99
+  +311,592, and max 556,317 tokens of growth per invocation, and up to 38.8
+  active minutes above 350k or 29.8 above 400k. The live `turn_usage`
   measurement excludes the finished turn's response and tool results, so percent
   mode triggers on a headroom below the configured threshold and the compactor
   makes the final call; absolute mode triggers at `trigger-tokens` (or the 75%
