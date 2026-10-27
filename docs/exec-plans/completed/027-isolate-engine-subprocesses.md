@@ -56,7 +56,7 @@ Update this section at every stopping point.
 - [x] (2026-10-27) Milestone 4: update README, ARCHITECTURE, and the security
   guardrail; run preflight and apply its four minor findings; move this plan to
   the completed bucket.
-- [ ] Fill task 093's Acceptance Notes and complete the task.
+- [x] (2026-10-27) Fill task 093's Acceptance Notes and complete the task.
 
 ## Surprises & Discoveries
 
