@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -19,7 +18,9 @@ import (
 const waitingFakeCompactor = `
 trap 'exit 0' TERM
 echo $$ > "$PID_FILE"
-if : < /dev/tty 2>/dev/null; then printf openable > "$TTY_FILE"; else printf blocked > "$TTY_FILE"; fi
+# The probe runs in a subshell because a redirection error on the special
+# builtin ':' is fatal to a non-interactive POSIX shell (dash, Ubuntu's /bin/sh).
+if ( : < /dev/tty ) 2>/dev/null; then printf openable > "$TTY_FILE"; else printf blocked > "$TTY_FILE"; fi
 while :; do sleep 0.05; done
 `
 
@@ -81,7 +82,7 @@ func TestCompactChildIsSessionLeader(t *testing.T) {
 	done, stop := startWaitingCompactor(t)
 	pid := waitForPID(t, pidFile)
 
-	sid, err := syscall.Getsid(pid)
+	sid, err := getSID(pid)
 	if err != nil {
 		t.Fatalf("getsid(%d): %v", pid, err)
 	}
