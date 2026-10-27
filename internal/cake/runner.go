@@ -234,6 +234,7 @@ func Start(opts Options) (*Run, error) {
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
+	configureProcess(cmd)
 	// Prefer a graceful stop so cake can finish writing session records, but
 	// fall back to SIGKILL if it does not exit promptly. Windows cannot
 	// deliver SIGTERM (Process.Signal returns an error, which would stall

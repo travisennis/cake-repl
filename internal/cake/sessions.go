@@ -69,6 +69,7 @@ func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, 
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
+	configureProcess(cmd)
 	// Bound completion: the exec context kills the helper on cancellation, and
 	// WaitDelay stops Wait from blocking on a process that will not exit or on a
 	// pipe a descendant still holds (sessionsWaitDelay).
