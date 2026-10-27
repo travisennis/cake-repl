@@ -5,14 +5,8 @@ package cake
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"syscall"
 )
-
-// configureProcess is a no-op on Windows, which has no POSIX session or
-// controlling-terminal equivalent. A child can still reach the console through
-// CONIN$ and CONOUT$, so this boundary claims no Windows isolation. See ADR 027.
-func configureProcess(_ *exec.Cmd) {}
 
 // signalGroup terminates the process on Windows. There is no process-group
 // equivalent, so the second argument is ignored.

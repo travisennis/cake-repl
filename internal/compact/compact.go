@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/travisennis/cake-repl/internal/childproc"
 )
 
 const (
@@ -133,6 +135,10 @@ func Compact(ctx context.Context, opts Options) Result {
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
+	// The compactor is another child that must not reach the REPL's terminal:
+	// it runs on the same session boundary as a cake run. Its SIGTERM-to-leader
+	// cancellation and WaitDelay teardown are unaffected by the detach.
+	childproc.Isolate(cmd)
 	// Prefer a graceful stop so the compactor can abandon an incomplete append
 	// and cancel its summarizer; WaitDelay then forces the issue. Windows
 	// cannot deliver SIGTERM, so kill outright there.

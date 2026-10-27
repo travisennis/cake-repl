@@ -45,7 +45,7 @@ func waitForPIDFile(t *testing.T, path string) int {
 }
 
 // requireSessionLeader proves the child was placed in its own session. Without
-// configureProcess the child inherits the test process's session, so sid != pid.
+// childproc.Isolate the child inherits the test process's session, so sid != pid.
 func requireSessionLeader(t *testing.T, pid int) {
 	t.Helper()
 	sid, err := getSID(pid)

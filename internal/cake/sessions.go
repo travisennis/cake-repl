@@ -9,6 +9,8 @@ import (
 	"io"
 	"os/exec"
 	"time"
+
+	"github.com/travisennis/cake-repl/internal/childproc"
 )
 
 // sessionsOutputLimit bounds how many bytes of `cake sessions list --json`
@@ -69,7 +71,7 @@ func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, 
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	configureProcess(cmd)
+	childproc.Isolate(cmd)
 	// Cancellation kills the listing's whole process group outright; a listing
 	// holds no state to flush. Treat an already-gone helper as a successful
 	// cancellation so exec does not replace the natural exit with its default

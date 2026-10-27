@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/travisennis/cake-repl/internal/childproc"
 )
 
 // RunMode selects which session flag a cake invocation uses.
@@ -285,7 +287,7 @@ func Start(opts Options) (*Run, error) {
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	configureProcess(cmd)
+	childproc.Isolate(cmd)
 	// Prefer a graceful stop so cake can finish writing session records, but
 	// fall back to SIGKILL if it does not exit promptly. Windows cannot
 	// deliver SIGTERM (Process.Signal returns an error, which would stall

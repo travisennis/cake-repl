@@ -54,12 +54,13 @@ scope unless the cake contract itself has changed. See
 cmd/cake-repl/main.go    Entry point: flag parsing, validation, Bubble Tea program startup.
 cmd/cake-repl/suspend.go Terminal release/restore around an external SIGTSTP (POSIX).
 internal/config/         TOML config-file loading for REPL startup defaults.
+internal/childproc/      POSIX session boundary shared by every external child (ADR 027).
 internal/cake/           cake-as-engine: subprocess lifecycle + stream-json decoding.
   events.go              Typed live and replay event structs and the Event interface (the wire schema).
   parser.go              ParseLine: one NDJSON line -> typed Event (forward-compatible).
   runner.go              Start/Replay: subprocess lifecycle, group cancellation, stderr tail, ParseError events.
-  process_unix.go        Setsid boundary, process-group signals, POSIX suspend hooks.
-  process_windows.go     No-op boundary and Windows process fallbacks.
+  process_unix.go        Process-group signals and POSIX suspend hooks.
+  process_windows.go     Windows process fallbacks.
   registry.go            Live/replay run registry for suspend coordination.
 internal/compact/        External compactor: one documented subprocess and its result document.
   compact.go             Args, Compact: bounded subprocess lifecycle + document decoding.
@@ -79,8 +80,9 @@ internal/version/        Binary version string (overridden by release ldflags).
 ```
 
 Dependency direction is one-way: `app` depends on `cake`, `compact`, and `ui`;
-`cake`, `compact`, and `ui` depend on neither `app` nor each other. Keep it that
-way.
+`cake`, `compact`, and `ui` depend on neither `app` nor each other. `cake` and
+`compact` also use the leaf `internal/childproc` package for the shared session
+boundary. Keep it that way.
 
 ## Architectural invariants
 
@@ -181,13 +183,13 @@ way.
   [`docs/adr/024-ignore-project-local-compaction-tuning.md`](docs/adr/024-ignore-project-local-compaction-tuning.md),
   and
   [`docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md`](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
-- **Engine processes are detached from the REPL terminal.** On POSIX, every
-  live prompt, replay, and session listing starts in its own session with
-  `SysProcAttr{Setsid: true}` (one helper in `internal/cake/process_unix.go`),
-  so the child has no controlling terminal and `/dev/tty` fails with `ENXIO`.
-  Windows is a no-op and claims no equivalent boundary. Start failure is
-  fail-closed, and tools that need a terminal now fail rather than prompt over
-  the REPL; the opt-in compactor is not covered. See
+- **Child processes are detached from the REPL terminal.** On POSIX, every live
+  prompt, replay, session listing, and opt-in compaction starts in its own
+  session with `SysProcAttr{Setsid: true}` (one helper in
+  `internal/childproc`), so the child has no controlling terminal and
+  `/dev/tty` fails with `ENXIO`. Windows is a no-op and claims no equivalent
+  boundary. Start failure is fail-closed, and tools that need a terminal now
+  fail rather than prompt over the REPL. See
   [`ADR 027`](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - **Graceful cancellation.** Cancel sends SIGTERM to the child leader. A
   REPL-owned timer fires at the grace deadline and sends SIGKILL to the detached

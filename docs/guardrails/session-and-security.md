@@ -168,14 +168,13 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
   and
   [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
-- **Engine terminal boundary (POSIX).** Every live prompt, replay, and session
-  listing starts in its own session with no controlling terminal
-  (`SysProcAttr{Setsid: true}` in `internal/cake/process_unix.go`), so a tool
+- **Child terminal boundary (POSIX).** Every live prompt, replay, session
+  listing, and opt-in compaction starts in its own session with no controlling
+  terminal (`SysProcAttr{Setsid: true}` in `internal/childproc`), so a child
   that opens `/dev/tty` gets `ENXIO` instead of prompting over or changing the
-  REPL. One helper serves all three spawn sites; `Replay` inherits it through
-  `Start`. Windows is a no-op and claims no equivalent boundary, and the opt-in
-  compactor is outside it (task 124). Start failure is fail-closed: do not add a
-  pty fallback or an opt-out. See
+  REPL. One helper serves every spawn site; `Replay` inherits it through
+  `Start`. Windows is a no-op and claims no equivalent boundary. Start failure
+  is fail-closed: do not add a pty fallback or an opt-out. See
   [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - **Process lifecycle.** One cake process at a time, including while replay
   hydration is active. Cancel sends SIGTERM to the leader; a REPL-owned timer
@@ -189,8 +188,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `WaitDelay` (a hard kill — the listing has no state to flush), so a stuck
   helper, or a descendant holding the inherited stdout pipe, cannot hang the REPL.
   The external compactor follows the same model-owned lifecycle as a cake run:
-  SIGTERM then `WaitDelay`, a 1 MiB stdout cap, and a bounded stderr tail; it is
-  not covered by the terminal boundary. See
+  SIGTERM then `WaitDelay`, a 1 MiB stdout cap, and a bounded stderr tail. It
+  also shares the session boundary, so it cannot reach the REPL's terminal.
+  Suspend coordination does not cover it: a suspend does not stop a running
+  compactor, which is bounded by its own cancellation paths. See
   [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md),
   [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
   and [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).

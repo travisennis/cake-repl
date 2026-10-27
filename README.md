@@ -535,19 +535,20 @@ validation is available with `just release-check`.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
 - One cake process at a time; submitting while a task runs is rejected.
-- On macOS and Linux, every live prompt, replay, and session listing runs in
-  its own session with no controlling terminal, so a tool that opens `/dev/tty`
-  fails with a device error instead of changing the REPL's terminal modes. Tools
-  that require a terminal — `sudo`, an SSH passphrase prompt, `gh auth login`,
-  or an editor that opens `/dev/tty` — therefore fail. Windows has no equivalent
-  boundary and claims no isolation, and the opt-in compactor is outside this
-  boundary. Startup is fail-closed: if the child cannot be started detached, the
-  run fails rather than falling back to an unisolated child. See
+- On macOS and Linux, every live prompt, replay, session listing, and context
+  compaction runs in its own session with no controlling terminal, so a tool
+  that opens `/dev/tty` fails with a device error instead of changing the REPL's
+  terminal modes. Tools that require a terminal — `sudo`, an SSH passphrase
+  prompt, `gh auth login`, or an editor that opens `/dev/tty` — therefore fail.
+  Windows has no equivalent boundary and claims no isolation. Startup is
+  fail-closed: if the child cannot be started detached, the run fails rather
+  than falling back to an unisolated child. See
   [ADR 027](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
-- A terminal hangup or an abrupt REPL death can leave a detached cake process
-  running until it finishes; normal quit, Ctrl+C, and SIGTERM still cancel it.
-  A suspend pauses tracked live and replay runs; the short-lived read-only
-  session listing is not tracked and can continue through the stop.
+- A terminal hangup or an abrupt REPL death can leave a detached cake or
+  compactor process running until it finishes; normal quit, Ctrl+C, and SIGTERM
+  still cancel it. A suspend pauses tracked live and replay runs; the short-lived
+  read-only session listing and the compactor are not tracked and can continue
+  through the stop.
 - Context compaction is best-effort and between turns only. The live `turn_usage`
   measurement excludes the finished turn's response and tool results, so percent
   mode triggers on a headroom below the configured threshold and the compactor
