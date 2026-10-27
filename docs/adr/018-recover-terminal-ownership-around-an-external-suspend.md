@@ -130,9 +130,9 @@ SIGCONT), restore every mode, and repaint without touching the conversation.
   [ADR 027](027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md)
   partially supersedes this decision: engine subprocesses are no longer members
   of the REPL's process group, so the suspend cycle stops and continues each
-  live engine run explicitly instead of relying on the group SIGSTOP. The rest
-  of this decision — release before stop, restore after SIGCONT, and the
-  documented SIGSTOP limits — still stands.
+  tracked engine run (live and replay) explicitly instead of relying on the
+  group SIGSTOP. The rest of this decision — release before stop, restore after
+  SIGCONT, and the documented SIGSTOP limits — still stands.
 - Bubble Tea v1.3.10: `signals_unix.go` listens for SIGWINCH only;
   `tty_unix.go` stops the process with `kill(0, SIGTSTP)` for the internal
   suspend; `tea.go` `RestoreTerminal` re-enables bracketed paste and focus

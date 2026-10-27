@@ -120,6 +120,9 @@ Consult:
   the new-session boundary.
 - [ADR 011](docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md), for
   the replay invocation and hydration decision.
+- [ADR 027](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md),
+  for the engine's POSIX session boundary, cancellation group kill, and suspend
+  coordination.
 
 Preserve session-hijack prevention and never leak raw stream content.
 

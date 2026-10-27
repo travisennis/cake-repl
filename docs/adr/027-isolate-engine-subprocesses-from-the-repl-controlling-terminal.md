@@ -83,36 +83,45 @@ of process attributes, so no equivalent guarantee is available there.
 
 ## Decision Outcome
 
-Chosen option: every POSIX child the REPL spawns for cake runs in a new session
-with no controlling terminal, and the lifecycle consequences are handled
-explicitly.
+Chosen option: every live, replay, and session-listing child the REPL spawns
+for cake runs in a new session with no controlling terminal, and the lifecycle
+consequences are handled explicitly. The opt-in compactor is a separate,
+documented gap rather than part of this guarantee.
 
 - **Mechanism.** `internal/cake` applies one process-attribute helper to the live
   run, replay, and session listing: `SysProcAttr{Setsid: true}` on `!windows`.
-  Windows leaves the attribute unset. One helper, not three ad-hoc assignments,
-  keeps the policy from drifting between spawn sites.
+  Windows leaves the attribute unset. One helper, not an ad-hoc assignment at
+  each spawn site, keeps the policy from drifting.
 - **Cancellation.** SIGTERM still goes to the child first, so cake can finish
-  writing session records and stop its tools. If the child has not been reaped
-  when the existing three-second `WaitDelay` expires, the REPL sends SIGKILL to
-  the child's process group. `exec`'s own `WaitDelay` kill is PID-only, so the
-  group kill needs a REPL-owned timer. A child that exits gracefully is not
-  followed by a group signal: a descendant that deliberately daemonized (a dev
-  server started by a tool) should outlive the turn, exactly as it does today.
+  writing session records and stop its tools. A REPL-owned timer fires at the
+  accepted three-second grace deadline; if the run has not been reaped by then,
+  the REPL sends SIGKILL to the child's process group. `exec`'s own `WaitDelay`
+  kill is PID-only and can race the leader's reaping, so the command's
+  `WaitDelay` is set one second later as a redundant PID-only fallback and the
+  group kill is the primary bound. A run already marked reaped is not followed
+  by a group signal, so a descendant that closed the inherited pipes (a dev
+  server started by a tool) outlives the turn exactly as it does today. A
+  descendant that still holds the inherited stdout or stderr pipe is killed with
+  the group, because the REPL cannot finish reading the run until that pipe
+  closes.
 - **Suspension.** The suspend cycle keeps ADR 018's order and intent but adds
-  explicit engine coordination: release the terminal, stop each live run's
-  process group with SIGSTOP, stop the REPL's own group (unchanged), and after
-  SIGCONT continue the engine groups before re-acquiring the terminal and
-  repainting. The REPL tracks live and replay runs for this purpose; the
-  read-only session listing is short-lived and is not tracked. A REPL killed
-  while stopped can still leave an engine stopped; that remains the documented
-  ADR 018 limit.
+  explicit engine coordination: release the terminal, stop each tracked live or
+  replay run's process group with SIGSTOP, stop the REPL's own group (unchanged),
+  and after SIGCONT continue the engine groups before re-acquiring the terminal
+  and repainting. The read-only session listing is not tracked: it is bounded
+  only after it exits or is canceled, so a stuck listing can continue through a
+  suspend; it cannot touch the terminal, and closing or replacing the browser or
+  quitting still cancels it. A REPL killed while stopped can still leave an
+  engine stopped; that remains the documented ADR 018 limit.
 - **Start failure is fail-closed.** If the child cannot be started with the
   attribute, starting the run fails and the error is shown. There is no silent
   unisolated retry.
 - **Signals.** After `Setsid` the terminal no longer delivers Ctrl+C or SIGTSTP
   to cake; only the REPL receives them. Ctrl+C reaches cake as the REPL's
   SIGTERM, which cake handles like its own Ctrl+C, so cancellation behavior is
-  unchanged. Ctrl+Z reaches cake as the explicit SIGSTOP from the suspend cycle.
+  unchanged. An external SIGTSTP (or a terminal whose ISIG is enabled) reaches
+  cake as the explicit SIGSTOP from the suspend cycle; in the normal raw-mode
+  REPL, Ctrl+Z is only a keystroke.
 - **Tools that need a terminal now fail.** `sudo`, an SSH passphrase prompt,
   `gh auth login`, or an editor that opens `/dev/tty` receives `ENXIO` instead of
   prompting over the REPL. That is accepted: a prompt raised by a tool must be
@@ -123,10 +132,11 @@ explicitly.
   replacement of that one mechanism.
 
 The explicit non-goals are a named terminal device (`/dev/ttysNNN`), signals from
-another same-user process, a descendant that calls `setsid` itself, Windows
-console handles, and any claim of a general sandbox. The opt-in `cake-compact`
-child in `internal/compact` is outside this task's scope and keeps its current
-topology; it is a known gap rather than an implied guarantee.
+another same-user process, a descendant that leaves the engine's process group or
+session itself (`setpgid` or `setsid`), Windows console handles, and any claim of
+a general sandbox. The opt-in `cake-compact` child in `internal/compact` is
+outside this task's scope and keeps its current topology; it is a known gap
+rather than an implied guarantee, tracked as task 124.
 
 ### Consequences
 
@@ -135,14 +145,23 @@ topology; it is a known gap rather than an implied guarantee.
   terminal. The reproduced `stty sane < /dev/tty` wrapper fails instead of
   corrupting the pane.
 - Good: cancellation now reaps a hung child's whole process group, while a
-  graceful exit still allows intentionally backgrounded tools to survive.
+  descendant that closed the inherited pipes still survives a graceful exit.
 - Good: session identity is observable in tests without a terminal: a detached
   child's session id equals its own pid, while the REPL's does not.
 - Bad: tools that require a terminal now fail rather than prompt.
 - Bad: the compactor remains a second, unaddressed terminal path until it is
-  brought under the same helper.
+  brought under the same helper; task 124 tracks that follow-up.
 - Bad: Windows gets no terminal-isolation guarantee; the existing topology is
   documented as the limit.
+- Bad: a terminal hangup or an abrupt REPL death no longer sends the engine the
+  group-directed termination it receives today, because it is outside the REPL's
+  session. Normal quit, Ctrl+C, and SIGTERM paths still cancel it, but a crash
+  can leave cake running until it finishes. No platform-specific parent-death
+  cleanup is added in this change.
+- Bad: the REPL signals a run's process group while the run is registered. A
+  child reaped between the registry snapshot and the signal can have its pid
+  reused by an unrelated group; that narrow race is accepted rather than closed
+  with platform-specific pid handles.
 
 ## More Information
 
@@ -152,6 +171,7 @@ topology; it is a known gap rather than an implied guarantee.
 - [ADR 019](019-cancel-and-bound-the-read-only-session-listing.md) defines the
   read-only listing lifecycle that this decision extends with the same process
   topology.
+- Task 124 tracks bringing the opt-in compactor under the same process boundary.
 - [ADR 020](020-repaint-the-frame-after-content-changes-to-heal-terminal-side-scrolls.md)
   and [ADR 022](022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md)
   describe other terminal-boundary behavior that this decision does not change.
