@@ -247,6 +247,11 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	if m.exitAfter {
 		return m.quit()
 	}
+	// The compactor is reaped, so the session is stable and the suggestion can
+	// read it. A new session, a retarget, or an exit returned above.
+	if next, cmd := m.maybeStartSuggestion(); cmd != nil {
+		return next, tea.Batch(cmd, next.titleCmd())
+	}
 	return m, m.titleCmd()
 }
 

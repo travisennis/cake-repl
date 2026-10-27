@@ -76,6 +76,7 @@ func (m *Model) resetSessionList() {
 // It returns the updated model and the listing command as a pair, so a caller
 // never reads a receiver mutated in a sibling return operand.
 func (m Model) openSessionBrowser() (Model, tea.Cmd) {
+	m.clearSuggestion()
 	m.browserOpen = true
 	m.browserLoading = true
 	m.browserErr = ""

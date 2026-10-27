@@ -93,6 +93,9 @@ func (m Model) composerHint() string {
 	if m.compacting {
 		return "Ctrl+C cancel · Ctrl+N new session"
 	}
+	if m.suggestionActive() && m.input.Value() == "" {
+		return "Ctrl+S use suggestion · type to dismiss"
+	}
 	return "Ctrl+S submit · Enter newline · /help"
 }
 

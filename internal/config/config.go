@@ -24,14 +24,15 @@ import (
 // than inferred from the value. Compaction.Enabled is the same kind of value and
 // uses the same presence rule.
 type Config struct {
-	Model            string     `toml:"model"`
-	Profile          string     `toml:"profile"`
-	OutputLimit      int        `toml:"output-limit"`
-	MaxTimelineItems int        `toml:"max-timeline-items"`
-	CakeBin          string     `toml:"cake-bin"`
-	ToolColor        bool       `toml:"tool-color"`
-	ToolColorSet     bool       `toml:"-"`
-	Compaction       Compaction `toml:"compaction"`
+	Model            string      `toml:"model"`
+	Profile          string      `toml:"profile"`
+	OutputLimit      int         `toml:"output-limit"`
+	MaxTimelineItems int         `toml:"max-timeline-items"`
+	CakeBin          string      `toml:"cake-bin"`
+	ToolColor        bool        `toml:"tool-color"`
+	ToolColorSet     bool        `toml:"-"`
+	Compaction       Compaction  `toml:"compaction"`
+	Suggestions      Suggestions `toml:"suggestions"`
 }
 
 // Compaction holds the opt-in between-turn context compaction settings in the
@@ -60,10 +61,24 @@ type Compaction struct {
 	KeepTokens       int `toml:"keep-tokens"`
 }
 
+// Suggestions holds the opt-in after-turn prompt-suggestion settings in the
+// `[suggestions]` table. Enabled is false by default and is the only field
+// whose false value is meaningful, so EnabledSet records whether the file
+// actually supplied the key. CakeSuggestBin names the external suggester; the
+// REPL only invokes it and never reads a session file itself.
+type Suggestions struct {
+	Enabled        bool   `toml:"enabled"`
+	EnabledSet     bool   `toml:"-"`
+	CakeSuggestBin string `toml:"cake-suggest-bin"`
+}
+
 const (
 	// DefaultCakeCompactBin is the compactor executable resolved on PATH when
 	// the config does not name one.
 	DefaultCakeCompactBin = "cake-compact"
+	// DefaultCakeSuggestBin is the prompt suggester executable resolved on PATH
+	// when the config does not name one.
+	DefaultCakeSuggestBin = "cake-suggest"
 	// DefaultCompactionThresholdPercent is the fallback trigger percentage when
 	// the absolute trigger fields are unset. The REPL fires five points below it
 	// after a completed turn.
@@ -82,6 +97,24 @@ func DefaultCompaction() Compaction {
 		KeepTokens:       DefaultCompactionKeepTokens,
 	}
 }
+
+// DefaultSuggestions returns the effective suggestion defaults before any
+// config file is merged. The feature stays disabled until trusted config
+// enables it.
+func DefaultSuggestions() Suggestions {
+	return Suggestions{CakeSuggestBin: DefaultCakeSuggestBin}
+}
+
+// Validate checks the effective suggestion settings. Only an enabled feature
+// needs an executable; a disabled table may omit it.
+func (s Suggestions) Validate() error {
+	if s.Enabled && s.CakeSuggestBin == "" {
+		return errMissingSuggester
+	}
+	return nil
+}
+
+var errMissingSuggester = errors.New("suggestions.cake-suggest-bin must name an executable")
 
 // Validate checks the effective compaction settings. Only values that cannot
 // describe a trigger are rejected; zero means "use the default" and is resolved
@@ -162,6 +195,16 @@ func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 		ignored = append(ignored, "compaction.cake-compact-bin")
 	}
 	cfg.Compaction.CakeCompactBin = ""
+	cfg.Suggestions.CakeSuggestBin = ""
+	if definedFold(meta, "suggestions", "cake-suggest-bin") {
+		ignored = append(ignored, "suggestions.cake-suggest-bin")
+	}
+	if definedFold(meta, "suggestions", "enabled") && cfg.Suggestions.Enabled {
+		// Disabling is allowed to win; enabling is not.
+		ignored = append(ignored, "suggestions.enabled")
+		cfg.Suggestions.Enabled = false
+		cfg.Suggestions.EnabledSet = false
+	}
 	if definedFold(meta, "compaction", "enabled") && cfg.Compaction.Enabled {
 		// Disabling is allowed to win; enabling is not.
 		ignored = append(ignored, "compaction.enabled")
@@ -201,6 +244,7 @@ func load(path string) (*Config, toml.MetaData, error) {
 	}
 	cfg.ToolColorSet = definedFold(meta, "tool-color")
 	cfg.Compaction.EnabledSet = definedFold(meta, "compaction", "enabled")
+	cfg.Suggestions.EnabledSet = definedFold(meta, "suggestions", "enabled")
 	return cfg, meta, nil
 }
 
@@ -258,6 +302,7 @@ func Merge(dst, src *Config) *Config {
 		dst.ToolColorSet = true
 	}
 	mergeCompaction(&dst.Compaction, src.Compaction)
+	mergeSuggestions(&dst.Suggestions, src.Suggestions)
 	return dst
 }
 
@@ -291,6 +336,28 @@ func mergeCompaction(dst *Compaction, src Compaction) {
 func MergeCompaction(base Compaction, file *Config) Compaction {
 	if file != nil {
 		mergeCompaction(&base, file.Compaction)
+	}
+	return base
+}
+
+// mergeSuggestions applies a higher-priority `[suggestions]` table.
+// Enabled merges on key presence so an explicit false can disable an
+// inherited true; the executable merges only when non-empty.
+func mergeSuggestions(dst *Suggestions, src Suggestions) {
+	if src.EnabledSet {
+		dst.Enabled = src.Enabled
+		dst.EnabledSet = true
+	}
+	if src.CakeSuggestBin != "" {
+		dst.CakeSuggestBin = src.CakeSuggestBin
+	}
+}
+
+// MergeSuggestions applies a config file's `[suggestions]` table to a base
+// carrying the hardcoded defaults. A nil file leaves the defaults untouched.
+func MergeSuggestions(base Suggestions, file *Config) Suggestions {
+	if file != nil {
+		mergeSuggestions(&base, file.Suggestions)
 	}
 	return base
 }

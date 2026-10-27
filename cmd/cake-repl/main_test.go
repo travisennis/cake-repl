@@ -996,3 +996,92 @@ func TestStartupCompactionConfig(t *testing.T) {
 		})
 	}
 }
+
+// TestStartupSuggestionsConfig drives the `[suggestions]` table through the
+// real config layers and flag surface: disabled by default, XDG-tunable,
+// unable to be enabled or pointed at an executable by the untrusted
+// project-local layer, and disabled by -no-session.
+func TestStartupSuggestionsConfig(t *testing.T) {
+	defaults := app.SuggestionConfig{Bin: "cake-suggest"}
+	enabled := defaults
+	enabled.Enabled = true
+
+	tests := []struct {
+		name          string
+		xdg           string
+		local         string
+		args          []string
+		want          app.SuggestionConfig
+		wantWarn      []string
+		wantWarnExact string
+	}{
+		{name: "disabled by default", want: defaults},
+		{
+			name: "XDG enables and selects the executable",
+			xdg:  "[suggestions]\nenabled = true\ncake-suggest-bin = \"/opt/cake-suggest\"\n",
+			want: app.SuggestionConfig{Enabled: true, Bin: "/opt/cake-suggest"},
+		},
+		{
+			name:     "project cannot enable or select the executable",
+			local:    "[suggestions]\nenabled = true\ncake-suggest-bin = \"/tmp/untrusted\"\n",
+			want:     defaults,
+			wantWarn: []string{"ignoring suggestions.cake-suggest-bin", "ignoring suggestions.enabled = true"},
+			wantWarnExact: "cake-repl: warning: ignoring suggestions.cake-suggest-bin in project-local config \".cake-repl.toml\"; use XDG config or -config to select the suggester\n" +
+				"cake-repl: warning: ignoring suggestions.enabled = true in project-local config \".cake-repl.toml\"; enable suggestions in XDG config or an explicit -config\n",
+		},
+		{
+			name:  "project can disable an enabled suggestion",
+			xdg:   "[suggestions]\nenabled = true\n",
+			local: "[suggestions]\nenabled = false\n",
+			want:  defaults,
+		},
+		{
+			name:     "no-session disables with a warning",
+			xdg:      "[suggestions]\nenabled = true\n",
+			args:     []string{"-no-session"},
+			want:     defaults,
+			wantWarn: []string{"prompt suggestions are disabled by -no-session"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+			xdgPath := filepath.Join(dir, "xdg", "cake-repl", "config.toml")
+			if err := os.MkdirAll(filepath.Dir(xdgPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for path, content := range map[string]string{xdgPath: tt.xdg, ".cake-repl.toml": tt.local} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			fs := flag.NewFlagSet("cake-repl", flag.ContinueOnError)
+			f := bindFlags(fs)
+			if err := fs.Parse(normalizeOptionalArgs(tt.args)); err != nil {
+				t.Fatalf("parsing %v: %v", tt.args, err)
+			}
+			var warnings bytes.Buffer
+			cfg, err := effectiveConfig(f, explicitFlags(fs), &warnings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Suggestions != tt.want {
+				t.Errorf("suggestions = %+v, want %+v", cfg.Suggestions, tt.want)
+			}
+			for _, want := range tt.wantWarn {
+				if !strings.Contains(warnings.String(), want) {
+					t.Errorf("warnings = %q, want it to contain %q", warnings.String(), want)
+				}
+			}
+			if tt.wantWarnExact != "" && warnings.String() != tt.wantWarnExact {
+				t.Errorf("warnings = %q, want exactly %q", warnings.String(), tt.wantWarnExact)
+			}
+			if tt.wantWarn == nil && warnings.Len() != 0 {
+				t.Errorf("unexpected warnings = %q", warnings.String())
+			}
+		})
+	}
+}

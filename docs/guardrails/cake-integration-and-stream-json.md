@@ -94,6 +94,23 @@ consumes cake events. This is the project's core external contract.
   See [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md)
   and
   [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
+- **External suggester (`internal/suggest`).** The opt-in prompt suggester is
+  invoked only as
+  `cake-suggest suggest -json [-cake-bin <path>] [-model <name>] [-profile <name>] -- <session-id>`.
+  It is read-only. Exactly one JSON document is decoded field by field
+  (`suggested`, `suggestion`, `session_id`, `reason`) with unknown fields
+  ignored. Exit 0 with a document is the only success shape; `suggested:false`
+  is a silent no-op. The REPL accepts the suggestion only when the document's
+  `session_id` matches the request, the request identity is current, the
+  session pin is unchanged, the REPL is idle, and the composer is empty. The
+  text is sanitized, whitespace-collapsed to one line, and bounded before it
+  becomes placeholder ghost text; it is never parsed as a slash command.
+  Cancellation is silent; a missing binary, non-zero exit, malformed document,
+  or timeout warns at most once per REPL process. The process uses the same
+  subprocess discipline as a cake run: model-owned context, SIGTERM then
+  `WaitDelay`, bounded stdout/stderr, `internal/childproc` isolation, and a
+  content-free debug-log line. It never reads or writes a session file. See
+  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
   and the versioned `sessions list --json` envelope) is the only contract; it is
@@ -135,6 +152,13 @@ consumes cake events. This is the project's core external contract.
   descendant holds stdout. App tests drive the trigger, the gate, the in-place
   success, the non-in-place rejection, and cancellation through `Ctrl+C` and
   `Ctrl+N`; none may need a real cake or a model call.
+- For the external suggester, add fake `cake-suggest` scripts for a success
+  document, a `suggested:false` no-op, a non-zero exit with stderr, malformed
+  output, a missing binary, cancellation, and the `WaitDelay` teardown when a
+  descendant holds stdout. App tests drive the completed-turn trigger, the
+  compaction ordering, applying a result, stale/wrong-session rejection, the
+  draft-wins rule, dismissal on typing, acceptance through `Ctrl+S`, and
+  cancellation on new session; none may need a real cake or a model call.
 - Verify a real round trip if you have a `cake` binary, but never make a real
   cake binary a test requirement.
 
@@ -173,6 +197,14 @@ consumes cake events. This is the project's core external contract.
   mode it is five points below `threshold-percent`. The compactor re-checks the
   session. A REPL-side session reader would cross the engine boundary and
   duplicate Cake's projection rules.
+- **Treating a suggestion as user input.** A suggestion is model output derived
+  from session content. Submit it as an ordinary prompt, never through
+  `ParseCommand`, or a transcript can execute a slash command. Apply it only
+  when the composer is empty and the request/session identity still matches; a
+  late result must never overwrite a draft.
+- **Reading session files for a suggestion.** The suggester owns that read. The
+  REPL passes the pinned session id and consumes one document; it never opens
+  the session file or reconstructs the transcript from the timeline.
 
 ## Related docs
 

@@ -36,12 +36,18 @@ session files. The only contract is cake's stream-json NDJSON output, the
 supported `replay <uuid>` and `sessions list --json` commands, and its
 documented session, model, profile, tools, and add-dir flags.
 
+When `[suggestions]` is enabled, a completed turn also runs the external
+`cake-suggest` binary and offers its suggested next prompt as dim ghost text in
+the composer. `Ctrl+S` accepts the suggestion; any typing dismisses it.
+
 ## Requirements
 
 - Go 1.27.3 or newer to build.
 - `cake` installed and on `PATH`, or point at a binary with `-cake-bin`.
   Startup `-resume <uuid>` history hydration requires cake 0.1.0 or a newer build
   that supports `cake --output-format stream-json replay <uuid>`.
+- `cake-suggest` installed and on `PATH` (or named by
+  `suggestions.cake-suggest-bin`) when prompt suggestions are enabled.
 
 ## Build
 
@@ -146,7 +152,7 @@ another policy (`read-only`, `workspace-write`, `workspace-write-interactive`, o
 |---|---|
 | `Enter` | insert newline |
 | `Tab` | complete slash commands |
-| `Ctrl+S` | submit prompt |
+| `Ctrl+S` | submit prompt, or the shown suggestion when the input is empty |
 | `Ctrl+C` | cancel running cake task or context compaction; quit when idle |
 | `Ctrl+N` | start a new session (cancels a running task or compaction) |
 | `Ctrl+U` | clear input |
@@ -377,6 +383,53 @@ keep-tokens = 20000
   and
   [ADR 026](docs/adr/026-show-compaction-progress-in-the-repl.md).
 
+## Prompt suggestions (experimental)
+
+cake-repl can ask an external `cake-suggest` binary for the next user prompt
+after a completed turn. The suggestion is shown as dim ghost text in the
+composer, replacing the `Type a prompt…` placeholder. It is never real input
+until accepted: `Ctrl+S` submits the suggested text as an ordinary prompt, and
+any typing (or history recall, tab completion, or `Ctrl+U`) discards it. A
+suggestion beginning with `/` is still sent as a prompt, never executed as a
+slash command. The feature is opt-in, off by default, and experimental:
+suggestion quality has not been qualified.
+
+```toml
+[suggestions]
+enabled = true
+cake-suggest-bin = "cake-suggest"
+```
+
+- The REPL runs one `cake-suggest suggest -json [-cake-bin <path>]
+  [-model <name>] [-profile <name>] -- <session-id>` after a completed turn
+  that ended cleanly and pinned a session. It passes the model and profile it
+  was configured with, omitting either when unset. The suggester reads the
+  session itself; cake-repl never reads or writes session files. The request is
+  read-only, bounded, and model-owned: it never blocks prompt submission and is
+  canceled when the composer is used, a new session starts, the session target
+  changes, or the REPL quits.
+- The result is one JSON document:
+  `{"suggested":true,"suggestion":"…","session_id":"…","reason":""}`. Unknown
+  fields are ignored. A `suggested:false` document, a cancellation, or a result
+  for another session is silent. A missing binary, malformed document, non-zero
+  exit, or timeout shows at most one warning per REPL process.
+- The suggestion is applied only when the input is still empty, the REPL is
+  idle, the request is current, and the session pin is the one the request
+  named. A later result cannot overwrite a draft.
+- If an automatic context compaction starts after the same turn, the
+  suggestion waits until the compactor has exited and been reaped, so it never
+  reads a session mid-append.
+- `-no-session` disables suggestions with a startup warning. The automatically
+  loaded project-local `.cake-repl.toml` cannot enable suggestions or select
+  `cake-suggest-bin`; it may only set `enabled = false`. XDG config or an
+  explicit `-config` supplies the trusted values.
+- The suggester inherits the REPL's environment and runs in the same `-cwd`,
+  so `CAKE_DATA_DIR` selects the same root and a relative `-cake-bin` resolves
+  in that directory. There is no fallback to reading session files.
+
+See
+[ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
+
 ## Config file
 
 Persistent defaults can be set in a TOML config file. Values from the config
@@ -387,9 +440,10 @@ file are overridden by CLI flags.
 Config files are loaded from two locations. Project-local values take
 precedence over XDG-level values, except that the automatic project-local layer
 cannot select `cake-bin`, cannot enable `compaction`, cannot set
-`compaction.cake-compact-bin`, and cannot tune `threshold-percent`,
-`keep-tokens`, `max-context-tokens`, or `trigger-tokens`; it may only disable
-compaction.
+`compaction.cake-compact-bin`, cannot tune `threshold-percent`,
+`keep-tokens`, `max-context-tokens`, or `trigger-tokens`, and cannot enable
+`suggestions` or set `suggestions.cake-suggest-bin`; it may only disable
+compaction or suggestions.
 
 | Path | Priority |
 |---|---|
@@ -404,11 +458,13 @@ The automatically loaded `.cake-repl.toml` cannot select the executable: its
 `cake-bin` key is ignored with a plain startup warning naming the file and key.
 It also cannot enable context compaction, set `compaction.cake-compact-bin`, or
 tune `threshold-percent`, `keep-tokens`, `max-context-tokens`, or
-`trigger-tokens`; each is ignored with a warning. It may disable compaction. Set
-the executable, enable compaction, and tune it in XDG config, an explicitly
-selected `-config` file, or `-cake-bin`. Explicitly selecting
-`.cake-repl.toml` with `-config` allows its `cake-bin` and compaction values.
-`-no-config` skips file values and these warnings.
+`trigger-tokens`; each is ignored with a warning. It cannot enable prompt
+suggestions or set `suggestions.cake-suggest-bin` either. It may disable
+compaction or suggestions. Set the executable, enable compaction or
+suggestions, and tune compaction in XDG config, an explicitly selected
+`-config` file, or `-cake-bin`. Explicitly selecting `.cake-repl.toml` with
+`-config` allows its `cake-bin` and compaction/suggestion values. `-no-config`
+skips file values and these warnings.
 
 ### Format
 
@@ -447,6 +503,13 @@ cake-compact-bin = "cake-compact"
 # Percent fallback when both absolute fields are unset (default: 80).
 threshold-percent = 80
 keep-tokens = 20000
+
+# Ask the external cake-suggest binary for the next user prompt after a
+# completed turn (default: off). XDG or explicit -config only; the automatic
+# project-local file cannot enable suggestions or select the executable.
+[suggestions]
+enabled = false
+cake-suggest-bin = "cake-suggest"
 ```
 
 ### Merge order
@@ -456,7 +519,9 @@ For `cake-bin`, precedence is hardcoded `cake` < XDG/explicit `-config` file <
 `-cake-bin`; the automatic project-local layer is excluded. The same exclusion
 applies to `compaction.enabled = true`, `compaction.cake-compact-bin`,
 `max-context-tokens`, `trigger-tokens`, `threshold-percent`, and `keep-tokens`;
-the project-local layer may only disable compaction. Trusted relative
+the project-local layer may only disable compaction. It also applies to
+`suggestions.enabled = true` and `suggestions.cake-suggest-bin`; the
+project-local layer may only disable suggestions. Trusted relative
 executable paths keep their usual resolution. A CLI flag always wins over the
 same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and

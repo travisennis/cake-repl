@@ -104,6 +104,27 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   serializes writers and the loser warns. See
   [cake-integration-and-stream-json.md](cake-integration-and-stream-json.md) for
   the subprocess contract.
+- **Prompt suggestions are an opt-in read-only external operation.** The
+  `[suggestions]` table (disabled by default) lets a completed, clean turn ask
+  `cake-suggest suggest -json … -- <session-id>` for the next user prompt after
+  the session pin and any automatic compaction have settled. The request is
+  read-only, model-owned, bounded by a 60-second context timeout, and never
+  gates prompt submission. Its result is applied only while the request
+  identity, session pin, idle state, and empty composer all still match, and it
+  is shown as dim placeholder ghost text, not as the textarea value. `Ctrl+S`
+  submits it as an ordinary prompt with slash-command parsing bypassed; typing,
+  history recall, tab completion, `Ctrl+U`, submit, `Ctrl+N`, `/new`, `/resume`,
+  `/sessions`, quit, and an unobserved exit discard the ghost and cancel the
+  request. Only one suggestion request runs at a time. Cancellation and a
+  `suggested:false` result are silent; a missing binary, malformed document,
+  non-zero exit, or timeout shows at most one warning per REPL process. The
+  suggester runs on the same child terminal boundary with the same SIGTERM and
+  `WaitDelay` bound, a 64 KiB stdout cap, an 8 KiB stderr tail, and a
+  content-free debug-log line; it never reads or writes a session file from
+  cake-repl. `-no-session` disables the feature with a startup warning, and the
+  automatically loaded project-local config cannot enable it or select
+  `cake-suggest-bin`; it may only disable it. See
+  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
   resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
@@ -172,10 +193,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   and
   [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
 - **Child terminal boundary (POSIX).** Every live prompt, replay, session
-  listing, and opt-in compaction starts in its own session with no controlling
-  terminal (`SysProcAttr{Setsid: true}` in `internal/childproc`), so a child
-  that opens `/dev/tty` gets `ENXIO` instead of prompting over or changing the
-  REPL. One helper serves every spawn site; `Replay` inherits it through
+  listing, opt-in compaction, and prompt suggestion starts in its own session
+  with no controlling terminal (`SysProcAttr{Setsid: true}` in
+  `internal/childproc`), so a child that opens `/dev/tty` gets `ENXIO` instead
+  of prompting over or changing the REPL. One helper serves every spawn site; `Replay` inherits it through
   `Start`. Windows is a no-op and claims no equivalent boundary. Start failure
   is fail-closed: do not add a pty fallback or an opt-out. See
   [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
@@ -191,10 +212,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `WaitDelay` (a hard kill — the listing has no state to flush), so a stuck
   helper, or a descendant holding the inherited stdout pipe, cannot hang the REPL.
   The external compactor follows the same model-owned lifecycle as a cake run:
-  SIGTERM then `WaitDelay`, a 1 MiB stdout cap, and a bounded stderr tail. It
-  also shares the session boundary, so it cannot reach the REPL's terminal.
-  Suspend coordination does not cover it: a suspend does not stop a running
-  compactor, which is bounded by its own cancellation paths. See
+  SIGTERM then `WaitDelay`, a 1 MiB stdout cap, and a bounded stderr tail. The
+  prompt suggester uses the same lifecycle with a 64 KiB stdout cap and an
+  8 KiB stderr tail; its cancellation is silent. Both
+  also share the session boundary, so neither can reach the REPL's terminal.
+  Suspend coordination does not cover them: a suspend does not stop a running
+  compactor or suggester, which are bounded by their own cancellation paths. See
   [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md),
   [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
   and [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).

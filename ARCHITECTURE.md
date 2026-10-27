@@ -8,7 +8,9 @@ read-only replay stream hydrates the local timeline before the first prompt; a
 bare `-resume` opens a picker of this directory's sessions instead, and hydrates
 nothing until one is chosen. When opted in, a completed turn over its context
 threshold is followed by one external `cake-compact` run that appends an
-in-place checkpoint to the same session (ADR 023).
+in-place checkpoint to the same session (ADR 023), and a completed turn may
+also ask the external `cake-suggest` binary for the next prompt and show it as
+ghost text in the composer (ADR 028).
 
 ## System boundary: cake is an external process
 
@@ -43,6 +45,11 @@ One non-cake executable is also part of the boundary: the opt-in
 passes `-fork`, never reads or writes the session file, and decodes only the
 one-document result. See
 [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+A second opt-in external executable is the prompt suggester:
+`cake-suggest suggest -json … -- <session-id>`. It is read-only and returns one
+suggestion document; the REPL never reads a session file and never parses the
+suggester's human output. See
+[`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
 
 This boundary is the project's reason to exist. Changes that cross it are out of
 scope unless the cake contract itself has changed. See
@@ -64,6 +71,8 @@ internal/cake/           cake-as-engine: subprocess lifecycle + stream-json deco
   registry.go            Live/replay run registry for suspend coordination.
 internal/compact/        External compactor: one documented subprocess and its result document.
   compact.go             Args, Compact: bounded subprocess lifecycle + document decoding.
+internal/suggest/        External prompt suggester: one documented subprocess and its result document.
+  suggest.go             Args, Suggest: bounded subprocess lifecycle + document decoding.
 internal/app/            Bubble Tea state machine (the REPL itself).
   model.go               Model struct, layout, timeline render cache.
   update.go              Event/key/command handling (the Update loop).
@@ -79,10 +88,10 @@ internal/ui/             Pure rendering: timeline, status line, tool blocks, the
 internal/version/        Binary version string (overridden by release ldflags).
 ```
 
-Dependency direction is one-way: `app` depends on `cake`, `compact`, and `ui`;
-`cake`, `compact`, and `ui` depend on neither `app` nor each other. `cake` and
-`compact` also use the leaf `internal/childproc` package for the shared session
-boundary. Keep it that way.
+Dependency direction is one-way: `app` depends on `cake`, `compact`,
+`suggest`, and `ui`; `cake`, `compact`, `suggest`, and `ui` depend on neither
+`app` nor each other. `cake`, `compact`, and `suggest` also use the leaf
+`internal/childproc` package for the shared session boundary. Keep it that way.
 
 ## Architectural invariants
 
@@ -158,6 +167,17 @@ boundary. Keep it that way.
   the model refuses prompts and session-target changes until the child has
   exited and been reaped. See
   [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+- **Prompt suggestions are opt-in, post-turn, and never gate input.** After a
+  completed turn that pins a session, one model-owned `cake-suggest` request may
+  run through `internal/suggest`. It is read-only, bounded by a context timeout,
+  and canceled by any composer use, a new session, a retarget, or quit. Its
+  result is applied only while the request identity, session pin, idle state,
+  and empty composer all still match, and it appears as dim placeholder ghost
+  text rather than editable input. `Ctrl+S` submits the ghost as an ordinary
+  prompt; slash-command parsing is bypassed so model output cannot execute a
+  command. `-no-session` disables the feature, and the untrusted project-local
+  config layer can only disable it. See
+  [`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
 - **Compaction is opt-in, between-turns, and in place.** A completed turn whose
   newest complete `turn_usage` figure reaches the configured trigger starts one
   model-owned `cake-compact` subprocess through `internal/compact`. Absolute
@@ -184,8 +204,8 @@ boundary. Keep it that way.
   and
   [`docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md`](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
 - **Child processes are detached from the REPL terminal.** On POSIX, every live
-  prompt, replay, session listing, and opt-in compaction starts in its own
-  session with `SysProcAttr{Setsid: true}` (one helper in
+  prompt, replay, session listing, opt-in compaction, and prompt suggestion
+  starts in its own session with `SysProcAttr{Setsid: true}` (one helper in
   `internal/childproc`), so the child has no controlling terminal and
   `/dev/tty` fails with `ENXIO`. Windows is a no-op and claims no equivalent
   boundary. Start failure is fail-closed, and tools that need a terminal now

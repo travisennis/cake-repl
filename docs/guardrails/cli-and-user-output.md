@@ -29,22 +29,24 @@ commands or help text (`internal/app/commands.go`), key bindings
   [ADR 017](../adr/017-default-the-cake-sandbox-to-workspace-write-interactive.md).
 - **Config file shape.** TOML config supports only stable REPL defaults:
   `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`,
-  `tool-color`, and the opt-in `[compaction]` policy table (`enabled`,
+  `tool-color`, the opt-in `[compaction]` policy table (`enabled`,
   `cake-compact-bin`, `max-context-tokens`, `trigger-tokens`,
-  `threshold-percent`, `keep-tokens`). The absolute trigger values are
-  between-turn targets, not live caps: the REPL checks them only after a
-  completed turn, from the newest complete `turn_usage`, so a long invocation
-  can pass both before the next prompt. Merge order is
+  `threshold-percent`, `keep-tokens`), and the opt-in `[suggestions]` table
+  (`enabled`, `cake-suggest-bin`). The absolute trigger values are between-turn
+  targets, not live caps: the REPL checks them only after a completed turn, from
+  the newest complete `turn_usage`, so a long invocation can pass both before
+  the next prompt. Merge order is
   hardcoded defaults < XDG config < project-local config < CLI flags, except
   `cake-bin`: the automatically loaded `.cake-repl.toml` key is ignored with a
   plain startup warning naming the file and key, even with `-no-color`.
   Executable precedence is hardcoded `cake` < XDG/explicit `-config` <
   `-cake-bin` (including trusted relative paths). The same untrusted layer cannot
-  enable compaction (`enabled = true`), set `compaction.cake-compact-bin`, or
-  tune `threshold-percent`/`keep-tokens`/`max-context-tokens`/`trigger-tokens`;
-  each is ignored with a warning, while `enabled = false` still applies.
-  Explicit `-config` may select the project file; `-no-config` skips file values
-  and warnings. Other project-local keys retain their existing behavior. See
+  enable compaction (`enabled = true`), set `compaction.cake-compact-bin`, tune
+  `threshold-percent`/`keep-tokens`/`max-context-tokens`/`trigger-tokens`,
+  enable suggestions, or set `suggestions.cake-suggest-bin`; each is ignored
+  with a warning, while `enabled = false` still applies. Explicit `-config` may
+  select the project file; `-no-config` skips file values and warnings. Other
+  project-local keys retain their existing behavior. See
   [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md)
   and
   [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
@@ -52,13 +54,16 @@ commands or help text (`internal/app/commands.go`), key bindings
   [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md) and extended
   to the absolute trigger by
   [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
+  Suggestions use the same provenance rule; see
+  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
   Session-specific values must stay out of config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
   `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
   stable. `/new`, `/resume`, and `/sessions` require an idle REPL (no live run,
   replay, or compaction); `Ctrl+N` remains the cancel-and-reset operation during
   an active run or compaction, and `/exit` cancels either before exiting.
-- **Key bindings.** `Enter` (newline), `Ctrl+S` (submit), `Ctrl+C`
+- **Key bindings.** `Enter` (newline), `Ctrl+S` (submit; when the input is
+  empty, submit the shown suggestion), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll). `Ctrl+C` cancels a running task or compaction and quits only when
@@ -151,7 +156,12 @@ in plain text like every other surface.
   newline, and help hints; it names the operation that is in flight while a
   task or compaction runs, including the compactor's elapsed age
   (`prompt · compacting 12s`), and its borders remain visible without color.
-  While the compactor runs the footer hints name `Ctrl+C cancel` and
+  When a prompt suggestion is showing, the empty composer renders it as dim
+  placeholder ghost text and the footer reads
+  `Ctrl+S use suggestion · type to dismiss`; the textarea value stays empty,
+  so typing inserts only the user's characters. The ghost is never parsed as a
+  slash command when accepted. While the compactor runs the footer hints name
+  `Ctrl+C cancel` and
   `Ctrl+N new session` instead of submit, because the prompt gate is closed.
   While
   the TUI is running, the terminal title is `cake-repl: <absolute working directory>`,

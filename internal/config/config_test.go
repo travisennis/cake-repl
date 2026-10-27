@@ -548,3 +548,124 @@ func TestCompactionValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadSuggestionsTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(`
+[suggestions]
+enabled = true
+cake-suggest-bin = "/opt/bin/cake-suggest"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Suggestions{
+		Enabled:        true,
+		EnabledSet:     true,
+		CakeSuggestBin: "/opt/bin/cake-suggest",
+	}
+	if cfg.Suggestions != want {
+		t.Fatalf("Suggestions = %+v, want %+v", cfg.Suggestions, want)
+	}
+	if err := cfg.Suggestions.Validate(); err != nil {
+		t.Fatalf("Validate = %v", err)
+	}
+}
+
+func TestSuggestionsValidate(t *testing.T) {
+	if err := (Suggestions{}).Validate(); err != nil {
+		t.Fatalf("disabled empty suggestions = %v, want nil", err)
+	}
+	if err := (Suggestions{Enabled: true}).Validate(); err == nil {
+		t.Fatal("enabled suggestions with no binary: want error")
+	}
+	if err := (Suggestions{Enabled: true, CakeSuggestBin: "cake-suggest"}).Validate(); err != nil {
+		t.Fatalf("enabled suggestions with a binary = %v, want nil", err)
+	}
+}
+
+func TestMergeSuggestionsDefaultsAndOverrides(t *testing.T) {
+	base := DefaultSuggestions()
+	if base.Enabled || base.CakeSuggestBin != DefaultCakeSuggestBin {
+		t.Fatalf("DefaultSuggestions = %+v", base)
+	}
+
+	file := &Config{Suggestions: Suggestions{Enabled: true, EnabledSet: true}}
+	got := MergeSuggestions(base, file)
+	if !got.Enabled || got.CakeSuggestBin != DefaultCakeSuggestBin {
+		t.Fatalf("MergeSuggestions = %+v", got)
+	}
+
+	file.Suggestions.CakeSuggestBin = "local-suggester"
+	got = MergeSuggestions(base, file)
+	if got.CakeSuggestBin != "local-suggester" {
+		t.Fatalf("binary override lost: %+v", got)
+	}
+
+	if got := MergeSuggestions(base, nil); got != base {
+		t.Fatalf("MergeSuggestions(nil) = %+v, want %+v", got, base)
+	}
+}
+
+func TestMergeSuggestionsDisableWins(t *testing.T) {
+	xdg := &Config{Suggestions: Suggestions{Enabled: true, EnabledSet: true, CakeSuggestBin: "xdg-suggester"}}
+	local := &Config{Suggestions: Suggestions{Enabled: false, EnabledSet: true}}
+	got := Merge(xdg, local)
+	if got.Suggestions.Enabled {
+		t.Fatalf("project-local enabled=false did not disable: %+v", got.Suggestions)
+	}
+	if got.Suggestions.CakeSuggestBin != "xdg-suggester" {
+		t.Fatalf("unrelated executable lost: %+v", got.Suggestions)
+	}
+}
+
+func TestLoadProjectCannotEnableOrSelectSuggester(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".cake-repl.toml")
+	if err := os.WriteFile(path, []byte(`
+[suggestions]
+enabled = true
+cake-suggest-bin = "/tmp/untrusted-suggester"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, ignored, err := LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Suggestions.Enabled || cfg.Suggestions.CakeSuggestBin != "" {
+		t.Fatalf("project-local suggestion keys survived: %+v", cfg.Suggestions)
+	}
+	want := []string{"suggestions.cake-suggest-bin", "suggestions.enabled"}
+	if strings.Join(ignored, ",") != strings.Join(want, ",") {
+		t.Fatalf("ignored = %v, want %v", ignored, want)
+	}
+
+	// Disabling is allowed, and an untrusted file must not be able to turn an
+	// already-enabled trusted setting back on in the same table.
+	if writeErr := os.WriteFile(path, []byte("[suggestions]\nenabled = false\n"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	cfg, ignored, err = LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Suggestions.Enabled || !cfg.Suggestions.EnabledSet {
+		t.Fatalf("project-local disable was not preserved: %+v", cfg.Suggestions)
+	}
+	if len(ignored) != 0 {
+		t.Fatalf("ignored = %v, want none", ignored)
+	}
+
+	trusted := &Config{Suggestions: Suggestions{Enabled: true, EnabledSet: true, CakeSuggestBin: "trusted-suggester"}}
+	merged := Merge(trusted, cfg)
+	if merged.Suggestions.Enabled {
+		t.Fatalf("trusted true survived a project-local false: %+v", merged.Suggestions)
+	}
+}

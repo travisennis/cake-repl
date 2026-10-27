@@ -67,6 +67,9 @@ type Config struct {
 	// The zero value is disabled, so a caller that does not wire it behaves
 	// exactly as before.
 	Compaction CompactionConfig
+	// Suggestions is the opt-in after-turn prompt-suggestion configuration.
+	// The zero value is disabled.
+	Suggestions SuggestionConfig
 }
 
 // CompactionConfig is the resolved `[compaction]` configuration. Bin is the
@@ -85,6 +88,13 @@ type CompactionConfig struct {
 	KeepTokens       int
 }
 
+// SuggestionConfig is the resolved `[suggestions]` configuration. Bin is the
+// external suggester executable. See ADR 028.
+type SuggestionConfig struct {
+	Enabled bool
+	Bin     string
+}
+
 const (
 	minInputHeight           = 3
 	maxInputHeight           = 8
@@ -100,6 +110,11 @@ const (
 	// loadHistory drains and skips larger ones while keeping the records around
 	// them, instead of failing the whole load.
 	maxHistoryRecordBytes = 1 << 20 // 1 MiB
+
+	// defaultInputPlaceholder is the composer placeholder when no suggestion is
+	// showing. A suggestion replaces it with the same dim styling, so accepting
+	// or dismissing a suggestion always returns to this one value.
+	defaultInputPlaceholder = "Type a prompt…"
 
 	// inlineViewportMax caps the timeline viewport in inline mode so the live
 	// region never grows tall enough to push the terminal's own history out of
@@ -153,6 +168,20 @@ type Model struct {
 	// new-session boundary and must not affect the fresh state. It also covers
 	// a canceled compaction being drained after Ctrl+N.
 	newSessionPending bool
+
+	// Suggestion state (ADR 028). At most one read-only suggestion request is in
+	// flight; suggestionSeq allocates a request identity that never repeats, and
+	// suggestionReq is the identity whose result may still be applied. A draft,
+	// a new turn, or a session change invalidates the identity so a late result
+	// cannot overwrite the composer. suggestionText is the currently shown ghost
+	// suggestion; empty means none. suggestionWarned keeps a broken suggester to
+	// one visible warning per REPL process.
+	suggesting       bool
+	suggestionSeq    uint64
+	suggestionReq    uint64
+	suggestionCancel context.CancelFunc
+	suggestionText   string
+	suggestionWarned bool
 
 	session      sessionState
 	history      promptHistory
@@ -219,7 +248,7 @@ func New(cfg Config) Model {
 	th.ToolColor = cfg.ToolColor
 
 	input := textarea.New()
-	input.Placeholder = "Type a prompt…"
+	input.Placeholder = defaultInputPlaceholder
 	input.FocusedStyle.Placeholder = th.Placeholder
 	input.BlurredStyle.Placeholder = th.Placeholder
 	input.ShowLineNumbers = false
@@ -393,6 +422,9 @@ func (m Model) CancelRunning() {
 		m.replayRun.Cancel()
 	}
 	m.cancelCompaction()
+	// A suggestion is read-only, but it is still a child the unobserved exit
+	// path must stop; no result may arrive after the program has returned.
+	m.cancelSuggestion()
 	// A session listing can be in flight without the model ever seeing a key:
 	// the startup picker starts one before the first frame, and main calls this
 	// for an exit the Update loop never observed (SIGINT, SIGTERM, a recovered

@@ -315,6 +315,22 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		KeepTokens:       compaction.KeepTokens,
 	}
 
+	// Resolve the `[suggestions]` table over the hardcoded defaults. Like
+	// compaction, there is no CLI flag for it, so trusted config is
+	// authoritative and the project-local layer may only disable it.
+	suggestions := config.MergeSuggestions(config.DefaultSuggestions(), cfgFile)
+	if err := suggestions.Validate(); err != nil {
+		return app.Config{}, err
+	}
+	if *f.noSession && suggestions.Enabled {
+		fmt.Fprintf(warnings, "cake-repl: warning: prompt suggestions are disabled by -no-session\n")
+		suggestions.Enabled = false
+	}
+	cfg.Suggestions = app.SuggestionConfig{
+		Enabled: suggestions.Enabled,
+		Bin:     suggestions.CakeSuggestBin,
+	}
+
 	if f.resume.set {
 		// A bare -resume names no session, so nothing is hydrated and nothing is
 		// pinned: the REPL opens the session picker and the picked row pins the
@@ -482,6 +498,10 @@ func projectConfigWarning(key, path string) string {
 		return fmt.Sprintf("cake-repl: warning: ignoring cake-bin in project-local config %q; use XDG config, -config, or -cake-bin to select the executable", path)
 	case "compaction.cake-compact-bin":
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.cake-compact-bin in project-local config %q; use XDG config or -config to select the compactor", path)
+	case "suggestions.cake-suggest-bin":
+		return fmt.Sprintf("cake-repl: warning: ignoring suggestions.cake-suggest-bin in project-local config %q; use XDG config or -config to select the suggester", path)
+	case "suggestions.enabled":
+		return fmt.Sprintf("cake-repl: warning: ignoring suggestions.enabled = true in project-local config %q; enable suggestions in XDG config or an explicit -config", path)
 	case "compaction.enabled":
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.enabled = true in project-local config %q; enable compaction in XDG config or an explicit -config", path)
 	case "compaction.max-context-tokens":

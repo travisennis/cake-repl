@@ -287,6 +287,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case compactionDoneMsg:
 		return m.finishCompaction(msg)
 
+	case suggestionDoneMsg:
+		return m.finishSuggestion(msg), nil
+
 	case replayStartedMsg:
 		if msg.err != nil {
 			if m.replayPending {
@@ -413,6 +416,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // operand whose order relative to this call is unspecified.
 func (m Model) quit() (Model, tea.Cmd) {
 	m.cancelCompaction()
+	m.cancelSuggestion()
 	m.cancelSessionList()
 	return m, tea.Quit
 }
@@ -451,6 +455,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startNewSession()
 
 	case key.Matches(msg, m.keys.ClearInput):
+		m.clearSuggestion()
 		m.input.Reset()
 		m.layout()
 		return m, nil
@@ -473,6 +478,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// multi-line input they keep moving the cursor.
 	case key.Matches(msg, m.keys.HistoryPrev):
 		if m.input.Line() == 0 {
+			m.clearSuggestion()
 			if text, ok := m.history.Prev(m.input.Value()); ok {
 				m.input.SetValue(text)
 				m.layout()
@@ -482,6 +488,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.HistoryNext):
 		if m.input.Line() == m.input.LineCount()-1 {
+			m.clearSuggestion()
 			if text, ok := m.history.Next(); ok {
 				m.input.SetValue(text)
 				m.layout()
@@ -490,7 +497,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Any key that reaches here modifies the input — reset the completion cycle.
+	// Any key that reaches here modifies the input — reset the completion cycle
+	// and dismiss a ghost suggestion before the character is inserted, so a
+	// suggestion is never appended to by the first typed word.
+	m.clearSuggestion()
 	m.completionPrefix = ""
 	m.completionMatches = nil
 	m.completionIdx = 0
@@ -536,6 +546,7 @@ func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // drained normally, but its remaining events are suppressed so they cannot enter
 // or re-pin the new session.
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
+	m.clearSuggestion()
 	if m.running {
 		m.newSessionPending = true
 		m.run.Cancel()
@@ -618,6 +629,9 @@ func (m Model) copySessionID() (tea.Model, tea.Cmd) {
 
 // handleTabComplete implements Tab key completion with cycling.
 func (m Model) handleTabComplete() (tea.Model, tea.Cmd) {
+	// Tab is an input action; a suggestion is a one-key hint, not a prefix to
+	// complete. Dismiss it before the completer reads the (empty) input.
+	m.clearSuggestion()
 	input := m.input.Value()
 
 	// If the input changed since the last Tab press, start a fresh cycle.
@@ -677,21 +691,32 @@ func (m Model) handleTabComplete() (tea.Model, tea.Cmd) {
 
 func (m Model) submit() (tea.Model, tea.Cmd) {
 	text := strings.TrimSpace(m.input.Value())
+	// Ctrl+S on an empty composer accepts the ghost suggestion. The suggestion
+	// is model output, not a user-issued command, so it skips slash-command
+	// parsing and always starts an ordinary prompt run.
+	fromSuggestion := false
+	if text == "" && m.suggestionActive() {
+		text = m.suggestionText
+		fromSuggestion = true
+	}
 	if text == "" {
 		return m, nil
 	}
 
-	if cmd, ok, err := ParseCommand(text); ok {
-		if m.history.Add(text) && m.persistHistory(text) {
-			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: historyTooLargeWarning()})
+	if !fromSuggestion {
+		if cmd, ok, err := ParseCommand(text); ok {
+			if m.history.Add(text) && m.persistHistory(text) {
+				m.appendItem(ui.Item{Kind: ui.KindWarning, Text: historyTooLargeWarning()})
+			}
+			m.input.Reset()
+			m.clearSuggestion()
+			m.layout()
+			if err != nil {
+				m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
+				return m, nil
+			}
+			return m.execCommand(cmd)
 		}
-		m.input.Reset()
-		m.layout()
-		if err != nil {
-			m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
-			return m, nil
-		}
-		return m.execCommand(cmd)
 	}
 
 	if m.hydrating || m.replayPending || m.replayRun != nil {
@@ -765,6 +790,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		return m.quit()
 
 	case CmdNew:
+		m.clearSuggestion()
 		m.session.Reset()
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt starts a fresh cake session"})
 
@@ -794,6 +820,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 // /resume command. The /sessions browser's Enter delegates here so both paths
 // share one notice and one state transition.
 func (m Model) resumeSession(id string) (tea.Model, tea.Cmd) {
+	m.clearSuggestion()
 	m.session.UseResume(id)
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt resumes session " + id})
 	return m, nil
@@ -869,6 +896,7 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	}
 	m.appendItem(ui.Item{Kind: ui.KindUser, Text: prompt})
 	m.input.Reset()
+	m.clearSuggestion()
 	m.layout()
 	return m, tea.Batch(m.spin.Tick, waitForRun(run), m.titleCmd())
 }
@@ -1142,6 +1170,14 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 		next, cmd := m.startCompaction()
 		if cmd != nil {
 			return next, cmd
+		}
+	}
+	// A suggestion waits for a completed turn and, when one runs, for the
+	// compactor to settle so it never reads a session mid-append.
+	if m.suggestionTurnEligible(res) {
+		next, cmd := m.maybeStartSuggestion()
+		if cmd != nil {
+			return next, tea.Batch(cmd, next.titleCmd())
 		}
 	}
 	return m, m.titleCmd()
