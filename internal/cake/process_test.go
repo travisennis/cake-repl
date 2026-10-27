@@ -48,9 +48,9 @@ func waitForPIDFile(t *testing.T, path string) int {
 // configureProcess the child inherits the test process's session, so sid != pid.
 func requireSessionLeader(t *testing.T, pid int) {
 	t.Helper()
-	sid, err := syscall.Getsid(pid)
+	sid, err := getSID(pid)
 	if err != nil {
-		t.Fatalf("Getsid(%d): %v", pid, err)
+		t.Fatalf("getsid(%d): %v", pid, err)
 	}
 	if sid != pid {
 		t.Fatalf("session id = %d, want %d (child was not detached)", sid, pid)
@@ -140,6 +140,34 @@ func waitForGone(t *testing.T, pid int, timeout time.Duration) {
 			t.Fatalf("descendant %d is still alive (kill 0: %v)", pid, err)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestNormalExitKeepsPipeFreeDescendant pins the graceful side of the policy: a
+// normal turn does not arm the group timer, so a background process that closed
+// the inherited pipes outlives the turn.
+func TestNormalExitKeepsPipeFreeDescendant(t *testing.T) {
+	descFile := filepath.Join(t.TempDir(), "desc")
+	t.Setenv("DESC_FILE", descFile)
+	t.Cleanup(func() { killPIDFile(t, descFile) })
+	bin := writeFakeCake(t, `
+sleep 30 > /dev/null 2>&1 &
+echo $! > "$DESC_FILE"
+exit 0
+`)
+
+	run, err := Start(Options{Bin: bin, Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	_, res := collect(t, run)
+	if res.ExitCode != 0 || res.Canceled || res.Err != nil {
+		t.Fatalf("result = %+v, want a clean exit", res)
+	}
+
+	desc := waitForPIDFile(t, descFile)
+	if err := syscall.Kill(desc, 0); err != nil {
+		t.Errorf("background process %d did not survive a normal turn: %v", desc, err)
 	}
 }
 
