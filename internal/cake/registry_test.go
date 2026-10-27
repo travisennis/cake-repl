@@ -38,6 +38,29 @@ func TestRegistryToleratesEmptyAndReaped(t *testing.T) {
 	}
 }
 
+// TestRegistryAddWhileSuspendedPausesNewRun covers the window between StopAll's
+// snapshot and the REPL's self-stop: a run registered while the registry is
+// suspended is stopped by Add, and a later ContinueAll clears the state.
+func TestRegistryAddWhileSuspendedPausesNewRun(t *testing.T) {
+	reg := NewRegistry(nil)
+	reg.StopAll()
+	if !reg.suspended {
+		t.Fatal("registry did not enter the suspended state")
+	}
+
+	// pid 0 makes Stop a no-op, so this pins the state transition without
+	// sending a signal to the test process's group.
+	reg.Add(&Run{})
+	if !reg.suspended {
+		t.Fatal("a run added during the suspend cleared the state")
+	}
+
+	reg.ContinueAll()
+	if reg.suspended {
+		t.Fatal("ContinueAll did not clear the suspended state")
+	}
+}
+
 // TestNilRegistryIsSafe keeps a caller that never wires a registry from
 // panicking during startup or shutdown.
 func TestNilRegistryIsSafe(t *testing.T) {

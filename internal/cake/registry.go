@@ -11,6 +11,11 @@ type Registry struct {
 	mu   sync.Mutex
 	runs map[*Run]struct{}
 	logf func(string, ...any)
+
+	// cycleMu serializes a stop/continue cycle with Add, so a run registered
+	// after StopAll's snapshot is still paused. suspended is guarded by mu.
+	cycleMu   sync.Mutex
+	suspended bool
 }
 
 // NewRegistry returns an empty registry. A nil logf discards diagnostics.
@@ -31,7 +36,23 @@ func (r *Registry) Add(run *Run) {
 		r.runs = make(map[*Run]struct{})
 	}
 	r.runs[run] = struct{}{}
+	suspended := r.suspended
 	r.mu.Unlock()
+	if !suspended {
+		return
+	}
+
+	// A run can start between StopAll's snapshot and the REPL's self-stop.
+	// Serialize with the cycle and re-check: if a resume won the race, the run
+	// must not be stopped after ContinueAll already ran.
+	r.cycleMu.Lock()
+	defer r.cycleMu.Unlock()
+	r.mu.Lock()
+	suspended = r.suspended
+	r.mu.Unlock()
+	if suspended {
+		r.logFailure("stopping", run, run.Stop())
+	}
 }
 
 // Remove unregisters a run. It is safe on a nil registry.
@@ -47,10 +68,16 @@ func (r *Registry) Remove(run *Run) {
 // StopAll pauses every registered run's process group. The mutex is released
 // before any signal, so a slow syscall cannot block registration or removal.
 func (r *Registry) StopAll() {
+	if r == nil {
+		return
+	}
+	r.cycleMu.Lock()
+	defer r.cycleMu.Unlock()
+	r.mu.Lock()
+	r.suspended = true
+	r.mu.Unlock()
 	for _, run := range r.snapshot() {
-		if err := run.Stop(); err != nil && !processGone(err) && r.logf != nil {
-			r.logf("suspend: stopping engine run %d failed: %v", run.pid, err)
-		}
+		r.logFailure("stopping", run, run.Stop())
 	}
 }
 
@@ -58,11 +85,24 @@ func (r *Registry) StopAll() {
 // during the suspend is skipped by Run.Continue, and an ESRCH from a race is
 // not logged.
 func (r *Registry) ContinueAll() {
-	for _, run := range r.snapshot() {
-		if err := run.Continue(); err != nil && !processGone(err) && r.logf != nil {
-			r.logf("suspend: continuing engine run %d failed: %v", run.pid, err)
-		}
+	if r == nil {
+		return
 	}
+	r.cycleMu.Lock()
+	defer r.cycleMu.Unlock()
+	r.mu.Lock()
+	r.suspended = false
+	r.mu.Unlock()
+	for _, run := range r.snapshot() {
+		r.logFailure("continuing", run, run.Continue())
+	}
+}
+
+func (r *Registry) logFailure(action string, run *Run, err error) {
+	if err == nil || processGone(err) || r.logf == nil {
+		return
+	}
+	r.logf("suspend: %s engine run %d failed: %v", action, run.pid, err)
 }
 
 func (r *Registry) snapshot() []*Run {

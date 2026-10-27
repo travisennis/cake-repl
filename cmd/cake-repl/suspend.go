@@ -85,9 +85,9 @@ func watchSuspend(prog terminalProgram, inline bool, runs engineRuns, logf func(
 				// a Reset-and-raise is swallowed instead of stopping the
 				// process. SIGSTOP cannot be caught, ignored, or blocked, so
 				// the stop is reliable and fg resumes it with SIGCONT, which
-				// this call returns on. The group is signalled, not just this
-				// process, so the cake child pauses with the REPL instead of
-				// running on unwatched.
+				// this call returns on. Signalling the whole group stops the
+				// REPL and any non-detached child together. The detached engine
+				// was already paused by stopRuns; this signal cannot reach it.
 				stop: func() {
 					err := syscall.Kill(0, syscall.SIGSTOP)
 					if err != nil {
