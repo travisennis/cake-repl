@@ -171,3 +171,7 @@ quality claim.
   hint, and resolves it into one outcome row (including an explicit skip for a
   no-op). The session pin, gate, cancellation, and result semantics above are
   unchanged.
+- [ADR 029](029-let-compaction-select-its-own-summarizer-model-and-reasoning-effort.md)
+  extends the summarizer selection: `[compaction]` may override the turn
+  model/profile and set a reasoning effort; the compactor argument and trigger
+  contracts above are unchanged.

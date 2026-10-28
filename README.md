@@ -337,8 +337,10 @@ keep-tokens = 20000
   `trigger-tokens` must be below `max-context-tokens`; otherwise startup fails
   with a config error naming the field. Setting only one is also an error.
 - The summary is a metered model call made by `cake-compact` through cake. It
-  uses the REPL's `-model` and `-profile` when set; with neither, cake's own
-  default model applies.
+  uses `summarizer-model` / `summarizer-profile` when set, then falls back to
+  the REPL's `-model` / `-profile`; `summarizer-reasoning-effort` is passed
+  through when set. With none of these, cake's own default model and reasoning
+  settings apply.
 - A compaction announces itself as soon as it starts: the timeline gains a
   `context compaction started · Ctrl+C cancels` row, the composer and status
   line read `compacting <elapsed>` with whole seconds, the composer footer
@@ -363,9 +365,11 @@ keep-tokens = 20000
   `turn_usage` replaces it.
 - `-no-session` disables compaction with a startup warning. The automatically
   loaded project-local `.cake-repl.toml` cannot enable compaction, choose
-  `cake-compact-bin`, or tune `threshold-percent`, `keep-tokens`,
-  `max-context-tokens`, or `trigger-tokens`; only XDG config or an explicit
-  `-config` can. A project may only disable compaction.
+  `cake-compact-bin`, tune `threshold-percent`, `keep-tokens`,
+  `max-context-tokens`, or `trigger-tokens`, or select the summary with
+  `summarizer-model`, `summarizer-profile`, or
+  `summarizer-reasoning-effort`; only XDG config or an explicit `-config` can.
+  A project may only disable compaction.
 - `cake-compact` must be installed, must support `-threshold-tokens` for
   absolute mode, and the configured `cake` must support
   `cake sessions checkpoint`. The compactor inherits the REPL's environment and
@@ -382,6 +386,28 @@ keep-tokens = 20000
   [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md),
   and
   [ADR 026](docs/adr/026-show-compaction-progress-in-the-repl.md).
+
+### Summarizer selection
+
+The summary is a separate metered call, so it can use a different model,
+profile, or reasoning effort from the coding turn:
+
+```toml
+[compaction]
+summarizer-model = "deepseek-flash"
+summarizer-profile = "summary"
+summarizer-reasoning-effort = "low"
+```
+
+Each key is independent. An unset `summarizer-model` or `summarizer-profile`
+falls back to the REPL's `-model` or `-profile`; an unset
+`summarizer-reasoning-effort` leaves cake's own reasoning default in effect.
+These keys are accepted only from XDG config or an explicit `-config`; the
+automatic project-local file ignores them with a startup warning because they
+select a metered operation's cost and behavior. `summarizer-reasoning-effort`
+requires a `cake-compact` build that supports
+`-summarizer-reasoning-effort`. See
+[ADR 029](docs/adr/029-let-compaction-select-its-own-summarizer-model-and-reasoning-effort.md).
 
 ## Prompt suggestions (experimental)
 
@@ -443,9 +469,10 @@ Config files are loaded from two locations. Project-local values take
 precedence over XDG-level values, except that the automatic project-local layer
 cannot select `cake-bin`, cannot enable `compaction`, cannot set
 `compaction.cake-compact-bin`, cannot tune `threshold-percent`,
-`keep-tokens`, `max-context-tokens`, or `trigger-tokens`, and cannot enable
-`suggestions` or set `suggestions.cake-suggest-bin`; it may only disable
-compaction or suggestions.
+`keep-tokens`, `max-context-tokens`, or `trigger-tokens`, cannot select
+`summarizer-model`, `summarizer-profile`, or `summarizer-reasoning-effort`,
+and cannot enable `suggestions` or set `suggestions.cake-suggest-bin`; it may
+only disable compaction or suggestions.
 
 | Path | Priority |
 |---|---|
@@ -458,10 +485,11 @@ default paths. Pass `--no-config` to skip config file loading entirely.
 
 The automatically loaded `.cake-repl.toml` cannot select the executable: its
 `cake-bin` key is ignored with a plain startup warning naming the file and key.
-It also cannot enable context compaction, set `compaction.cake-compact-bin`, or
-tune `threshold-percent`, `keep-tokens`, `max-context-tokens`, or
-`trigger-tokens`; each is ignored with a warning. It cannot enable prompt
-suggestions or set `suggestions.cake-suggest-bin` either. It may disable
+It also cannot enable context compaction, set `compaction.cake-compact-bin`, tune
+`threshold-percent`, `keep-tokens`, `max-context-tokens`, or `trigger-tokens`,
+or select `summarizer-model`, `summarizer-profile`, or
+`summarizer-reasoning-effort`; each is ignored with a warning. It cannot enable
+prompt suggestions or set `suggestions.cake-suggest-bin` either. It may disable
 compaction or suggestions. Set the executable, enable compaction or
 suggestions, and tune compaction in XDG config, an explicitly selected
 `-config` file, or `-cake-bin`. Explicitly selecting `.cake-repl.toml` with
@@ -505,6 +533,12 @@ cake-compact-bin = "cake-compact"
 # Percent fallback when both absolute fields are unset (default: 80).
 threshold-percent = 80
 keep-tokens = 20000
+# Optional: use a different model/profile/reasoning effort for the summary.
+# Each falls back to the turn selection (model/profile) or cake's default
+# (reasoning effort). Trusted config only; project-local keys are ignored.
+# summarizer-model = "deepseek-flash"
+# summarizer-profile = "summary"
+# summarizer-reasoning-effort = "low"
 
 # Ask the external cake-suggest binary for the next user prompt after a
 # completed turn (default: off). XDG or explicit -config only; the automatic
@@ -520,10 +554,12 @@ Hardcoded defaults < XDG config < project-local config < CLI flags.
 For `cake-bin`, precedence is hardcoded `cake` < XDG/explicit `-config` file <
 `-cake-bin`; the automatic project-local layer is excluded. The same exclusion
 applies to `compaction.enabled = true`, `compaction.cake-compact-bin`,
-`max-context-tokens`, `trigger-tokens`, `threshold-percent`, and `keep-tokens`;
-the project-local layer may only disable compaction. It also applies to
-`suggestions.enabled = true` and `suggestions.cake-suggest-bin`; the
-project-local layer may only disable suggestions. Trusted relative
+`max-context-tokens`, `trigger-tokens`, `threshold-percent`, `keep-tokens`,
+`summarizer-model`, `summarizer-profile`, and
+`summarizer-reasoning-effort`; the project-local layer may only disable
+compaction. It also applies to `suggestions.enabled = true` and
+`suggestions.cake-suggest-bin`; the project-local layer may only disable
+suggestions. Trusted relative
 executable paths keep their usual resolution. A CLI flag always wins over the
 same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and

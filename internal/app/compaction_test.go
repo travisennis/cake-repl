@@ -405,6 +405,50 @@ JSON
 	}
 }
 
+// TestFinishRunUsesCompactionSummarizerSelection proves the compaction table's
+// model/profile/effort override the turn selection without changing the
+// compactor's fixed argument shape.
+func TestFinishRunUsesCompactionSummarizerSelection(t *testing.T) {
+	argsPath := filepath.Join(t.TempDir(), "args")
+	t.Setenv("ARGS_FILE", argsPath)
+	bin := writeFakeCompactor(t, `
+printf '%s\n' "$@" >> "$ARGS_FILE"
+cat <<'JSON'
+{"compacted":true,"source_session_id":"11111111-2222-3333-4444-555555555555","session_id":"11111111-2222-3333-4444-555555555555","in_place":true,"checkpoint_id":"c-1","boundary":4,"before_tokens":170000,"after_tokens":24000,"window":200000,"retained_count":4}
+JSON
+`)
+	m := compactionModelWithConfig(t, CompactionConfig{
+		Enabled:                   true,
+		Bin:                       bin,
+		ThresholdPercent:          80,
+		KeepTokens:                20000,
+		SummarizerModel:           "compact-model",
+		SummarizerProfile:         "compact-profile",
+		SummarizerReasoningEffort: "low",
+	}, 170_000, 200_000)
+
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
+	m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
+
+	raw, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(string(raw))
+	want := []string{
+		"compact", "-json", "-threshold", "-threshold-percent", "80",
+		"-keep-tokens", "20000", "-cake-bin", "/opt/bin/cake",
+		"-summarizer-model", "compact-model",
+		"-summarizer-profile", "compact-profile",
+		"-summarizer-reasoning-effort", "low",
+		"--", compactionSessionID,
+	}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("compactor args = %v, want %v", got, want)
+	}
+}
+
 // TestFinishRunAbsoluteCompactionArgs checks the absolute trigger reaches the
 // compactor as one -threshold-tokens flag carrying the same line the REPL used,
 // including the window fallback, and that no percent, force, or fork flag leaks

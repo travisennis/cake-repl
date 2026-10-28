@@ -76,16 +76,22 @@ type Config struct {
 // external compactor executable, MaxContextTokens is the quality ceiling for
 // absolute mode, TriggerTokens is the absolute compaction line, and
 // ThresholdPercent/KeepTokens are the percent fallback and retained-tail target.
-// The trigger and ceiling are between-turn targets, not in-invocation caps; the
-// ceiling is policy only and is never passed to the compactor. See ADR 023 and
-// ADR 025.
+// SummarizerModel, SummarizerProfile, and SummarizerReasoningEffort override the
+// summarizer selection for compaction only; empty values fall back to the
+// REPL's -model/-profile and cake's own reasoning default. The trigger and
+// ceiling are between-turn targets, not in-invocation caps; the ceiling is
+// policy only and is never passed to the compactor. See ADR 023, ADR 025, and
+// ADR 029.
 type CompactionConfig struct {
-	Enabled          bool
-	Bin              string
-	MaxContextTokens int
-	TriggerTokens    int
-	ThresholdPercent int
-	KeepTokens       int
+	Enabled                   bool
+	Bin                       string
+	MaxContextTokens          int
+	TriggerTokens             int
+	ThresholdPercent          int
+	KeepTokens                int
+	SummarizerModel           string
+	SummarizerProfile         string
+	SummarizerReasoningEffort string
 }
 
 // SuggestionConfig is the resolved `[suggestions]` configuration. Bin is the

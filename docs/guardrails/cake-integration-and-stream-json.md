@@ -71,9 +71,13 @@ consumes cake events. This is the project's core external contract.
   REPL runs. `cake-compact compact -json -threshold` is invoked with exactly one
   threshold mode: `-threshold-tokens` carrying the effective absolute line in
   absolute mode, or `-threshold-percent` in the legacy fallback. It also gets
-  `-keep-tokens`, `-cake-bin` when cake-repl has one, `-summarizer-model` and
-  `-summarizer-profile` from the model and profile the REPL was configured with
-  (each omitted when unset), and `-- <session-id>`. The absolute quality ceiling
+  `-keep-tokens`, `-cake-bin` when cake-repl has one, `-summarizer-model`,
+  `-summarizer-profile`, and `-summarizer-reasoning-effort`, and
+  `-- <session-id>`. The model and profile come from `[compaction]` when set and
+  otherwise from the REPL's turn `-model`/`-profile`; each is omitted when
+  unset. Reasoning effort is passed only when `[compaction]` selects it, so
+  cake's own default otherwise. All three selection keys are trusted-config
+  only. The absolute quality ceiling
   is never passed as the trigger. The trigger is a between-turn target, not a
   live cap: the REPL evaluates it after a completed turn, so one invocation can
   grow past it before the compactor runs. Never pass `-fork` or `-force`: the

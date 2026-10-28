@@ -166,14 +166,15 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	m.compactionElapsed = 0
 	req := m.compactionReq
 	opts := compact.Options{
-		Bin:               m.cfg.Compaction.Bin,
-		Cwd:               m.cfg.Cwd,
-		SessionID:         sessionID,
-		CakeBin:           m.cfg.CakeBin,
-		KeepTokens:        m.cfg.Compaction.KeepTokens,
-		SummarizerModel:   m.cfg.Model,
-		SummarizerProfile: m.cfg.Profile,
-		DebugLog:          m.cfg.DebugLog,
+		Bin:                       m.cfg.Compaction.Bin,
+		Cwd:                       m.cfg.Cwd,
+		SessionID:                 sessionID,
+		CakeBin:                   m.cfg.CakeBin,
+		KeepTokens:                m.cfg.Compaction.KeepTokens,
+		SummarizerModel:           firstNonEmpty(m.cfg.Compaction.SummarizerModel, m.cfg.Model),
+		SummarizerProfile:         firstNonEmpty(m.cfg.Compaction.SummarizerProfile, m.cfg.Profile),
+		SummarizerReasoningEffort: m.cfg.Compaction.SummarizerReasoningEffort,
+		DebugLog:                  m.cfg.DebugLog,
 	}
 	if trigger.absolute {
 		opts.ThresholdTokens = trigger.tokens
@@ -360,6 +361,17 @@ func compactionElapsedText(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dh%02dm%02ds", secs/3600, (secs/60)%60, secs%60)
 	}
+}
+
+// firstNonEmpty returns the first non-empty value. Compaction uses it so an
+// unset summarizer model or profile falls back to the REPL's turn selection.
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // compactionFailureText renders the one diagnostic for a failed compactor run.

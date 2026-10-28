@@ -876,6 +876,12 @@ func TestStartupCompactionConfig(t *testing.T) {
 	absoluteTuned.TriggerTokens = 350000
 	absoluteTuned.KeepTokens = 12000
 
+	const summarizerXDG = "[compaction]\nenabled = true\nsummarizer-model = \"summary-model\"\nsummarizer-profile = \"summary-profile\"\nsummarizer-reasoning-effort = \"low\"\n"
+	summarizerTuned := enabled
+	summarizerTuned.SummarizerModel = "summary-model"
+	summarizerTuned.SummarizerProfile = "summary-profile"
+	summarizerTuned.SummarizerReasoningEffort = "low"
+
 	tests := []struct {
 		name          string
 		xdg           string
@@ -889,6 +895,18 @@ func TestStartupCompactionConfig(t *testing.T) {
 		{name: "disabled by default", want: defaults},
 		{name: "XDG enables and tunes", xdg: enableXDG, want: enabledTuned},
 		{name: "XDG enables absolute mode", xdg: absoluteXDG, want: absoluteTuned},
+		{name: "XDG selects the compaction summarizer", xdg: summarizerXDG, want: summarizerTuned},
+		{
+			name:  "project cannot select the compaction summarizer",
+			xdg:   summarizerXDG,
+			local: "[compaction]\nsummarizer-model = \"untrusted-model\"\nsummarizer-profile = \"untrusted-profile\"\nsummarizer-reasoning-effort = \"max\"\n",
+			want:  summarizerTuned,
+			wantWarn: []string{
+				"ignoring compaction.summarizer-model",
+				"ignoring compaction.summarizer-profile",
+				"ignoring compaction.summarizer-reasoning-effort",
+			},
+		},
 		{
 			name:     "project cannot tune absolute thresholds",
 			xdg:      absoluteXDG,
@@ -939,6 +957,11 @@ func TestStartupCompactionConfig(t *testing.T) {
 			name:    "invalid threshold is rejected",
 			xdg:     "[compaction]\nenabled = true\nthreshold-percent = 101\n",
 			wantErr: "threshold-percent",
+		},
+		{
+			name:    "invalid reasoning effort is rejected",
+			xdg:     "[compaction]\nenabled = true\nsummarizer-reasoning-effort = \"maximal\"\n",
+			wantErr: "summarizer-reasoning-effort",
 		},
 		{
 			name:     "invalid project tuning is ignored",

@@ -79,4 +79,7 @@ project-local tuning allowance and the residual-risk bullet no longer apply.
   extends the ignored tuning keys to `max-context-tokens` and
   `trigger-tokens`; the rule that the untrusted layer may only disable
   compaction is unchanged.
+- [ADR 029](029-let-compaction-select-its-own-summarizer-model-and-reasoning-effort.md)
+  extends the ignored tuning keys to `summarizer-model`, `summarizer-profile`,
+  and `summarizer-reasoning-effort`; the same rule applies.
 - cake-repl task 119 (opt-in between-turn compaction) is the implementation.

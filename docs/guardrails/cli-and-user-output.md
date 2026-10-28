@@ -31,7 +31,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`,
   `tool-color`, the opt-in `[compaction]` policy table (`enabled`,
   `cake-compact-bin`, `max-context-tokens`, `trigger-tokens`,
-  `threshold-percent`, `keep-tokens`), and the opt-in `[suggestions]` table
+  `threshold-percent`, `keep-tokens`, `summarizer-model`, `summarizer-profile`,
+  `summarizer-reasoning-effort`), and the opt-in `[suggestions]` table
   (`enabled`, `cake-suggest-bin`). The absolute trigger values are between-turn
   targets, not live caps: the REPL checks them only after a completed turn, from
   the newest complete `turn_usage`, so a long invocation can pass both before
@@ -43,6 +44,7 @@ commands or help text (`internal/app/commands.go`), key bindings
   `-cake-bin` (including trusted relative paths). The same untrusted layer cannot
   enable compaction (`enabled = true`), set `compaction.cake-compact-bin`, tune
   `threshold-percent`/`keep-tokens`/`max-context-tokens`/`trigger-tokens`,
+  select `summarizer-model`/`summarizer-profile`/`summarizer-reasoning-effort`,
   enable suggestions, or set `suggestions.cake-suggest-bin`; each is ignored
   with a warning, while `enabled = false` still applies. Explicit `-config` may
   select the project file; `-no-config` skips file values and warnings. Other
@@ -53,7 +55,9 @@ commands or help text (`internal/app/commands.go`), key bindings
   narrowed by
   [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md) and extended
   to the absolute trigger by
-  [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
+  [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md)
+  and to summarizer selection by
+  [ADR 029](../adr/029-let-compaction-select-its-own-summarizer-model-and-reasoning-effort.md).
   Suggestions use the same provenance rule; see
   [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
   Session-specific values must stay out of config.

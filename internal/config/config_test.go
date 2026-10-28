@@ -275,6 +275,9 @@ enabled = true
 cake-compact-bin = "/opt/bin/cake-compact"
 threshold-percent = 70
 keep-tokens = 12000
+summarizer-model = "summary-model"
+summarizer-profile = "summary-profile"
+summarizer-reasoning-effort = "low"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -284,11 +287,14 @@ keep-tokens = 12000
 		t.Fatalf("Load = %v", err)
 	}
 	want := Compaction{
-		Enabled:          true,
-		EnabledSet:       true,
-		CakeCompactBin:   "/opt/bin/cake-compact",
-		ThresholdPercent: 70,
-		KeepTokens:       12000,
+		Enabled:                   true,
+		EnabledSet:                true,
+		CakeCompactBin:            "/opt/bin/cake-compact",
+		ThresholdPercent:          70,
+		KeepTokens:                12000,
+		SummarizerModel:           "summary-model",
+		SummarizerProfile:         "summary-profile",
+		SummarizerReasoningEffort: "low",
 	}
 	if cfg.Compaction != want {
 		t.Fatalf("Compaction = %+v, want %+v", cfg.Compaction, want)
@@ -326,13 +332,25 @@ func TestMergeCompactionDefaultsAndOverrides(t *testing.T) {
 	if base.Enabled || base.CakeCompactBin != DefaultCakeCompactBin ||
 		base.MaxContextTokens != 0 || base.TriggerTokens != 0 ||
 		base.ThresholdPercent != DefaultCompactionThresholdPercent ||
-		base.KeepTokens != DefaultCompactionKeepTokens {
+		base.KeepTokens != DefaultCompactionKeepTokens ||
+		base.SummarizerModel != "" || base.SummarizerProfile != "" ||
+		base.SummarizerReasoningEffort != "" {
 		t.Fatalf("defaults = %+v", base)
 	}
 
-	file := &Config{Compaction: Compaction{Enabled: true, EnabledSet: true, ThresholdPercent: 60}}
+	file := &Config{Compaction: Compaction{
+		Enabled:                   true,
+		EnabledSet:                true,
+		ThresholdPercent:          60,
+		SummarizerModel:           "summary-model",
+		SummarizerProfile:         "summary-profile",
+		SummarizerReasoningEffort: "low",
+	}}
 	got := MergeCompaction(base, file)
-	if !got.Enabled || got.ThresholdPercent != 60 {
+	if !got.Enabled || got.ThresholdPercent != 60 ||
+		got.SummarizerModel != "summary-model" ||
+		got.SummarizerProfile != "summary-profile" ||
+		got.SummarizerReasoningEffort != "low" {
 		t.Fatalf("file values not applied: %+v", got)
 	}
 	if got.CakeCompactBin != DefaultCakeCompactBin || got.KeepTokens != DefaultCompactionKeepTokens ||
@@ -372,6 +390,9 @@ max-context-tokens = 500000
 trigger-tokens = 1000
 threshold-percent = 50
 keep-tokens = 5000
+summarizer-model = "untrusted-model"
+summarizer-profile = "untrusted-profile"
+summarizer-reasoning-effort = "max"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -387,32 +408,43 @@ keep-tokens = 5000
 		"compaction.trigger-tokens",
 		"compaction.threshold-percent",
 		"compaction.keep-tokens",
+		"compaction.summarizer-model",
+		"compaction.summarizer-profile",
+		"compaction.summarizer-reasoning-effort",
 	}
 	if strings.Join(ignored, ",") != strings.Join(wantIgnored, ",") {
 		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
 	}
 	if cfg.Compaction.Enabled || cfg.Compaction.CakeCompactBin != "" ||
 		cfg.Compaction.MaxContextTokens != 0 || cfg.Compaction.TriggerTokens != 0 ||
-		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
+		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 ||
+		cfg.Compaction.SummarizerModel != "" || cfg.Compaction.SummarizerProfile != "" ||
+		cfg.Compaction.SummarizerReasoningEffort != "" {
 		t.Fatalf("project-local security or tuning keys survived: %+v", cfg.Compaction)
 	}
 
 	trusted := &Config{
 		CakeBin: "cake",
 		Compaction: Compaction{
-			Enabled:          true,
-			EnabledSet:       true,
-			CakeCompactBin:   "trusted-compactor",
-			MaxContextTokens: 400000,
-			TriggerTokens:    350000,
-			ThresholdPercent: 80,
-			KeepTokens:       20000,
+			Enabled:                   true,
+			EnabledSet:                true,
+			CakeCompactBin:            "trusted-compactor",
+			MaxContextTokens:          400000,
+			TriggerTokens:             350000,
+			ThresholdPercent:          80,
+			KeepTokens:                20000,
+			SummarizerModel:           "trusted-model",
+			SummarizerProfile:         "trusted-profile",
+			SummarizerReasoningEffort: "low",
 		},
 	}
 	merged := Merge(trusted, cfg)
 	if !merged.Compaction.Enabled || merged.Compaction.CakeCompactBin != "trusted-compactor" ||
 		merged.Compaction.MaxContextTokens != 400000 || merged.Compaction.TriggerTokens != 350000 ||
-		merged.Compaction.ThresholdPercent != 80 || merged.Compaction.KeepTokens != 20000 {
+		merged.Compaction.ThresholdPercent != 80 || merged.Compaction.KeepTokens != 20000 ||
+		merged.Compaction.SummarizerModel != "trusted-model" ||
+		merged.Compaction.SummarizerProfile != "trusted-profile" ||
+		merged.Compaction.SummarizerReasoningEffort != "low" {
 		t.Fatalf("trusted values did not survive: %+v", merged.Compaction)
 	}
 }
@@ -432,6 +464,9 @@ Max-Context-Tokens = 500000
 Trigger-Tokens = 1000
 Threshold-Percent = 1
 Keep-Tokens = 1
+Summarizer-Model = "untrusted-model"
+Summarizer-Profile = "untrusted-profile"
+Summarizer-Reasoning-Effort = "max"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -448,13 +483,18 @@ Keep-Tokens = 1
 		"compaction.trigger-tokens",
 		"compaction.threshold-percent",
 		"compaction.keep-tokens",
+		"compaction.summarizer-model",
+		"compaction.summarizer-profile",
+		"compaction.summarizer-reasoning-effort",
 	}
 	if strings.Join(ignored, ",") != strings.Join(wantIgnored, ",") {
 		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
 	}
 	if cfg.CakeBin != "" || cfg.Compaction.Enabled || cfg.Compaction.CakeCompactBin != "" ||
 		cfg.Compaction.MaxContextTokens != 0 || cfg.Compaction.TriggerTokens != 0 ||
-		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
+		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 ||
+		cfg.Compaction.SummarizerModel != "" || cfg.Compaction.SummarizerProfile != "" ||
+		cfg.Compaction.SummarizerReasoningEffort != "" {
 		t.Fatalf("case-variant project keys survived: cake-bin=%q compaction=%+v", cfg.CakeBin, cfg.Compaction)
 	}
 }
@@ -478,7 +518,7 @@ func TestLoadProjectCaseVariantDisableIsAllowed(t *testing.T) {
 
 func TestLoadProjectCanDisableCompaction(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".cake-repl.toml")
-	if err := os.WriteFile(path, []byte("[compaction]\nenabled = false\nthreshold-percent = 60\nkeep-tokens = 5000\nmax-context-tokens = 400000\ntrigger-tokens = 350000\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[compaction]\nenabled = false\nthreshold-percent = 60\nkeep-tokens = 5000\nmax-context-tokens = 400000\ntrigger-tokens = 350000\nsummarizer-model = \"untrusted-model\"\nsummarizer-profile = \"untrusted-profile\"\nsummarizer-reasoning-effort = \"max\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, ignored, err := LoadProject(path)
@@ -490,6 +530,9 @@ func TestLoadProjectCanDisableCompaction(t *testing.T) {
 		"compaction.trigger-tokens",
 		"compaction.threshold-percent",
 		"compaction.keep-tokens",
+		"compaction.summarizer-model",
+		"compaction.summarizer-profile",
+		"compaction.summarizer-reasoning-effort",
 	}
 	if strings.Join(ignored, ",") != strings.Join(wantIgnored, ",") {
 		t.Fatalf("ignored = %v, want %v", ignored, wantIgnored)
@@ -498,7 +541,9 @@ func TestLoadProjectCanDisableCompaction(t *testing.T) {
 		t.Fatalf("disable was not preserved: %+v", cfg.Compaction)
 	}
 	if cfg.Compaction.MaxContextTokens != 0 || cfg.Compaction.TriggerTokens != 0 ||
-		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 {
+		cfg.Compaction.ThresholdPercent != 0 || cfg.Compaction.KeepTokens != 0 ||
+		cfg.Compaction.SummarizerModel != "" || cfg.Compaction.SummarizerProfile != "" ||
+		cfg.Compaction.SummarizerReasoningEffort != "" {
 		t.Fatalf("project-local tuning survived: %+v", cfg.Compaction)
 	}
 	xdg := &Config{Compaction: Compaction{
@@ -528,6 +573,8 @@ func TestCompactionValidate(t *testing.T) {
 		{"disabled ignores values", Compaction{}, false},
 		{"valid", Compaction{Enabled: true, CakeCompactBin: "cake-compact", ThresholdPercent: 80}, false},
 		{"valid absolute", Compaction{Enabled: true, CakeCompactBin: "cake-compact", MaxContextTokens: 400000, TriggerTokens: 350000, ThresholdPercent: 80}, false},
+		{"valid reasoning effort", Compaction{Enabled: true, CakeCompactBin: "cake-compact", ThresholdPercent: 80, SummarizerReasoningEffort: "low"}, false},
+		{"invalid reasoning effort", Compaction{Enabled: true, CakeCompactBin: "cake-compact", ThresholdPercent: 80, SummarizerReasoningEffort: "maximal"}, true},
 		{"absolute trigger adjacent to ceiling", Compaction{Enabled: true, CakeCompactBin: "cake-compact", MaxContextTokens: 400000, TriggerTokens: 399999, ThresholdPercent: 80}, false},
 		{"missing binary", Compaction{Enabled: true, ThresholdPercent: 80}, true},
 		{"threshold too low", Compaction{Enabled: true, CakeCompactBin: "x", ThresholdPercent: 0}, true},
