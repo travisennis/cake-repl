@@ -1037,6 +1037,7 @@ func TestStartupSuggestionsConfig(t *testing.T) {
 		want          app.SuggestionConfig
 		wantWarn      []string
 		wantWarnExact string
+		wantErr       string
 	}{
 		{name: "disabled by default", want: defaults},
 		{
@@ -1068,6 +1069,18 @@ func TestStartupSuggestionsConfig(t *testing.T) {
 			want:     defaults,
 			wantWarn: []string{"prompt suggestions are disabled by -no-session"},
 		},
+		{
+			name:    "invalid reasoning effort is rejected",
+			xdg:     "[suggestions]\nenabled = true\nreasoning-effort = \"maximal\"\n",
+			wantErr: "reasoning-effort",
+		},
+		{
+			name:     "invalid project reasoning effort is ignored",
+			xdg:      "[suggestions]\nenabled = true\n",
+			local:    "[suggestions]\nreasoning-effort = \"maximal\"\n",
+			want:     enabled,
+			wantWarn: []string{"ignoring suggestions.reasoning-effort"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1091,6 +1104,12 @@ func TestStartupSuggestionsConfig(t *testing.T) {
 			}
 			var warnings bytes.Buffer
 			cfg, err := effectiveConfig(f, explicitFlags(fs), &warnings)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
