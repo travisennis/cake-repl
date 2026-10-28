@@ -79,10 +79,12 @@ func (o Options) Args() []string {
 
 // Document is the documented `cake-suggest suggest -json` result the REPL
 // consumes. Unknown fields are ignored so a newer suggester keeps working.
-// Suggested distinguishes a real suggestion from a no-op; the REPL never treats
-// an empty suggestion as a prompt.
+// Suggested is a pointer so a missing or null required field is distinguishable
+// from an explicit false; the REPL warns on the malformed document instead of
+// treating it as a silent no-op. The REPL never treats an empty suggestion as a
+// prompt.
 type Document struct {
-	Suggested  bool   `json:"suggested"`
+	Suggested  *bool  `json:"suggested"`
 	Suggestion string `json:"suggestion"`
 	SessionID  string `json:"session_id"`
 	Reason     string `json:"reason"`
@@ -149,14 +151,17 @@ func Suggest(ctx context.Context, opts Options) Result {
 		// cancellation, and the caller reports it once.
 		res.ExitCode = exitCode(cmd)
 		res.Err = fmt.Errorf("suggester timed out: %w", ctx.Err())
-	case ctx.Err() != nil:
-		// A canceled request is expected: the user typed, started a new turn, or
-		// asked to stop. It is never a user-visible failure.
-		res.ExitCode = exitCode(cmd)
-		res.Canceled = true
 	case errors.As(err, &exitErr):
+		// Classify a non-zero exit from the cancel flag and signal status, not
+		// from ctx.Err(), so a late cancel cannot relabel a natural failure and a
+		// canceled child that exits non-zero is still silent.
 		res.ExitCode = exitCode(cmd)
 		res.Canceled = canceledExit(exitErr, cancelRequested.Load())
+	case errors.Is(err, context.Canceled):
+		// The context canceled before the child produced an exit status. This is
+		// an expected dismissal, never a user-visible failure.
+		res.ExitCode = exitCode(cmd)
+		res.Canceled = true
 	default:
 		// The process could not be started (a missing or non-executable binary)
 		// or teardown failed in another way.

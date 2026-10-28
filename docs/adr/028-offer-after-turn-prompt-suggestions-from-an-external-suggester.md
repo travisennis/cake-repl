@@ -81,20 +81,22 @@ cake-suggest-bin = "cake-suggest"
   (`internal/childproc`), inherits the REPL environment and `-cwd`, and is
   bounded by a model-owned context and a fixed timeout. It runs only from
   `internal/suggest`; the REPL never reads or writes the session file.
-- **Result document.** Exit 0 emits one JSON object. `suggested` is a boolean,
-  `suggestion` is the prompt text, `session_id` identifies the session the
-  suggester read, and `reason` is an optional explanation for a no-op. Unknown
-  fields are ignored. A document with `suggested:false` is a silent no-op. A
-  document whose `session_id` is not the request's session is rejected. The
-  suggestion is sanitized, whitespace-collapsed to one line, and bounded before
-  it reaches the composer.
+- **Result document.** Exit 0 emits one JSON object. `suggested` is a required
+  boolean, `suggestion` is the prompt text, `session_id` identifies the session
+  the suggester read, and `reason` is an optional explanation for a no-op.
+  Unknown fields are ignored. A document with `suggested:false` is a silent
+  no-op; a document that omits `suggested` is malformed and warns. A document
+  whose `session_id` is not the request's session is rejected. The suggestion
+  is sanitized, whitespace-collapsed to one line, and bounded before it reaches
+  the composer.
 - **Trigger.** One request may run at a time. It starts after a turn that
   delivered a completion record and ended cleanly, once the session pin is
   settled. It is skipped for canceled runs, start/wait errors, non-zero exits,
-  hydration, replay, an open session browser, `-no-session`, and while a
-  compaction is running. If the turn starts an automatic compaction, the
-  suggestion starts only after that compaction's result is reaped, so it never
-  reads a session while the compactor appends to it.
+  a completion marked `is_error`, hydration, replay, an open session browser,
+  `-no-session`, and while a compaction is running. If the turn starts an
+  automatic compaction, the suggestion starts only after that compaction's
+  result is reaped, so it never reads a session while the compactor appends to
+  it.
 - **Apply.** The result populates `input.Placeholder` with dim ghost text only
   when the request identity is current, the session pin is still the one the
   request named, no run/hydration/compaction/browser is active, the input is
@@ -106,12 +108,16 @@ cake-suggest-bin = "cake-suggest"
   never execute a command. Any composer key that can edit or recall input
   dismisses the ghost before it is applied. `Ctrl+U`, `Ctrl+N`, `/new`,
   `/resume`, `/sessions`, submit, quit, and an unobserved exit cancel an
-  in-flight request. Scrolling, tool-output cycling, and clipboard copy do not.
-- **Failure and cancellation.** Cancellation and `suggested:false` are silent. A
-  missing binary, non-zero exit, malformed document, or timeout produces at most
-  one visible warning per REPL process and a content-free debug-log lifecycle
-  line. A suggestion failure never changes the session, the input, or the
-  status line.
+  in-flight request; quit and the unobserved-exit path wait for its canceled
+  child to be reaped within the same bounded teardown before the program
+  returns, and further keyboard input is ignored while that exit drains.
+  Scrolling, tool-output cycling, and clipboard copy do not.
+- **Failure and cancellation.** A signal-terminated cancellation and
+  `suggested:false` are silent. A missing binary, non-zero exit (including a
+  child that exits on its own after a cancel), malformed document, or timeout
+  produces at most one visible warning per REPL process and a content-free
+  debug-log lifecycle line. A suggestion failure never changes the session, the
+  input, or the status line.
 - **Provenance.** The automatically loaded project-local `.cake-repl.toml`
   cannot enable suggestions or select `cake-suggest-bin`; each is ignored with a
   startup warning. It may set `enabled = false` to disable the feature for that

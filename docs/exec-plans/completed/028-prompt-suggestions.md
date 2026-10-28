@@ -150,6 +150,23 @@ promised-but-implicit fence (session-pin comparison), plus a missing end-to-end
 fake-binary app test. All were fixed and validated. `just ci` is green, and the
 reviewed branch is ready for handoff.
 
+A merge-readiness review then found two remaining defects. A `task_complete`
+marked `is_error` could still start a metered suggestion, contrary to the clean
+turn trigger and the compaction precedent. A quit that canceled an in-flight
+suggester did not wait for the child to be reaped, so a suggester that ignored
+SIGTERM could outlive the REPL; the same gap applied to the unobserved
+SIGINT/SIGTERM teardown. Both are fixed. The model now tracks a per-request drain
+channel independently of the request identity, quit drains the child before
+returning `tea.Quit`, `CancelRunning` waits on the same channel, `canSuggest`
+rejects an errored completion and a draining child, and a document that omits
+the required `suggested` field produces the one malformed-document warning.
+Regression tests cover the errored completion, quit drain, canceled-child quit,
+one-request gate, and teardown wait. `internal/suggest` tests also cover a
+canceled context, a canceled child that exits non-zero, and a SIGTERM-ignoring
+child force-killed by `WaitDelay`. The suggestion's timeout/cancellation
+classification now follows the cancel flag plus signal status, matching the
+compactor and the guardrail. `just ci` is green after rebasing onto `master`.
+
 ## Context and Orientation
 
 cake-repl is a Go Bubble Tea terminal REPL. Each submitted prompt spawns one

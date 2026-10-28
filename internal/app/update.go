@@ -288,7 +288,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishCompaction(msg)
 
 	case suggestionDoneMsg:
-		return m.finishSuggestion(msg), nil
+		next := m.finishSuggestion(msg)
+		if next.exitAfter {
+			// quit() canceled the in-flight suggester and is waiting for this
+			// result to reap the child before returning the quit command.
+			return next.quit()
+		}
+		return next, nil
 
 	case replayStartedMsg:
 		if msg.err != nil {
@@ -410,18 +416,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// quit cancels any in-flight session listing and then quits, so the
-// model-owned operation stops before the program exits. It returns the updated
-// model with the quit command, so no caller reads the model in a sibling return
-// operand whose order relative to this call is unspecified.
+// quit cancels any in-flight child and then quits, so the model-owned
+// operation stops before the program exits. An in-flight suggester is drained:
+// the quit waits for its result, which reaps the child, before returning
+// tea.Quit. It returns the updated model with the quit command, so no caller
+// reads the model in a sibling return operand whose order relative to this call
+// is unspecified.
 func (m Model) quit() (Model, tea.Cmd) {
 	m.cancelCompaction()
-	m.cancelSuggestion()
 	m.cancelSessionList()
+	m.cancelSuggestion()
+	if m.suggestionDone != nil {
+		if !m.exitAfter {
+			m.exitAfter = true
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling prompt suggestion, then exiting…"})
+		}
+		m.syncViewport()
+		return m, nil
+	}
 	return m, tea.Quit
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.exitAfter {
+		// The REPL is draining a child before it exits. A submission or session
+		// change here would start new work behind the quit.
+		return m, nil
+	}
 	if m.browserOpen {
 		return m.handleBrowserKey(msg)
 	}
@@ -690,6 +711,11 @@ func (m Model) handleTabComplete() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submit() (tea.Model, tea.Cmd) {
+	if m.exitAfter {
+		// The quit path is waiting for a child to be reaped. Never start a run or
+		// execute a command behind it.
+		return m, nil
+	}
 	text := strings.TrimSpace(m.input.Value())
 	// Ctrl+S on an empty composer accepts the ghost suggestion. The suggestion
 	// is model output, not a user-issued command, so it skips slash-command

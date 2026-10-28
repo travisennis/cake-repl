@@ -105,11 +105,15 @@ consumes cake events. This is the project's core external contract.
   session pin is unchanged, the REPL is idle, and the composer is empty. The
   text is sanitized, whitespace-collapsed to one line, and bounded before it
   becomes placeholder ghost text; it is never parsed as a slash command.
-  Cancellation is silent; a missing binary, non-zero exit, malformed document,
-  or timeout warns at most once per REPL process. The process uses the same
+  Cancellation is silent when the child is signal-terminated; a child that exits
+  non-zero on its own after the cancel is a failure. A missing binary, non-zero
+  exit, malformed document (including a missing required `suggested` field), or
+  timeout warns at most once per REPL process. The process uses the same
   subprocess discipline as a cake run: model-owned context, SIGTERM then
   `WaitDelay`, bounded stdout/stderr, `internal/childproc` isolation, and a
-  content-free debug-log line. It never reads or writes a session file. See
+  content-free debug-log line. Quit and the unobserved-exit teardown drain an
+  in-flight request, so its canceled child is reaped before the REPL returns.
+  It never reads or writes a session file. See
   [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
@@ -153,12 +157,17 @@ consumes cake events. This is the project's core external contract.
   success, the non-in-place rejection, and cancellation through `Ctrl+C` and
   `Ctrl+N`; none may need a real cake or a model call.
 - For the external suggester, add fake `cake-suggest` scripts for a success
-  document, a `suggested:false` no-op, a non-zero exit with stderr, malformed
-  output, a missing binary, cancellation, and the `WaitDelay` teardown when a
-  descendant holds stdout. App tests drive the completed-turn trigger, the
-  compaction ordering, applying a result, stale/wrong-session rejection, the
-  draft-wins rule, dismissal on typing, acceptance through `Ctrl+S`, and
-  cancellation on new session; none may need a real cake or a model call.
+  document, a `suggested:false` no-op, a document that omits the required
+  `suggested` field, a non-zero exit with stderr, malformed output, a missing
+  binary, a canceled context, a canceled child that exits non-zero, a
+  SIGTERM-ignoring child that the `WaitDelay` force-kills, and the `WaitDelay`
+  teardown when a descendant holds stdout. App tests drive the completed-turn
+  trigger, the `is_error` rejection, the compaction ordering, applying a result,
+  stale/wrong-session rejection, the draft-wins rule, dismissal on typing,
+  acceptance through `Ctrl+S`, the missing-field warning, cancellation on new
+  session, the one-request gate while a child drains, quit/teardown draining
+  (including ignored keyboard input), and the teardown wait; none may need a
+  real cake or a model call.
 - Verify a real round trip if you have a `cake` binary, but never make a real
   cake binary a test requirement.
 

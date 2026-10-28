@@ -180,6 +180,11 @@ type Model struct {
 	suggestionSeq    uint64
 	suggestionReq    uint64
 	suggestionCancel context.CancelFunc
+	// suggestionDone closes when the suggester child has exited and been reaped.
+	// It stays set after cancelSuggestion invalidates the request, so quit and
+	// main's unobserved-exit teardown can wait for the child instead of letting
+	// it outlive the REPL.
+	suggestionDone   chan struct{}
 	suggestionText   string
 	suggestionWarned bool
 
@@ -423,13 +428,24 @@ func (m Model) CancelRunning() {
 	}
 	m.cancelCompaction()
 	// A suggestion is read-only, but it is still a child the unobserved exit
-	// path must stop; no result may arrive after the program has returned.
+	// path must stop; no result may arrive after the program has returned. Wait
+	// for the child to be reaped because the Update loop that would normally
+	// process its result is already gone.
 	m.cancelSuggestion()
 	// A session listing can be in flight without the model ever seeing a key:
 	// the startup picker starts one before the first frame, and main calls this
 	// for an exit the Update loop never observed (SIGINT, SIGTERM, a recovered
-	// panic), which is exactly the path where quit() cannot cancel it.
+	// panic), which is exactly the path where quit() cannot cancel it. Cancel it
+	// before the suggestion wait so it is not held behind that child.
 	m.cancelSessionList()
+	if done := m.suggestionDone; done != nil {
+		timer := time.NewTimer(suggestionTeardownTimeout)
+		select {
+		case <-done:
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
 }
 
 // cancelCompaction stops an in-flight compactor. The process keeps the same

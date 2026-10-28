@@ -73,7 +73,7 @@ JSON
 	if doc == nil {
 		t.Fatal("no document decoded")
 	}
-	if !doc.Suggested || doc.Suggestion != "Add a test for the new path." || doc.SessionID != "s-1" {
+	if doc.Suggested == nil || !*doc.Suggested || doc.Suggestion != "Add a test for the new path." || doc.SessionID != "s-1" {
 		t.Errorf("document = %+v", doc)
 	}
 	raw, err := os.ReadFile(argsPath)
@@ -100,8 +100,23 @@ JSON
 	if res.ExitCode != 0 || res.Err != nil || res.Document == nil {
 		t.Fatalf("result = %+v", res)
 	}
-	if res.Document.Suggested || !strings.Contains(res.Document.Reason, "no completed turn") {
+	if res.Document.Suggested == nil || *res.Document.Suggested || !strings.Contains(res.Document.Reason, "no completed turn") {
 		t.Fatalf("document = %+v, want a no-op with a reason", res.Document)
+	}
+}
+
+func TestSuggestMissingSuggestedFieldIsDistinguishable(t *testing.T) {
+	bin := writeFakeSuggester(t, `
+cat <<'JSON'
+{"suggestion":"orphan suggestion","session_id":"s-1"}
+JSON
+`)
+	res := Suggest(context.Background(), Options{Bin: bin, SessionID: "s-1"})
+	if res.ExitCode != 0 || res.Err != nil || res.Document == nil {
+		t.Fatalf("result = %+v, want a decoded document", res)
+	}
+	if res.Document.Suggested != nil {
+		t.Fatalf("Suggested = %v, want nil for an absent required field", res.Document.Suggested)
 	}
 }
 
@@ -157,6 +172,90 @@ func TestSuggestCancellationReapsChild(t *testing.T) {
 	}
 	if res.Document != nil {
 		t.Fatalf("canceled run produced a document: %+v", res.Document)
+	}
+}
+
+func TestSuggestCanceledContextIsSilent(t *testing.T) {
+	bin := writeFakeSuggester(t, `exit 0`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	res := Suggest(ctx, Options{Bin: bin, SessionID: "s-1"})
+	if !res.Canceled || res.Err != nil || res.Document != nil {
+		t.Fatalf("result = %+v, want a silent cancellation", res)
+	}
+}
+
+// waitForStartMarker polls for a fake child's marker and then cancels its
+// context, so a cancellation test does not race the shell's startup or its trap
+// installation.
+func waitForStartMarker(t *testing.T, path string, cancel context.CancelFunc) {
+	t.Helper()
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if _, err := os.Stat(path); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel()
+	}()
+}
+
+func TestSuggestCanceledChildExitingNonzeroIsFailure(t *testing.T) {
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	marker := filepath.Join(dir, "term-trap")
+	t.Setenv("SUGGEST_START_MARKER", started)
+	t.Setenv("SUGGEST_TERM_MARKER", marker)
+	bin := writeFakeSuggester(t, `
+trap 'printf exit3 > "$SUGGEST_TERM_MARKER"; exit 3' TERM
+printf started > "$SUGGEST_START_MARKER"
+while :; do :; done
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waitForStartMarker(t, started, cancel)
+	res := Suggest(ctx, Options{Bin: bin, SessionID: "s-1", waitDelay: 2 * time.Second})
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("trap did not run: %v; result = %+v", err, res)
+	}
+	if res.Canceled {
+		t.Fatalf("result = %+v, want a natural failure, not a cancellation", res)
+	}
+	if res.ExitCode != 3 || res.Err != nil {
+		t.Fatalf("result = %+v, want exit 3 and no error", res)
+	}
+}
+
+func TestSuggestCancellationForceKillsSIGTERMIgnoringChild(t *testing.T) {
+	started := filepath.Join(t.TempDir(), "started")
+	t.Setenv("SUGGEST_START_MARKER", started)
+	bin := writeFakeSuggester(t, `
+trap '' TERM
+printf started > "$SUGGEST_START_MARKER"
+while :; do :; done
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waitForStartMarker(t, started, cancel)
+	start := time.Now()
+	res := Suggest(ctx, Options{Bin: bin, SessionID: "s-1", waitDelay: 100 * time.Millisecond})
+	if _, err := os.Stat(started); err != nil {
+		t.Fatalf("child did not start: %v; result = %+v", err, res)
+	}
+	elapsed := time.Since(start)
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("teardown returned after %s; the child may not have started", elapsed)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("teardown took %s for a SIGTERM-ignoring child", elapsed)
+	}
+	if !res.Canceled || res.Err != nil {
+		t.Fatalf("result = %+v, want a silent cancellation after the force-kill", res)
 	}
 }
 

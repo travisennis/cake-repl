@@ -18,6 +18,10 @@ const (
 	// call made after every completed turn; a hung child must not keep a request
 	// identity or a child process alive for the life of the REPL.
 	suggestionTimeout = 60 * time.Second
+	// suggestionTeardownTimeout bounds how long an exit that never reaches the
+	// Update loop waits for a canceled suggester to be reaped. The suggester's
+	// own WaitDelay is three seconds; this leaves room for scheduling.
+	suggestionTeardownTimeout = 5 * time.Second
 	// maxSuggestionBytes bounds the ghost text placed in the composer. A prompt
 	// suggestion longer than this is not a useful one-line hint.
 	maxSuggestionBytes = 4 * 1024
@@ -34,7 +38,8 @@ type suggestionDoneMsg struct {
 
 // suggestionTurnEligible reports whether a finished run is a completed turn
 // that may carry a suggestion. Cancellations and failures keep the previous
-// composer state; the next completed turn re-evaluates.
+// composer state; the next completed turn re-evaluates. A completion record
+// marked is_error is a task failure and is rejected by canSuggest.
 func (m Model) suggestionTurnEligible(res cake.Result) bool {
 	return !res.Canceled && res.Err == nil && res.ExitCode == 0 && m.sawComplete
 }
@@ -51,10 +56,10 @@ func (m Model) canSuggest() bool {
 		m.browserOpen || m.exitAfter || m.newSessionPending {
 		return false
 	}
-	if m.suggesting || m.suggestionText != "" || m.input.Value() != "" {
+	if m.suggesting || m.suggestionDone != nil || m.suggestionText != "" || m.input.Value() != "" {
 		return false
 	}
-	if m.session.LastComplete == nil {
+	if m.session.LastComplete == nil || m.session.LastComplete.IsError {
 		return false
 	}
 	mode, sessionID := m.session.RunOptions()
@@ -71,10 +76,12 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 	_, sessionID := m.session.RunOptions()
 
 	ctx, cancel := context.WithTimeout(context.Background(), suggestionTimeout)
+	done := make(chan struct{})
 	m.suggestionSeq++
 	req := m.suggestionSeq
 	m.suggestionReq = req
 	m.suggestionCancel = cancel
+	m.suggestionDone = done
 	m.suggesting = true
 	opts := suggest.Options{
 		Bin:       m.cfg.Suggestions.Bin,
@@ -86,7 +93,12 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 		DebugLog:  m.cfg.DebugLog,
 	}
 	return m, func() tea.Msg {
-		return suggestionDoneMsg{req: req, sessionID: sessionID, res: suggest.Suggest(ctx, opts)}
+		res := suggest.Suggest(ctx, opts)
+		// Close before returning the message: an exit that never reaches Update
+		// (SIGINT/SIGTERM) can wait on the child here, even if the program's own
+		// message channel is already gone.
+		close(done)
+		return suggestionDoneMsg{req: req, sessionID: sessionID, res: res}
 	}
 }
 
@@ -95,6 +107,10 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 // composer. A usable result is shown only if the REPL is still idle, the input
 // is still empty, and the session pin is still the one the request named.
 func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
+	// The child is reaped by the time any result arrives, including a result for
+	// a request that typing or a session change already invalidated. Settle the
+	// drain state before deciding whether the document may be used.
+	m.suggestionDone = nil
 	if msg.req == 0 || msg.req != m.suggestionReq {
 		return m
 	}
@@ -115,7 +131,14 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 		return m
 	}
 	doc := *msg.res.Document
-	if !doc.Suggested {
+	if doc.Suggested == nil {
+		// The required field is absent or null. That is a malformed document, not
+		// the explicit no-op the contract permits, so it must not pass silently.
+		m.warnSuggestion(suggestionMalformedText)
+		m.syncViewport()
+		return m
+	}
+	if !*doc.Suggested {
 		m.logDebug("suggestion: no-op")
 		return m
 	}
@@ -174,8 +197,9 @@ func (m *Model) clearSuggestion() {
 }
 
 // cancelSuggestion stops an in-flight request and invalidates its identity. The
-// child may take a moment to exit, but its late result is ignored. Suggestions
-// are read-only, so unlike compaction there is no gate to keep closed.
+// child may take a moment to exit, but its late result is ignored. The drain
+// channel stays set until that result arrives so an exit cannot race the child;
+// canSuggest refuses to start another request until it is reaped.
 func (m *Model) cancelSuggestion() {
 	if m.suggestionCancel != nil {
 		m.suggestionCancel()
@@ -208,6 +232,10 @@ func normalizeSuggestion(s string) (string, bool) {
 	}
 	return s, true
 }
+
+// suggestionMalformedText is the one diagnostic for a syntactically valid
+// document that omits a required field. It shares the failure warning budget.
+const suggestionMalformedText = "prompt suggestion unavailable: malformed document (missing suggested)"
 
 // suggestionFailureText renders the one diagnostic for a failed suggester run.
 // The suggester's stderr is already bounded; the render path sanitizes it.

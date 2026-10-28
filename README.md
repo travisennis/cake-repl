@@ -407,7 +407,9 @@ cake-suggest-bin = "cake-suggest"
   session itself; cake-repl never reads or writes session files. The request is
   read-only, bounded, and model-owned: it never blocks prompt submission and is
   canceled when the composer is edited, a new session starts, the session
-  target changes, or the REPL quits.
+  target changes, or the REPL quits. A canceled child is reaped before the REPL
+  returns within the same bounded teardown, including the quit and
+  SIGINT/SIGTERM paths; keyboard input is ignored while that exit is draining.
 - The result is one JSON document:
   `{"suggested":true,"suggestion":"…","session_id":"…","reason":""}`. Unknown
   fields are ignored. A `suggested:false` document, a cancellation, or a result
@@ -630,9 +632,10 @@ validation is available with `just release-check`.
   [ADR 027](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - A terminal hangup or an abrupt REPL death can leave a detached cake or
   compactor process running until it finishes; normal quit, Ctrl+C, and SIGTERM
-  still cancel it. A suspend pauses tracked live and replay runs; the short-lived
-  read-only session listing and the compactor are not tracked and can continue
-  through the stop.
+  still cancel it, and an in-flight prompt suggester is canceled and reaped
+  before the REPL returns. A suspend pauses tracked live and replay runs; the
+  short-lived read-only session listing and the compactor are not tracked and can
+  continue through the stop.
 - Context compaction is best-effort and between turns only. The trigger is a
   target, not an in-invocation cap: task 130 measured median +40,375, p99
   +311,592, and max 556,317 tokens of growth per invocation, and up to 38.8
