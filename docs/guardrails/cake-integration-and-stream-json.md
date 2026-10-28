@@ -102,14 +102,20 @@ consumes cake events. This is the project's core external contract.
 - **External suggester (`internal/suggest`).** The opt-in prompt suggester is
   invoked only as
   `cake-suggest suggest -json [-cake-bin <path>] [-model <name>] [-profile <name>] -- <session-id>`.
-  It is read-only. Exactly one JSON document is decoded field by field
-  (`suggested`, `suggestion`, `session_id`, `reason`) with unknown fields
-  ignored. Exit 0 with a document is the only success shape; `suggested:false`
-  is a silent no-op. The REPL accepts the suggestion only when the document's
-  `session_id` matches the request, the request identity is current, the
-  session pin is unchanged, the REPL is idle, and the composer is empty. The
-  text is sanitized, whitespace-collapsed to one line, and bounded before it
-  becomes placeholder ghost text; it is never parsed as a slash command.
+  It is read-only. The `-model`/`-profile` values resolve from `[suggestions]`
+  first and then independently from the turn selection. Exactly one JSON
+  document is decoded field by field (`suggested`, `suggestion`, `session_id`,
+  `reason`) with unknown fields ignored. Exit 0 with a document is the only
+  success shape; `suggested:false` is a silent no-op. The REPL accepts the
+  suggestion only when the document's `session_id` matches the request, the
+  request identity is current, the session pin is unchanged, the REPL is idle,
+  and the composer is empty. A request starts alongside an automatic
+  compaction; because Cake replay is read-only and skips a trailing partial
+  record, the concurrent checkpoint append is safe. A result that arrives while
+  compaction gates the composer is held and applied after the compactor
+  settles. The text is sanitized, whitespace-collapsed to one line, and bounded
+  before it becomes placeholder ghost text; it is never parsed as a slash
+  command.
   Cancellation is silent when the child is signal-terminated; a child that exits
   non-zero on its own after the cancel is a failure. A missing binary, non-zero
   exit, malformed document (including a missing required `suggested` field), or
@@ -119,7 +125,10 @@ consumes cake events. This is the project's core external contract.
   content-free debug-log line. Quit and the unobserved-exit teardown drain an
   in-flight request, so its canceled child is reaped before the REPL returns.
   It never reads or writes a session file. See
-  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
+  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
+  [ADR 030](../adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+  and
+  [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
   and the versioned `sessions list --json` envelope) is the only contract; it is

@@ -332,6 +332,8 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 	cfg.Suggestions = app.SuggestionConfig{
 		Enabled: suggestions.Enabled,
 		Bin:     suggestions.CakeSuggestBin,
+		Model:   suggestions.Model,
+		Profile: suggestions.Profile,
 	}
 
 	if f.resume.set {
@@ -503,6 +505,10 @@ func projectConfigWarning(key, path string) string {
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.cake-compact-bin in project-local config %q; use XDG config or -config to select the compactor", path)
 	case "suggestions.cake-suggest-bin":
 		return fmt.Sprintf("cake-repl: warning: ignoring suggestions.cake-suggest-bin in project-local config %q; use XDG config or -config to select the suggester", path)
+	case "suggestions.model":
+		return fmt.Sprintf("cake-repl: warning: ignoring suggestions.model in project-local config %q; tune suggestions in XDG config or an explicit -config", path)
+	case "suggestions.profile":
+		return fmt.Sprintf("cake-repl: warning: ignoring suggestions.profile in project-local config %q; tune suggestions in XDG config or an explicit -config", path)
 	case "suggestions.enabled":
 		return fmt.Sprintf("cake-repl: warning: ignoring suggestions.enabled = true in project-local config %q; enable suggestions in XDG config or an explicit -config", path)
 	case "compaction.enabled":

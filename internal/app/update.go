@@ -1190,23 +1190,33 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 		return m.quit()
 	}
 
+	// Start both between-turn background calls from the same transition. The
+	// suggester reads through cake's read-only replay stream, which tolerates
+	// the compactor's concurrent append, so it does not wait for compaction to
+	// start or finish. A result that arrives while compaction gates the composer
+	// is held until finishCompaction applies it. See ADR 031.
+	var cmds []tea.Cmd
+	if m.suggestionTurnEligible(res) {
+		next, cmd := m.maybeStartSuggestion()
+		m = next
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	// Compact between turns, after the pin is settled and the completed turn's
 	// measurement is known. The compactor re-checks the session and may decline.
 	if m.shouldCompactAfter(res) {
 		next, cmd := m.startCompaction()
+		m = next
 		if cmd != nil {
-			return next, cmd
+			cmds = append(cmds, cmd)
 		}
 	}
-	// A suggestion waits for a completed turn and, when one runs, for the
-	// compactor to settle so it never reads a session mid-append.
-	if m.suggestionTurnEligible(res) {
-		next, cmd := m.maybeStartSuggestion()
-		if cmd != nil {
-			return next, tea.Batch(cmd, next.titleCmd())
-		}
+	if len(cmds) == 0 {
+		return m, m.titleCmd()
 	}
-	return m, m.titleCmd()
+	cmds = append(cmds, m.titleCmd())
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) sessionInfo() string {

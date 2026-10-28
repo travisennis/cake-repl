@@ -48,8 +48,12 @@ one-document result. See
 A second opt-in external executable is the prompt suggester:
 `cake-suggest suggest -json … -- <session-id>`. It is read-only and returns one
 suggestion document; the REPL never reads a session file and never parses the
-suggester's human output. See
-[`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
+suggester's human output. It starts alongside an automatic compaction and reads
+through cake's read-only replay stream, which tolerates the compactor's
+concurrent append. See
+[`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md)
+and
+[`docs/adr/031-run-after-turn-suggestions-alongside-compaction.md`](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md).
 
 This boundary is the project's reason to exist. Changes that cross it are out of
 scope unless the cake contract itself has changed. See
@@ -169,15 +173,21 @@ Dependency direction is one-way: `app` depends on `cake`, `compact`,
   [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
 - **Prompt suggestions are opt-in, post-turn, and never gate input.** After a
   completed turn that pins a session, one model-owned `cake-suggest` request may
-  run through `internal/suggest`. It is read-only, bounded by a context timeout,
-  and canceled by any composer use, a new session, a retarget, or quit. Its
-  result is applied only while the request identity, session pin, idle state,
-  and empty composer all still match, and it appears as dim placeholder ghost
-  text rather than editable input. `Ctrl+S` submits the ghost as an ordinary
-  prompt; slash-command parsing is bypassed so model output cannot execute a
-  command. `-no-session` disables the feature, and the untrusted project-local
-  config layer can only disable it. See
-  [`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
+  run through `internal/suggest`, concurrently with an automatic compaction. It
+  is read-only, bounded by a context timeout, and canceled by any composer use,
+  a new session, a retarget, or quit. Its model/profile resolve from
+  `[suggestions]` first and then the turn selection. A result is applied only
+  while the request identity, session pin, idle state, and empty composer all
+  still match; one that arrives while compaction gates the composer is held and
+  applied after the compactor settles. It appears as dim placeholder ghost text
+  rather than editable input. `Ctrl+S` submits the ghost as an ordinary prompt;
+  slash-command parsing is bypassed so model output cannot execute a command.
+  `-no-session` disables the feature, and the untrusted project-local config
+  layer can only disable it. See
+  [`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
+  [`docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md`](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+  and
+  [`docs/adr/031-run-after-turn-suggestions-alongside-compaction.md`](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md).
 - **Compaction is opt-in, between-turns, and in place.** A completed turn whose
   newest complete `turn_usage` figure reaches the configured trigger starts one
   model-owned `cake-compact` subprocess through `internal/compact`. Absolute

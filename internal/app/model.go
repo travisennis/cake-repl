@@ -94,10 +94,14 @@ type CompactionConfig struct {
 }
 
 // SuggestionConfig is the resolved `[suggestions]` configuration. Bin is the
-// external suggester executable. See ADR 028.
+// external suggester executable. Model and Profile select the suggestion call;
+// empty values fall back to the REPL's -model/-profile. See ADR 028 and ADR
+// 030.
 type SuggestionConfig struct {
 	Enabled bool
 	Bin     string
+	Model   string
+	Profile string
 }
 
 const (
@@ -192,6 +196,12 @@ type Model struct {
 	suggestionDone   chan struct{}
 	suggestionText   string
 	suggestionWarned bool
+	// pendingSuggestion holds a usable result that arrived while compaction
+	// still gated the composer. pendingSuggestionSession is the session the
+	// request named, so the held text cannot cross a session boundary. Both are
+	// cleared by every path that dismisses a visible ghost. See ADR 031.
+	pendingSuggestion        string
+	pendingSuggestionSession string
 
 	session      sessionState
 	history      promptHistory

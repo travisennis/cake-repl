@@ -80,8 +80,9 @@ func TestCanSuggest(t *testing.T) {
 		{"draft in the composer", func(m *Model) { m.input.SetValue("draft") }, false},
 		{"request already in flight", func(m *Model) { m.suggesting = true }, false},
 		{"ghost already showing", func(m *Model) { m.suggestionText = "shown" }, false},
+		{"held result waiting for compaction", func(m *Model) { m.pendingSuggestion = "held" }, false},
 		{"run in flight", func(m *Model) { m.running = true }, false},
-		{"compaction in flight", func(m *Model) { m.compacting = true }, false},
+		{"compaction in flight", func(m *Model) { m.compacting = true }, true},
 		{"hydrating", func(m *Model) { m.hydrating = true }, false},
 		{"replay pending", func(m *Model) { m.replayPending = true }, false},
 		{"session browser open", func(m *Model) { m.browserOpen = true }, false},
@@ -159,6 +160,95 @@ func TestSuggestionFromFakeBinary(t *testing.T) {
 	if got := m.composerHint(); got != "Ctrl+S use suggestion \u00b7 type to dismiss" {
 		t.Fatalf("composerHint = %q", got)
 	}
+}
+
+// TestSuggestionModelSelection checks the resolved -model/-profile passed to
+// the suggester: the [suggestions] value wins, and each unset value falls back
+// independently to the turn selection.
+func TestSuggestionModelSelection(t *testing.T) {
+	tests := []struct {
+		name              string
+		suggestionModel   string
+		suggestionProfile string
+		turnModel         string
+		turnProfile       string
+		wantModel         string
+		wantProfile       string
+	}{
+		{
+			name:              "suggestion selection overrides the turn",
+			suggestionModel:   "suggestion-model",
+			suggestionProfile: "suggestion-profile",
+			turnModel:         "turn-model",
+			turnProfile:       "turn-profile",
+			wantModel:         "suggestion-model",
+			wantProfile:       "suggestion-profile",
+		},
+		{
+			name:        "unset suggestion values fall back",
+			turnModel:   "turn-model",
+			turnProfile: "turn-profile",
+			wantModel:   "turn-model",
+			wantProfile: "turn-profile",
+		},
+		{
+			name:            "model and profile fall back independently",
+			suggestionModel: "suggestion-model",
+			turnModel:       "turn-model",
+			turnProfile:     "turn-profile",
+			wantModel:       "suggestion-model",
+			wantProfile:     "turn-profile",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			argsPath := filepath.Join(t.TempDir(), "args")
+			t.Setenv("ARGS_FILE", argsPath)
+			bin := filepath.Join(t.TempDir(), "fake-cake-suggest")
+			script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARGS_FILE\"\n" +
+				"printf '%s\\n' '{\"suggested\":false,\"session_id\":\"" + suggestionSessionID + "\",\"reason\":\"done\"}'\n"
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			m := suggestionReady(t)
+			m.cfg.Suggestions.Bin = bin
+			m.cfg.Suggestions.Model = tt.suggestionModel
+			m.cfg.Suggestions.Profile = tt.suggestionProfile
+			m.cfg.Model = tt.turnModel
+			m.cfg.Profile = tt.turnProfile
+			m, cmd := m.maybeStartSuggestion()
+			if cmd == nil {
+				t.Fatal("maybeStartSuggestion returned no command")
+			}
+			if _, ok := cmd().(suggestionDoneMsg); !ok {
+				t.Fatal("suggester command did not produce a suggestionDoneMsg")
+			}
+
+			raw, err := os.ReadFile(argsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Fields(string(raw))
+			if got := argsValue(args, "-model"); got != tt.wantModel {
+				t.Fatalf("-model = %q, want %q (args %v)", got, tt.wantModel, args)
+			}
+			if got := argsValue(args, "-profile"); got != tt.wantProfile {
+				t.Fatalf("-profile = %q, want %q (args %v)", got, tt.wantProfile, args)
+			}
+		})
+	}
+}
+
+// argsValue returns the token following name in a captured argv, or an empty
+// string when the flag is absent.
+func argsValue(args []string, name string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func TestSuggestionDismissedByTyping(t *testing.T) {
@@ -479,15 +569,29 @@ func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
 	}
 }
 
-func TestCompactionThenSuggestion(t *testing.T) {
+// TestCompactionAndSuggestionRunTogether checks the end-of-turn transition
+// starts both background calls and that a suggestion result arriving while the
+// compacting gate is closed is held until the compactor settles.
+func TestCompactionAndSuggestionRunTogether(t *testing.T) {
 	m := suggestionReady(t)
 	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
 	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
 
 	next, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = next.(Model)
-	if cmd == nil || !m.compacting || m.suggesting {
-		t.Fatalf("finishRun did not start compaction first: compacting=%v suggesting=%v cmd nil=%v", m.compacting, m.suggesting, cmd == nil)
+	if cmd == nil || !m.compacting || !m.suggesting {
+		t.Fatalf("finishRun did not start both: compacting=%v suggesting=%v cmd nil=%v", m.compacting, m.suggesting, cmd == nil)
+	}
+
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("Add a test for the parallel path."),
+	})
+	if m.suggestionText != "" || m.input.Placeholder != defaultInputPlaceholder {
+		t.Fatalf("ghost appeared while compaction gated the composer: text=%q placeholder=%q", m.suggestionText, m.input.Placeholder)
+	}
+	if m.pendingSuggestion != "Add a test for the parallel path." {
+		t.Fatalf("pendingSuggestion = %q", m.pendingSuggestion)
 	}
 
 	m, cmd = m.finishCompaction(compactionDoneMsg{
@@ -495,10 +599,98 @@ func TestCompactionThenSuggestion(t *testing.T) {
 		sessionID: suggestionSessionID,
 		res:       compact.Result{ExitCode: 1, Stderr: "compactor failed"},
 	})
-	if m.compacting || !m.suggesting || cmd == nil {
-		t.Fatalf("finishCompaction did not start the suggestion after settling: compacting=%v suggesting=%v cmd nil=%v", m.compacting, m.suggesting, cmd == nil)
+	if m.compacting || m.suggesting || cmd == nil {
+		t.Fatalf("finishCompaction state: compacting=%v suggesting=%v cmd nil=%v", m.compacting, m.suggesting, cmd == nil)
 	}
-	m.cancelSuggestion()
+	if m.pendingSuggestion != "" {
+		t.Fatalf("pendingSuggestion survived the settle: %q", m.pendingSuggestion)
+	}
+	if m.suggestionText != "Add a test for the parallel path." || m.input.Placeholder != "Add a test for the parallel path." {
+		t.Fatalf("held suggestion was not applied: text=%q placeholder=%q", m.suggestionText, m.input.Placeholder)
+	}
+}
+
+// TestCompactionSettleDropsHeldSuggestionWhenComposerChanges covers the held
+// result losing its claim before the compactor opens the gate.
+func TestCompactionSettleDropsHeldSuggestionWhenComposerChanges(t *testing.T) {
+	m := suggestionReady(t)
+	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
+	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
+
+	next, _ := m.finishRun(cake.Result{ExitCode: 0})
+	m = next.(Model)
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("Add a test for the parallel path."),
+	})
+	m.input.SetValue("my own draft")
+	m.clearSuggestion()
+
+	m, _ = m.finishCompaction(compactionDoneMsg{
+		req:       m.compactionReq,
+		sessionID: suggestionSessionID,
+		res:       compact.Result{ExitCode: 1, Stderr: "compactor failed"},
+	})
+	if m.suggestionActive() || m.pendingSuggestion != "" {
+		t.Fatalf("dismissed held result survived settling: text=%q pending=%q", m.suggestionText, m.pendingSuggestion)
+	}
+}
+
+// TestNewSessionDropsHeldSuggestion checks the new-session boundary discards a
+// result held for the old session before the compactor settles.
+func TestNewSessionDropsHeldSuggestion(t *testing.T) {
+	m := suggestionReady(t)
+	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
+	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
+
+	next, _ := m.finishRun(cake.Result{ExitCode: 0})
+	m = next.(Model)
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("Add a test for the parallel path."),
+	})
+	if m.pendingSuggestion == "" {
+		t.Fatal("suggestion was not held during compaction")
+	}
+
+	next, _ = m.startNewSession()
+	m = next.(Model)
+	m, _ = m.finishCompaction(compactionDoneMsg{
+		req:       m.compactionReq,
+		sessionID: suggestionSessionID,
+		res:       compact.Result{ExitCode: 1, Stderr: "compactor failed"},
+	})
+	if m.suggestionActive() || m.pendingSuggestion != "" {
+		t.Fatalf("held result crossed the new-session boundary: text=%q pending=%q", m.suggestionText, m.pendingSuggestion)
+	}
+}
+
+// TestFinishCompactionDoesNotStartSuggestion checks that settling a compaction
+// does not spend a second suggestion call after the turn's one attempt.
+func TestFinishCompactionDoesNotStartSuggestion(t *testing.T) {
+	m := suggestionReady(t)
+	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
+	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
+
+	next, _ := m.finishRun(cake.Result{ExitCode: 0})
+	m = next.(Model)
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: &suggest.Document{
+			Suggested: suggestionBool(false),
+			SessionID: suggestionSessionID,
+			Reason:    "the work is complete",
+		},
+	})
+
+	m, _ = m.finishCompaction(compactionDoneMsg{
+		req:       m.compactionReq,
+		sessionID: suggestionSessionID,
+		res:       compact.Result{ExitCode: 1, Stderr: "compactor failed"},
+	})
+	if m.suggesting || m.suggestionReq != 0 {
+		t.Fatalf("finishCompaction started a second request: suggesting=%v req=%d", m.suggesting, m.suggestionReq)
+	}
 }
 
 func TestNormalizeSuggestion(t *testing.T) {

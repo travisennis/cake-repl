@@ -428,18 +428,24 @@ suggestion quality has not been qualified.
 [suggestions]
 enabled = true
 cake-suggest-bin = "cake-suggest"
+# Optional: use a different model/profile for the suggestion call. Each falls
+# back independently to the REPL's turn selection when unset.
+# model = "deepseek-flash-low"
+# profile = "suggestion"
 ```
 
 - The REPL runs one `cake-suggest suggest -json [-cake-bin <path>]
   [-model <name>] [-profile <name>] -- <session-id>` after a completed turn
-  that ended cleanly and pinned a session. It passes the model and profile it
-  was configured with, omitting either when unset. The suggester reads the
-  session itself; cake-repl never reads or writes session files. The request is
-  read-only, bounded, and model-owned: it never blocks prompt submission and is
-  canceled when the composer is edited, a new session starts, the session
-  target changes, or the REPL quits. A canceled child is reaped before the REPL
-  returns within the same bounded teardown, including the quit and
-  SIGINT/SIGTERM paths; keyboard input is ignored while that exit is draining.
+  that ended cleanly and pinned a session. It passes the resolved
+  `[suggestions] model` and `profile` when set, falling back independently to
+  the REPL's `-model` and `-profile`, and omitting either when empty. The
+  suggester reads the session itself; cake-repl never reads or writes session
+  files. The request is read-only, bounded, and model-owned: it never blocks
+  prompt submission and is canceled when the composer is edited, a new session
+  starts, the session target changes, or the REPL quits. A canceled child is
+  reaped before the REPL returns within the same bounded teardown, including
+  the quit and SIGINT/SIGTERM paths; keyboard input is ignored while that exit
+  is draining.
 - The result is one JSON document:
   `{"suggested":true,"suggestion":"…","session_id":"…","reason":""}`. Unknown
   fields are ignored. A `suggested:false` document, a cancellation, or a result
@@ -448,19 +454,27 @@ cake-suggest-bin = "cake-suggest"
 - The suggestion is applied only when the input is still empty, the REPL is
   idle, the request is current, and the session pin is the one the request
   named. A later result cannot overwrite a draft.
-- If an automatic context compaction starts after the same turn, the
-  suggestion waits until the compactor has exited and been reaped, so it never
-  reads a session mid-append.
+- A suggestion starts alongside an automatic context compaction from the same
+  turn instead of waiting for the compactor. Cake replay is read-only and
+  tolerates a trailing partial record, so the suggester safely reads the
+  pre-checkpoint transcript or a compacted prefix. A result that arrives while
+  compaction still gates the composer is held and applied once the compactor
+  settles, only if the composer is still empty and the session pin matches. The
+  REPL does not start a second suggestion after compaction.
 - `-no-session` disables suggestions with a startup warning. The automatically
-  loaded project-local `.cake-repl.toml` cannot enable suggestions or select
-  `cake-suggest-bin`; it may only set `enabled = false`. XDG config or an
-  explicit `-config` supplies the trusted values.
+  loaded project-local `.cake-repl.toml` cannot enable suggestions, select
+  `cake-suggest-bin`, or set `suggestions.model` / `suggestions.profile`; it may
+  only set `enabled = false`. XDG config or an explicit `-config` supplies the
+  trusted values.
 - The suggester inherits the REPL's environment and runs in the same `-cwd`,
   so `CAKE_DATA_DIR` selects the same root and a relative `-cake-bin` resolves
   in that directory. There is no fallback to reading session files.
 
 See
-[ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
+[ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
+[ADR 030](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+and
+[ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md).
 
 ## Config file
 
@@ -475,8 +489,9 @@ cannot select `cake-bin`, cannot enable `compaction`, cannot set
 `compaction.cake-compact-bin`, cannot tune `threshold-percent`,
 `keep-tokens`, `max-context-tokens`, or `trigger-tokens`, cannot select
 `compaction.model`, `compaction.profile`, or `compaction.reasoning-effort`, and
-cannot enable `suggestions` or set `suggestions.cake-suggest-bin`; it may only
-disable compaction or suggestions.
+cannot enable `suggestions`, set `suggestions.cake-suggest-bin`, or select
+`suggestions.model` / `suggestions.profile`; it may only disable compaction or
+suggestions.
 
 | Path | Priority |
 |---|---|
@@ -493,8 +508,9 @@ It also cannot enable context compaction, set `compaction.cake-compact-bin`, tun
 `threshold-percent`, `keep-tokens`, `max-context-tokens`, or `trigger-tokens`,
 or select `compaction.model`, `compaction.profile`, or
 `compaction.reasoning-effort`; each is ignored with a warning. It cannot enable
-prompt suggestions or set `suggestions.cake-suggest-bin` either. It may disable
-compaction or suggestions. Set the executable, enable compaction or suggestions,
+prompt suggestions, set `suggestions.cake-suggest-bin`, or select
+`suggestions.model` or `suggestions.profile` either. It may disable compaction
+or suggestions. Set the executable, enable compaction or suggestions,
 and tune compaction in XDG config, an explicitly selected `-config` file, or
 `-cake-bin`. Explicitly selecting `.cake-repl.toml` with
 `-config` allows its `cake-bin` and compaction/suggestion values. `-no-config`
@@ -546,10 +562,16 @@ keep-tokens = 20000
 
 # Ask the external cake-suggest binary for the next user prompt after a
 # completed turn (default: off). XDG or explicit -config only; the automatic
-# project-local file cannot enable suggestions or select the executable.
+# project-local file cannot enable suggestions, select the executable, or
+# select the suggestion model.
 [suggestions]
 enabled = false
 cake-suggest-bin = "cake-suggest"
+# Optional: use a different model/profile for the suggestion call. Each falls
+# back independently to the turn selection when unset. Trusted config only;
+# project-local keys are ignored.
+# model = "deepseek-flash-low"
+# profile = "suggestion"
 ```
 
 ### Merge order
@@ -561,9 +583,10 @@ applies to `compaction.enabled = true`, `compaction.cake-compact-bin`,
 `compaction.max-context-tokens`, `compaction.trigger-tokens`,
 `compaction.threshold-percent`, `compaction.keep-tokens`, `compaction.model`,
 `compaction.profile`, and `compaction.reasoning-effort`; the project-local layer
-may only disable compaction. It also applies to `suggestions.enabled = true`
-and `suggestions.cake-suggest-bin`; the project-local layer may only disable
-suggestions. Trusted relative executable
+may only disable compaction. It also applies to `suggestions.enabled = true`,
+`suggestions.cake-suggest-bin`, `suggestions.model`, and
+`suggestions.profile`; the project-local layer may only disable suggestions.
+Trusted relative executable
 paths keep their usual resolution. A CLI flag always wins over the
 same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and

@@ -155,3 +155,9 @@ cake-suggest-bin = "cake-suggest"
   [ADR 027](027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - cake-repl task 127 implements the REPL side. `cake-suggest` is a separate
   sibling binary; its internal design and model choice are out of scope here.
+- [ADR 030](030-let-prompt-suggestions-select-their-own-model-and-profile.md)
+  extends the `[suggestions]` table with a trusted `model`/`profile` selection.
+- [ADR 031](031-run-after-turn-suggestions-alongside-compaction.md) partially
+  supersedes the trigger clause: the suggestion now starts alongside an
+  automatic compaction, and a result arriving while the compacting gate is
+  closed is held until the compactor settles.

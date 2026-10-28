@@ -48,15 +48,22 @@ func (m Model) suggestionTurnEligible(res cake.Result) bool {
 // deliberately stricter than "a turn just ended": the request starts only with
 // an empty composer, an idle program, and a pinned session that has a completed
 // turn behind it. A draft always wins over a suggestion.
+//
+// Compaction is intentionally not part of the gate: the suggester reads the
+// session through cake's read-only replay stream, which tolerates a concurrent
+// append, and the two model calls overlap. A result that arrives while the
+// compacting gate still blocks submission is held for the composer. See ADR
+// 031.
 func (m Model) canSuggest() bool {
 	if !m.cfg.Suggestions.Enabled || m.cfg.NoSession {
 		return false
 	}
-	if m.running || m.compacting || m.hydrating || m.replayPending || m.replayRun != nil ||
+	if m.running || m.hydrating || m.replayPending || m.replayRun != nil ||
 		m.browserOpen || m.exitAfter || m.newSessionPending {
 		return false
 	}
-	if m.suggesting || m.suggestionDone != nil || m.suggestionText != "" || m.input.Value() != "" {
+	if m.suggesting || m.suggestionDone != nil || m.suggestionText != "" ||
+		m.pendingSuggestion != "" || m.input.Value() != "" {
 		return false
 	}
 	if m.session.LastComplete == nil || m.session.LastComplete.IsError {
@@ -88,8 +95,8 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 		Cwd:       m.cfg.Cwd,
 		SessionID: sessionID,
 		CakeBin:   m.cfg.CakeBin,
-		Model:     m.cfg.Model,
-		Profile:   m.cfg.Profile,
+		Model:     firstNonEmpty(m.cfg.Suggestions.Model, m.cfg.Model),
+		Profile:   firstNonEmpty(m.cfg.Suggestions.Profile, m.cfg.Profile),
 		DebugLog:  m.cfg.DebugLog,
 	}
 	return m, func() tea.Msg {
@@ -165,12 +172,48 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 		m.logDebug("suggestion: session pin changed")
 		return m
 	}
+	if m.compacting {
+		// The composer is gated until the compactor is reaped. Hold the usable
+		// result so it can appear the moment the gate opens instead of starting
+		// a second metered request afterward. See ADR 031.
+		m.pendingSuggestion = text
+		m.pendingSuggestionSession = msg.sessionID
+		return m
+	}
 
+	m.showSuggestion(text)
+	return m
+}
+
+// showSuggestion puts one usable, already-normalized suggestion in the
+// composer as ghost text.
+func (m *Model) showSuggestion(text string) {
 	m.suggestionText = text
 	m.input.Placeholder = text
 	m.layout()
 	m.contentChanged = true
-	return m
+}
+
+// applyPendingSuggestion promotes a suggestion held during compaction once the
+// composer is usable again. It re-checks the same identity and composer rules as
+// a live result; anything that changed while the compactor ran drops the held
+// text instead.
+func (m *Model) applyPendingSuggestion() {
+	if m.pendingSuggestion == "" {
+		return
+	}
+	text := m.pendingSuggestion
+	sessionID := m.pendingSuggestionSession
+	m.pendingSuggestion = ""
+	m.pendingSuggestionSession = ""
+	if !m.canSuggest() {
+		return
+	}
+	if _, pinned := m.session.RunOptions(); pinned != sessionID {
+		m.logDebug("suggestion: held session pin changed")
+		return
+	}
+	m.showSuggestion(text)
 }
 
 // warnSuggestion surfaces a broken suggester once per REPL process. The feature
@@ -189,6 +232,8 @@ func (m *Model) warnSuggestion(text string) {
 // history recall, completion, submit, a new session, a resume, and quit.
 func (m *Model) clearSuggestion() {
 	m.suggestionText = ""
+	m.pendingSuggestion = ""
+	m.pendingSuggestionSession = ""
 	if m.input.Placeholder != defaultInputPlaceholder {
 		m.input.Placeholder = defaultInputPlaceholder
 		m.contentChanged = true

@@ -141,7 +141,9 @@ func (m Model) compactionTriggerPercent() int {
 // startCompaction launches one in-place compaction as a Bubble Tea command. The
 // model-owned context is canceled by Ctrl+C, quit, and Ctrl+N; the gate stays
 // closed until the result is reaped. It returns a nil command, leaving state
-// untouched, when there is no pinned session or no resolvable trigger.
+// untouched, when there is no pinned session or no resolvable trigger. The
+// caller batches the returned command with the title update, so a turn that
+// also starts a suggestion uses one title command for both.
 func (m Model) startCompaction() (Model, tea.Cmd) {
 	mode, sessionID := m.session.RunOptions()
 	if mode != cake.RunResume || sessionID == "" {
@@ -191,10 +193,10 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	// lands. See ADR 026.
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: compactionStartText})
 	m.syncViewport()
-	// The title picks up the compacting marker in the same transition. The
+	// The title picks up the compacting marker in the caller's batch. The
 	// spinner needs no new tick: finishRun runs while the finished turn's tick
 	// is still pending, and the handler keeps that chain alive while compacting.
-	return m, tea.Batch(run, m.titleCmd())
+	return m, run
 }
 
 // finishCompaction applies one compactor result. In-place success keeps the
@@ -212,9 +214,12 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	m.compactionElapsed = 0
 
 	// Ctrl+N moved to a new session while the canceled child was draining; its
-	// result belongs before that boundary.
+	// result belongs before that boundary, and so does any suggestion held for
+	// the old one.
 	if m.newSessionPending {
 		m.newSessionPending = false
+		m.pendingSuggestion = ""
+		m.pendingSuggestionSession = ""
 		if m.exitAfter {
 			return m.quit()
 		}
@@ -225,9 +230,11 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	mode, sessionID := m.session.RunOptions()
 	if mode != cake.RunResume || sessionID != msg.sessionID {
 		// The target changed while the child was draining; its result belongs to
-		// the session the REPL left. Drop the pending start row so it cannot
-		// keep reading as in progress after the operation is over.
+		// the session the REPL left. Drop the pending start row and any suggestion
+		// held for the old session so neither can keep reading as current.
 		m.removeCompactionStart()
+		m.pendingSuggestion = ""
+		m.pendingSuggestionSession = ""
 		if m.exitAfter {
 			return m.quit()
 		}
@@ -248,11 +255,11 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	if m.exitAfter {
 		return m.quit()
 	}
-	// The compactor is reaped, so the session is stable and the suggestion can
-	// read it. A new session, a retarget, or an exit returned above.
-	if next, cmd := m.maybeStartSuggestion(); cmd != nil {
-		return next, tea.Batch(cmd, next.titleCmd())
-	}
+	// The compactor is reaped, so the composer gate is open. A suggestion that
+	// completed while it ran has been waiting for exactly this transition; a
+	// suggestion still in flight will apply through its own result path. Do not
+	// start a new request here: the turn already made its one attempt.
+	m.applyPendingSuggestion()
 	return m, m.titleCmd()
 }
 
@@ -363,8 +370,9 @@ func compactionElapsedText(d time.Duration) string {
 	}
 }
 
-// firstNonEmpty returns the first non-empty value. Compaction uses it so an
-// unset summarizer model or profile falls back to the REPL's turn selection.
+// firstNonEmpty returns the first non-empty value. Between-turn operations use
+// it so an unset operation-specific model or profile falls back to the REPL's
+// turn selection.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {

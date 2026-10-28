@@ -108,31 +108,41 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   the subprocess contract.
 - **Prompt suggestions are an opt-in read-only external operation.** The
   `[suggestions]` table (disabled by default) lets a completed, clean turn ask
-  `cake-suggest suggest -json … -- <session-id>` for the next user prompt after
-  the session pin and any automatic compaction have settled. The request is
-  read-only, model-owned, bounded by a 60-second context timeout, and never
-  gates prompt submission. Its result is applied only while the request
-  identity, session pin, idle state, and empty composer all still match, and it
-  is shown as dim placeholder ghost text, not as the textarea value. `Ctrl+S`
-  submits it as an ordinary prompt with slash-command parsing bypassed; typing,
-  history recall, tab completion, `Ctrl+U`, submit, `Ctrl+N`, `/new`, `/resume`,
-  `/sessions`, quit, and an unobserved exit discard the ghost and cancel the
-  request. An in-flight child stays tracked after invalidation; only one
-  suggestion request runs at a time, and quit or an unobserved exit waits for
-  the canceled child to be reaped within the same bounded teardown before the
-  program returns. The exit is already in progress, so further keyboard input
-  is ignored while it drains. A signal-terminated cancellation and a
-  `suggested:false` result are silent; a child that exits non-zero on its own
-  after the cancel is a failure that shares the warning budget, as are a
-  missing binary, malformed document (including a missing required `suggested`
-  field), non-zero exit, and timeout. The suggester
-  runs on the same child terminal boundary with the same SIGTERM and `WaitDelay`
-  bound, a 64 KiB stdout cap, an 8 KiB stderr tail, and a content-free debug-log
-  line; it never reads or writes a session file from cake-repl. `-no-session`
-  disables the feature with a startup warning, and the automatically loaded
-  project-local config cannot enable it or select `cake-suggest-bin`; it may only
-  disable it. See
-  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
+  `cake-suggest suggest -json … -- <session-id>` for the next user prompt. The
+  request starts alongside an automatic compaction from the same turn; the
+  suggester reads through Cake's read-only replay stream, which opens no lock
+  and skips a trailing partial record, so the concurrent checkpoint append
+  cannot corrupt the read. The request is model-owned, bounded by a 60-second
+  context timeout, and never gates prompt submission. Its `-model`/`-profile`
+  resolve from `[suggestions]` first and then independently from the turn
+  selection. Its result is applied only while the request identity, session
+  pin, idle state, and empty composer all still match, and it is shown as dim
+  placeholder ghost text, not as the textarea value. A result that arrives while
+  compaction still gates the composer is held, then applied only if those
+  conditions still hold after the compactor settles; the REPL does not start a
+  second suggestion after compaction. `Ctrl+S` submits it as an ordinary prompt
+  with slash-command parsing bypassed; typing, history recall, tab completion,
+  `Ctrl+U`, submit, `Ctrl+N`, `/new`, `/resume`, `/sessions`, quit, and an
+  unobserved exit discard the ghost or held result and cancel the request. An
+  in-flight child stays tracked after invalidation; only one suggestion request
+  runs at a time, and quit or an unobserved exit waits for the canceled child
+  to be reaped within the same bounded teardown before the program returns. The
+  exit is already in progress, so further keyboard input is ignored while it
+  drains. A signal-terminated cancellation and a `suggested:false` result are
+  silent; a child that exits non-zero on its own after the cancel is a failure
+  that shares the warning budget, as are a missing binary, malformed document
+  (including a missing required `suggested` field), non-zero exit, and timeout.
+  The suggester runs on the same child terminal boundary with the same SIGTERM
+  and `WaitDelay` bound, a 64 KiB stdout cap, an 8 KiB stderr tail, and a
+  content-free debug-log line; it never reads or writes a session file from
+  cake-repl. `-no-session` disables the feature with a startup warning, and the
+  automatically loaded project-local config cannot enable it, select
+  `cake-suggest-bin`, or select `suggestions.model`/`suggestions.profile`; it
+  may only disable it. See
+  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
+  [ADR 030](../adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+  and
+  [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md).
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
   resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and

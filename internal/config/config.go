@@ -75,10 +75,16 @@ type Compaction struct {
 // whose false value is meaningful, so EnabledSet records whether the file
 // actually supplied the key. CakeSuggestBin names the external suggester; the
 // REPL only invokes it and never reads a session file itself.
+//
+// Model and Profile select the metered suggestion call. Empty values fall back
+// to the REPL's turn selection. These are trusted-config only; a project-local
+// file may not select a suggestion model. See ADR 030.
 type Suggestions struct {
 	Enabled        bool   `toml:"enabled"`
 	EnabledSet     bool   `toml:"-"`
 	CakeSuggestBin string `toml:"cake-suggest-bin"`
+	Model          string `toml:"model"`
+	Profile        string `toml:"profile"`
 }
 
 const (
@@ -193,10 +199,11 @@ func Load(path string) (*Config, error) {
 // LoadProject loads automatically discovered project defaults. A project file is
 // untrusted provenance, so it cannot select an executable, cannot enable the
 // metered, session-mutating compactor or the metered suggester, and cannot tune
-// the compactor's thresholds or summarizer selection. ignored names each key
-// dropped for that reason, in a stable order, and reports key presence even when
-// its value is empty. A project file may still disable compaction or
-// suggestions. See ADR 006, ADR 024, ADR 028, and ADR 029.
+// the compactor's thresholds or summarizer selection or the suggestion model.
+// ignored names each key dropped for that reason, in a stable order, and reports
+// key presence even when its value is empty. A project file may still disable
+// compaction or suggestions. See ADR 006, ADR 024, ADR 028, ADR 029, and ADR
+// 030.
 func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	cfg, meta, err := load(path)
 	if err != nil {
@@ -213,6 +220,14 @@ func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	cfg.Suggestions.CakeSuggestBin = ""
 	if definedFold(meta, "suggestions", "cake-suggest-bin") {
 		ignored = append(ignored, "suggestions.cake-suggest-bin")
+	}
+	if definedFold(meta, "suggestions", "model") {
+		ignored = append(ignored, "suggestions.model")
+		cfg.Suggestions.Model = ""
+	}
+	if definedFold(meta, "suggestions", "profile") {
+		ignored = append(ignored, "suggestions.profile")
+		cfg.Suggestions.Profile = ""
 	}
 	if definedFold(meta, "suggestions", "enabled") && cfg.Suggestions.Enabled {
 		// Disabling is allowed to win; enabling is not.
@@ -378,7 +393,8 @@ func MergeCompaction(base Compaction, file *Config) Compaction {
 
 // mergeSuggestions applies a higher-priority `[suggestions]` table.
 // Enabled merges on key presence so an explicit false can disable an
-// inherited true; the executable merges only when non-empty.
+// inherited true; the executable and model selection merge only when
+// non-empty.
 func mergeSuggestions(dst *Suggestions, src Suggestions) {
 	if src.EnabledSet {
 		dst.Enabled = src.Enabled
@@ -386,6 +402,12 @@ func mergeSuggestions(dst *Suggestions, src Suggestions) {
 	}
 	if src.CakeSuggestBin != "" {
 		dst.CakeSuggestBin = src.CakeSuggestBin
+	}
+	if src.Model != "" {
+		dst.Model = src.Model
+	}
+	if src.Profile != "" {
+		dst.Profile = src.Profile
 	}
 }
 
