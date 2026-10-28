@@ -60,14 +60,14 @@ type Compaction struct {
 	ThresholdPercent int `toml:"threshold-percent"`
 	KeepTokens       int `toml:"keep-tokens"`
 
-	// SummarizerModel, SummarizerProfile, and SummarizerReasoningEffort select
-	// the model and reasoning settings for the summary. Empty values fall back to
-	// the REPL's turn selection (for model/profile) or cake's own default (for
-	// reasoning effort). These are trusted-config only; a project-local file may
-	// not select a metered summarizer. See ADR 029.
-	SummarizerModel           string `toml:"summarizer-model"`
-	SummarizerProfile         string `toml:"summarizer-profile"`
-	SummarizerReasoningEffort string `toml:"summarizer-reasoning-effort"`
+	// Model, Profile, and ReasoningEffort select the model and reasoning
+	// settings for the summary. Empty values fall back to the REPL's turn
+	// selection (for model/profile) or cake's own default (for reasoning
+	// effort). These are trusted-config only; a project-local file may not
+	// select a metered summarizer. See ADR 029.
+	Model           string `toml:"model"`
+	Profile         string `toml:"profile"`
+	ReasoningEffort string `toml:"reasoning-effort"`
 }
 
 // Suggestions holds the opt-in after-turn prompt-suggestion settings in the
@@ -154,10 +154,10 @@ func (c Compaction) Validate() error {
 	if c.KeepTokens < 0 {
 		return fmt.Errorf("compaction.keep-tokens must not be negative, got %d", c.KeepTokens)
 	}
-	switch c.SummarizerReasoningEffort {
+	switch c.ReasoningEffort {
 	case "", "none", "low", "medium", "high", "xhigh", "max":
 	default:
-		return fmt.Errorf("compaction.summarizer-reasoning-effort must be one of none, low, medium, high, xhigh, or max, got %q", c.SummarizerReasoningEffort)
+		return fmt.Errorf("compaction.reasoning-effort must be one of none, low, medium, high, xhigh, or max, got %q", c.ReasoningEffort)
 	}
 	return nil
 }
@@ -245,17 +245,17 @@ func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 		ignored = append(ignored, "compaction.keep-tokens")
 		cfg.Compaction.KeepTokens = 0
 	}
-	if definedFold(meta, "compaction", "summarizer-model") {
-		ignored = append(ignored, "compaction.summarizer-model")
-		cfg.Compaction.SummarizerModel = ""
+	if definedFold(meta, "compaction", "model") {
+		ignored = append(ignored, "compaction.model")
+		cfg.Compaction.Model = ""
 	}
-	if definedFold(meta, "compaction", "summarizer-profile") {
-		ignored = append(ignored, "compaction.summarizer-profile")
-		cfg.Compaction.SummarizerProfile = ""
+	if definedFold(meta, "compaction", "profile") {
+		ignored = append(ignored, "compaction.profile")
+		cfg.Compaction.Profile = ""
 	}
-	if definedFold(meta, "compaction", "summarizer-reasoning-effort") {
-		ignored = append(ignored, "compaction.summarizer-reasoning-effort")
-		cfg.Compaction.SummarizerReasoningEffort = ""
+	if definedFold(meta, "compaction", "reasoning-effort") {
+		ignored = append(ignored, "compaction.reasoning-effort")
+		cfg.Compaction.ReasoningEffort = ""
 	}
 	return cfg, ignored, nil
 }
@@ -356,14 +356,14 @@ func mergeCompaction(dst *Compaction, src Compaction) {
 	if src.KeepTokens != 0 {
 		dst.KeepTokens = src.KeepTokens
 	}
-	if src.SummarizerModel != "" {
-		dst.SummarizerModel = src.SummarizerModel
+	if src.Model != "" {
+		dst.Model = src.Model
 	}
-	if src.SummarizerProfile != "" {
-		dst.SummarizerProfile = src.SummarizerProfile
+	if src.Profile != "" {
+		dst.Profile = src.Profile
 	}
-	if src.SummarizerReasoningEffort != "" {
-		dst.SummarizerReasoningEffort = src.SummarizerReasoningEffort
+	if src.ReasoningEffort != "" {
+		dst.ReasoningEffort = src.ReasoningEffort
 	}
 }
 

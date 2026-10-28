@@ -22,24 +22,30 @@ this decision.
 
 ```toml
 [compaction]
-summarizer-model = "deepseek-flash-max"
-summarizer-profile = "summary"
-summarizer-reasoning-effort = "low"
+model = "deepseek-flash-max"
+profile = "summary"
+reasoning-effort = "low"
 ```
 
-- `summarizer-model` and `summarizer-profile` each override the corresponding
-  turn selection independently. An unset value falls back to the REPL's
-  `-model` / `-profile`, preserving the current behavior.
-- `summarizer-reasoning-effort` is passed through when set. An unset value
-  leaves Cake's own reasoning default in effect.
-- cake-repl passes the resolved values to `cake-compact compact` as
+- `model` and `profile` each override the corresponding turn selection
+  independently. An unset value falls back to the REPL's `-model` / `-profile`,
+  preserving the current behavior.
+- `reasoning-effort` is passed through when set. An unset value leaves Cake's
+  own reasoning default in effect.
+- The `[compaction]` table scopes these keys, so they do not need a `summarizer-`
+  prefix. cake-repl passes the resolved values to `cake-compact compact` as
   `-summarizer-model`, `-summarizer-profile`, and
-  `-summarizer-reasoning-effort`. The compactor's threshold, in-place append,
-  and result contract are unchanged.
+  `-summarizer-reasoning-effort`; those flags keep the prefix because
+  `cake-compact run` also accepts `-model` / `-profile` /
+  `-reasoning-effort` for the coding turn. The compactor's threshold, in-place
+  append, and result contract are unchanged.
 - The automatic project-local `.cake-repl.toml` layer ignores all three keys
   with a startup warning. They may only come from XDG config or an explicit
   `-config`, because they select a metered operation's cost and behavior. This
   extends ADR 024's provenance rule.
+- The keys were first written as `summarizer-model`, `summarizer-profile`, and
+  `summarizer-reasoning-effort`; they were renamed before any release. The
+  compactor flags were not renamed.
 
 ## Consequences
 
@@ -48,7 +54,8 @@ summarizer-reasoning-effort = "low"
   creating a profile.
 - Good: the existing turn-model fallback keeps current configs unchanged.
 - Bad: another set of keys to keep aligned across the README, ADRs, config
-  validation, and the compactor CLI.
+  validation, and the compactor CLI; the config keys and CLI flags intentionally
+  differ because of the table scope (`model` vs `-summarizer-model`).
 - Neutral: the summary's quality and cost still require explicit evaluation;
   this decision adds selection, not a policy or a default change.
 

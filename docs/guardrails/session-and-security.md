@@ -95,8 +95,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   automatically loaded project-local `.cake-repl.toml` cannot enable
   compaction, select its executable, tune any threshold, including
   `max-context-tokens` and `trigger-tokens`, or select the summary with
-  `summarizer-model`, `summarizer-profile`, or
-  `summarizer-reasoning-effort` (ADR 006, extended by
+  `compaction.model`, `compaction.profile`, or `compaction.reasoning-effort`
+  (ADR 006, extended by
   [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md)
   and narrowed by
   [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md); the absolute
@@ -313,12 +313,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - **Letting a project file turn on metered compaction.** The automatically
   loaded `.cake-repl.toml` may only disable compaction; `enabled = true`,
   `cake-compact-bin`, `threshold-percent`, `keep-tokens`, `max-context-tokens`,
-  `trigger-tokens`, `summarizer-model`, `summarizer-profile`, and
-  `summarizer-reasoning-effort` must be ignored with a warning. Enabling or
+  `trigger-tokens`, `compaction.model`, `compaction.profile`, and
+  `compaction.reasoning-effort` must be ignored with a warning. Enabling or
   tuning there would let a cloned repository spend the user's quota and mutate
-  the session without the user opting in. Key presence must be matched case-insensitively,
-  as TOML decoding does; a case-sensitive metadata lookup misses
-  `[Compaction] Enabled = true` and lets it through.
+  the session without the user opting in. Key presence must be matched
+  case-insensitively, as TOML decoding does; a case-sensitive metadata lookup
+  misses `[Compaction] Enabled = true` and lets it through.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Reopening terminal injection.** Adding a render path that bypasses

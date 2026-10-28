@@ -418,13 +418,13 @@ cat <<'JSON'
 JSON
 `)
 	m := compactionModelWithConfig(t, CompactionConfig{
-		Enabled:                   true,
-		Bin:                       bin,
-		ThresholdPercent:          80,
-		KeepTokens:                20000,
-		SummarizerModel:           "compact-model",
-		SummarizerProfile:         "compact-profile",
-		SummarizerReasoningEffort: "low",
+		Enabled:          true,
+		Bin:              bin,
+		ThresholdPercent: 80,
+		KeepTokens:       20000,
+		Model:            "compact-model",
+		Profile:          "compact-profile",
+		ReasoningEffort:  "low",
 	}, 170_000, 200_000)
 
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})

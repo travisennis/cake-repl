@@ -73,14 +73,15 @@ consumes cake events. This is the project's core external contract.
   absolute mode, or `-threshold-percent` in the legacy fallback. It also gets
   `-keep-tokens`, `-cake-bin` when cake-repl has one, `-summarizer-model`,
   `-summarizer-profile`, and `-summarizer-reasoning-effort`, and
-  `-- <session-id>`. The model and profile come from `[compaction]` when set and
-  otherwise from the REPL's turn `-model`/`-profile`; each is omitted when
-  unset. Reasoning effort is passed only when `[compaction]` selects it, so
-  cake's own default otherwise. All three selection keys are trusted-config
-  only. The absolute quality ceiling
-  is never passed as the trigger. The trigger is a between-turn target, not a
-  live cap: the REPL evaluates it after a completed turn, so one invocation can
-  grow past it before the compactor runs. Never pass `-fork` or `-force`: the
+  `-- <session-id>`. The model and profile come from `[compaction] model` and
+  `profile` when set and otherwise from the REPL's turn `-model`/`-profile`;
+  each is omitted when unset. Reasoning effort comes from
+  `[compaction] reasoning-effort` and is passed only when set, so cake's own
+  default otherwise. All three selection keys are trusted-config only. The
+  absolute quality ceiling is never passed as the trigger. The trigger is a
+  between-turn target, not a live cap: the REPL evaluates it after a completed
+  turn, so one invocation can grow past it before the compactor runs. Never
+  pass `-fork` or `-force`: the
   integration is in place and threshold-gated only. The one JSON document is
   decoded field by field (`Document`) with unknown fields ignored; `in_place` is
   read rather than assumed. Exit 0 with a document is success or a no-op

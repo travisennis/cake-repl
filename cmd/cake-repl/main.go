@@ -307,15 +307,15 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		compaction.Enabled = false
 	}
 	cfg.Compaction = app.CompactionConfig{
-		Enabled:                   compaction.Enabled,
-		Bin:                       compaction.CakeCompactBin,
-		MaxContextTokens:          compaction.MaxContextTokens,
-		TriggerTokens:             compaction.TriggerTokens,
-		ThresholdPercent:          compaction.ThresholdPercent,
-		KeepTokens:                compaction.KeepTokens,
-		SummarizerModel:           compaction.SummarizerModel,
-		SummarizerProfile:         compaction.SummarizerProfile,
-		SummarizerReasoningEffort: compaction.SummarizerReasoningEffort,
+		Enabled:          compaction.Enabled,
+		Bin:              compaction.CakeCompactBin,
+		MaxContextTokens: compaction.MaxContextTokens,
+		TriggerTokens:    compaction.TriggerTokens,
+		ThresholdPercent: compaction.ThresholdPercent,
+		KeepTokens:       compaction.KeepTokens,
+		Model:            compaction.Model,
+		Profile:          compaction.Profile,
+		ReasoningEffort:  compaction.ReasoningEffort,
 	}
 
 	// Resolve the `[suggestions]` table over the hardcoded defaults. Like
@@ -515,12 +515,12 @@ func projectConfigWarning(key, path string) string {
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.threshold-percent in project-local config %q; tune compaction in XDG config or an explicit -config", path)
 	case "compaction.keep-tokens":
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.keep-tokens in project-local config %q; tune compaction in XDG config or an explicit -config", path)
-	case "compaction.summarizer-model":
-		return fmt.Sprintf("cake-repl: warning: ignoring compaction.summarizer-model in project-local config %q; tune compaction in XDG config or an explicit -config", path)
-	case "compaction.summarizer-profile":
-		return fmt.Sprintf("cake-repl: warning: ignoring compaction.summarizer-profile in project-local config %q; tune compaction in XDG config or an explicit -config", path)
-	case "compaction.summarizer-reasoning-effort":
-		return fmt.Sprintf("cake-repl: warning: ignoring compaction.summarizer-reasoning-effort in project-local config %q; tune compaction in XDG config or an explicit -config", path)
+	case "compaction.model":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.model in project-local config %q; tune compaction in XDG config or an explicit -config", path)
+	case "compaction.profile":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.profile in project-local config %q; tune compaction in XDG config or an explicit -config", path)
+	case "compaction.reasoning-effort":
+		return fmt.Sprintf("cake-repl: warning: ignoring compaction.reasoning-effort in project-local config %q; tune compaction in XDG config or an explicit -config", path)
 	default:
 		return fmt.Sprintf("cake-repl: warning: ignoring %s in project-local config %q", key, path)
 	}
