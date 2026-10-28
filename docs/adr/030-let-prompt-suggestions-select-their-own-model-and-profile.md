@@ -36,9 +36,8 @@ profile = "suggestion"
   startup warning. They may only come from XDG config or an explicit `-config`,
   because they select a metered operation's cost and provider behavior. This
   extends ADR 024's provenance rule.
-- `reasoning-effort` is not added here. `cake-suggest` accepts
-  `-reasoning-effort`, so a later decision can expose it in the same table
-  without changing this resolution rule.
+- `reasoning-effort` is not part of this decision. [ADR 032](032-let-prompt-suggestions-select-reasoning-effort.md)
+  adds it in the same table without changing this resolution rule.
 
 ## Consequences
 
@@ -61,3 +60,6 @@ profile = "suggestion"
   decision follows.
 - [ADR 024](024-ignore-project-local-compaction-tuning.md) defines the
   provenance rule extended here.
+- [ADR 032](032-let-prompt-suggestions-select-reasoning-effort.md) partially
+  supersedes this decision by adding `suggestions.reasoning-effort`; the
+  model/profile resolution rule here still applies.

@@ -115,7 +115,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   cannot corrupt the read. The request is model-owned, bounded by a 60-second
   context timeout, and never gates prompt submission. Its `-model`/`-profile`
   resolve from `[suggestions]` first and then independently from the turn
-  selection. Its result is applied only while the request identity, session
+  selection; its `-reasoning-effort` comes from `[suggestions]` when set and is
+  otherwise omitted. Its result is applied only while the request identity, session
   pin, idle state, and empty composer all still match, and it is shown as dim
   placeholder ghost text, not as the textarea value. A result that arrives while
   compaction still gates the composer is held, then applied only if those
@@ -137,12 +138,14 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   content-free debug-log line; it never reads or writes a session file from
   cake-repl. `-no-session` disables the feature with a startup warning, and the
   automatically loaded project-local config cannot enable it, select
-  `cake-suggest-bin`, or select `suggestions.model`/`suggestions.profile`; it
+  `cake-suggest-bin`, or select
+  `suggestions.model`/`suggestions.profile`/`suggestions.reasoning-effort`; it
   may only disable it. See
   [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
   [ADR 030](../adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+  [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md),
   and
-  [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md).
+  [ADR 032](../adr/032-let-prompt-suggestions-select-reasoning-effort.md).
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
   resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and

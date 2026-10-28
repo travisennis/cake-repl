@@ -240,6 +240,50 @@ func TestSuggestionModelSelection(t *testing.T) {
 	}
 }
 
+// TestSuggestionReasoningEffort checks that a configured reasoning effort is
+// passed through only when set.
+func TestSuggestionReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		effort string
+		want   string
+	}{
+		{name: "configured effort is passed", effort: "low", want: "low"},
+		{name: "empty effort is omitted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			argsPath := filepath.Join(t.TempDir(), "args")
+			t.Setenv("ARGS_FILE", argsPath)
+			bin := filepath.Join(t.TempDir(), "fake-cake-suggest")
+			script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARGS_FILE\"\n" +
+				"printf '%s\\n' '{\"suggested\":false,\"session_id\":\"" + suggestionSessionID + "\",\"reason\":\"done\"}'\n"
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			m := suggestionReady(t)
+			m.cfg.Suggestions.Bin = bin
+			m.cfg.Suggestions.ReasoningEffort = tt.effort
+			m, cmd := m.maybeStartSuggestion()
+			if cmd == nil {
+				t.Fatal("maybeStartSuggestion returned no command")
+			}
+			if _, ok := cmd().(suggestionDoneMsg); !ok {
+				t.Fatal("suggester command did not produce a suggestionDoneMsg")
+			}
+
+			raw, err := os.ReadFile(argsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := argsValue(strings.Fields(string(raw)), "-reasoning-effort"); got != tt.want {
+				t.Fatalf("-reasoning-effort = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // argsValue returns the token following name in a captured argv, or an empty
 // string when the flag is absent.
 func argsValue(args []string, name string) string {

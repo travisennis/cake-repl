@@ -95,13 +95,15 @@ type CompactionConfig struct {
 
 // SuggestionConfig is the resolved `[suggestions]` configuration. Bin is the
 // external suggester executable. Model and Profile select the suggestion call;
-// empty values fall back to the REPL's -model/-profile. See ADR 028 and ADR
-// 030.
+// empty values fall back to the REPL's -model/-profile. ReasoningEffort is
+// passed through when set and otherwise leaves Cake's default. See ADR 028,
+// ADR 030, and ADR 032.
 type SuggestionConfig struct {
-	Enabled bool
-	Bin     string
-	Model   string
-	Profile string
+	Enabled         bool
+	Bin             string
+	Model           string
+	Profile         string
+	ReasoningEffort string
 }
 
 const (

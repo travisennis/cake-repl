@@ -1040,18 +1040,19 @@ func TestStartupSuggestionsConfig(t *testing.T) {
 	}{
 		{name: "disabled by default", want: defaults},
 		{
-			name: "XDG enables, selects the executable, and selects a suggestion model",
-			xdg:  "[suggestions]\nenabled = true\ncake-suggest-bin = \"/opt/cake-suggest\"\nmodel = \"suggestion-model\"\nprofile = \"suggestion-profile\"\n",
-			want: app.SuggestionConfig{Enabled: true, Bin: "/opt/cake-suggest", Model: "suggestion-model", Profile: "suggestion-profile"},
+			name: "XDG enables, selects the executable, and tunes the suggestion model",
+			xdg:  "[suggestions]\nenabled = true\ncake-suggest-bin = \"/opt/cake-suggest\"\nmodel = \"suggestion-model\"\nprofile = \"suggestion-profile\"\nreasoning-effort = \"low\"\n",
+			want: app.SuggestionConfig{Enabled: true, Bin: "/opt/cake-suggest", Model: "suggestion-model", Profile: "suggestion-profile", ReasoningEffort: "low"},
 		},
 		{
 			name:     "project cannot enable or select any suggester setting",
-			local:    "[suggestions]\nenabled = true\ncake-suggest-bin = \"/tmp/untrusted\"\nmodel = \"untrusted-model\"\nprofile = \"untrusted-profile\"\n",
+			local:    "[suggestions]\nenabled = true\ncake-suggest-bin = \"/tmp/untrusted\"\nmodel = \"untrusted-model\"\nprofile = \"untrusted-profile\"\nreasoning-effort = \"max\"\n",
 			want:     defaults,
-			wantWarn: []string{"ignoring suggestions.cake-suggest-bin", "ignoring suggestions.model", "ignoring suggestions.profile", "ignoring suggestions.enabled = true"},
+			wantWarn: []string{"ignoring suggestions.cake-suggest-bin", "ignoring suggestions.model", "ignoring suggestions.profile", "ignoring suggestions.reasoning-effort", "ignoring suggestions.enabled = true"},
 			wantWarnExact: "cake-repl: warning: ignoring suggestions.cake-suggest-bin in project-local config \".cake-repl.toml\"; use XDG config or -config to select the suggester\n" +
 				"cake-repl: warning: ignoring suggestions.model in project-local config \".cake-repl.toml\"; tune suggestions in XDG config or an explicit -config\n" +
 				"cake-repl: warning: ignoring suggestions.profile in project-local config \".cake-repl.toml\"; tune suggestions in XDG config or an explicit -config\n" +
+				"cake-repl: warning: ignoring suggestions.reasoning-effort in project-local config \".cake-repl.toml\"; tune suggestions in XDG config or an explicit -config\n" +
 				"cake-repl: warning: ignoring suggestions.enabled = true in project-local config \".cake-repl.toml\"; enable suggestions in XDG config or an explicit -config\n",
 		},
 		{

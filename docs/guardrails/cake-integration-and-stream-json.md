@@ -101,9 +101,11 @@ consumes cake events. This is the project's core external contract.
   [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
 - **External suggester (`internal/suggest`).** The opt-in prompt suggester is
   invoked only as
-  `cake-suggest suggest -json [-cake-bin <path>] [-model <name>] [-profile <name>] -- <session-id>`.
-  It is read-only. The `-model`/`-profile` values resolve from `[suggestions]`
-  first and then independently from the turn selection. Exactly one JSON
+  `cake-suggest suggest -json [-cake-bin <path>] [-model <name>] [-profile <name>]
+  [-reasoning-effort <effort>] -- <session-id>`. It is read-only. The
+  `-model`/`-profile` values resolve from `[suggestions]` first and then
+  independently from the turn selection; `-reasoning-effort` is passed only
+  when `suggestions.reasoning-effort` is set. Exactly one JSON
   document is decoded field by field (`suggested`, `suggestion`, `session_id`,
   `reason`) with unknown fields ignored. Exit 0 with a document is the only
   success shape; `suggested:false` is a silent no-op. The REPL accepts the
@@ -127,8 +129,9 @@ consumes cake events. This is the project's core external contract.
   It never reads or writes a session file. See
   [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
   [ADR 030](../adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+  [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md),
   and
-  [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md).
+  [ADR 032](../adr/032-let-prompt-suggestions-select-reasoning-effort.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
   and the versioned `sessions list --json` envelope) is the only contract; it is

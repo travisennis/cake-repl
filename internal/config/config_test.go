@@ -473,6 +473,7 @@ Enabled = true
 Cake-Suggest-Bin = "/tmp/untrusted-suggester"
 Model = "untrusted-suggestion-model"
 Profile = "untrusted-suggestion-profile"
+Reasoning-Effort = "max"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -487,6 +488,7 @@ Profile = "untrusted-suggestion-profile"
 		"suggestions.cake-suggest-bin",
 		"suggestions.model",
 		"suggestions.profile",
+		"suggestions.reasoning-effort",
 		"suggestions.enabled",
 		"compaction.enabled",
 		"compaction.max-context-tokens",
@@ -506,7 +508,7 @@ Profile = "untrusted-suggestion-profile"
 		cfg.Compaction.Model != "" || cfg.Compaction.Profile != "" ||
 		cfg.Compaction.ReasoningEffort != "" || cfg.Suggestions.Enabled ||
 		cfg.Suggestions.CakeSuggestBin != "" || cfg.Suggestions.Model != "" ||
-		cfg.Suggestions.Profile != "" {
+		cfg.Suggestions.Profile != "" || cfg.Suggestions.ReasoningEffort != "" {
 		t.Fatalf("case-variant project keys survived: cake-bin=%q compaction=%+v suggestions=%+v", cfg.CakeBin, cfg.Compaction, cfg.Suggestions)
 	}
 }
@@ -617,6 +619,7 @@ enabled = true
 cake-suggest-bin = "/opt/bin/cake-suggest"
 model = "suggestion-model"
 profile = "suggestion-profile"
+reasoning-effort = "low"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -626,11 +629,12 @@ profile = "suggestion-profile"
 		t.Fatal(err)
 	}
 	want := Suggestions{
-		Enabled:        true,
-		EnabledSet:     true,
-		CakeSuggestBin: "/opt/bin/cake-suggest",
-		Model:          "suggestion-model",
-		Profile:        "suggestion-profile",
+		Enabled:         true,
+		EnabledSet:      true,
+		CakeSuggestBin:  "/opt/bin/cake-suggest",
+		Model:           "suggestion-model",
+		Profile:         "suggestion-profile",
+		ReasoningEffort: "low",
 	}
 	if cfg.Suggestions != want {
 		t.Fatalf("Suggestions = %+v, want %+v", cfg.Suggestions, want)
@@ -641,21 +645,30 @@ profile = "suggestion-profile"
 }
 
 func TestSuggestionsValidate(t *testing.T) {
-	if err := (Suggestions{}).Validate(); err != nil {
-		t.Fatalf("disabled empty suggestions = %v, want nil", err)
+	tests := []struct {
+		name    string
+		s       Suggestions
+		wantErr bool
+	}{
+		{"disabled ignores values", Suggestions{}, false},
+		{"missing binary", Suggestions{Enabled: true}, true},
+		{"enabled with a binary", Suggestions{Enabled: true, CakeSuggestBin: "cake-suggest"}, false},
+		{"valid reasoning effort", Suggestions{Enabled: true, CakeSuggestBin: "cake-suggest", ReasoningEffort: "low"}, false},
+		{"invalid reasoning effort", Suggestions{Enabled: true, CakeSuggestBin: "cake-suggest", ReasoningEffort: "maximal"}, true},
 	}
-	if err := (Suggestions{Enabled: true}).Validate(); err == nil {
-		t.Fatal("enabled suggestions with no binary: want error")
-	}
-	if err := (Suggestions{Enabled: true, CakeSuggestBin: "cake-suggest"}).Validate(); err != nil {
-		t.Fatalf("enabled suggestions with a binary = %v, want nil", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.s.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
 func TestMergeSuggestionsDefaultsAndOverrides(t *testing.T) {
 	base := DefaultSuggestions()
 	if base.Enabled || base.CakeSuggestBin != DefaultCakeSuggestBin ||
-		base.Model != "" || base.Profile != "" {
+		base.Model != "" || base.Profile != "" || base.ReasoningEffort != "" {
 		t.Fatalf("DefaultSuggestions = %+v", base)
 	}
 
@@ -668,8 +681,10 @@ func TestMergeSuggestionsDefaultsAndOverrides(t *testing.T) {
 	file.Suggestions.CakeSuggestBin = "local-suggester"
 	file.Suggestions.Model = "local-model"
 	file.Suggestions.Profile = "local-profile"
+	file.Suggestions.ReasoningEffort = "low"
 	got = MergeSuggestions(base, file)
-	if got.CakeSuggestBin != "local-suggester" || got.Model != "local-model" || got.Profile != "local-profile" {
+	if got.CakeSuggestBin != "local-suggester" || got.Model != "local-model" ||
+		got.Profile != "local-profile" || got.ReasoningEffort != "low" {
 		t.Fatalf("suggestion overrides lost: %+v", got)
 	}
 
@@ -699,6 +714,7 @@ enabled = true
 cake-suggest-bin = "/tmp/untrusted-suggester"
 model = "untrusted-model"
 profile = "untrusted-profile"
+reasoning-effort = "max"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -708,13 +724,15 @@ profile = "untrusted-profile"
 		t.Fatal(err)
 	}
 	if cfg.Suggestions.Enabled || cfg.Suggestions.CakeSuggestBin != "" ||
-		cfg.Suggestions.Model != "" || cfg.Suggestions.Profile != "" {
+		cfg.Suggestions.Model != "" || cfg.Suggestions.Profile != "" ||
+		cfg.Suggestions.ReasoningEffort != "" {
 		t.Fatalf("project-local suggestion keys survived: %+v", cfg.Suggestions)
 	}
 	want := []string{
 		"suggestions.cake-suggest-bin",
 		"suggestions.model",
 		"suggestions.profile",
+		"suggestions.reasoning-effort",
 		"suggestions.enabled",
 	}
 	if strings.Join(ignored, ",") != strings.Join(want, ",") {
@@ -724,10 +742,12 @@ profile = "untrusted-profile"
 	// A trusted selection survives the project-local layer's stripped values.
 	trustedSelection := &Config{Suggestions: Suggestions{
 		Enabled: true, EnabledSet: true, CakeSuggestBin: "trusted-suggester",
-		Model: "trusted-model", Profile: "trusted-profile",
+		Model: "trusted-model", Profile: "trusted-profile", ReasoningEffort: "low",
 	}}
 	mergedSelection := Merge(trustedSelection, cfg)
-	if mergedSelection.Suggestions.Model != "trusted-model" || mergedSelection.Suggestions.Profile != "trusted-profile" {
+	if mergedSelection.Suggestions.Model != "trusted-model" ||
+		mergedSelection.Suggestions.Profile != "trusted-profile" ||
+		mergedSelection.Suggestions.ReasoningEffort != "low" {
 		t.Fatalf("trusted suggestion selection did not survive: %+v", mergedSelection.Suggestions)
 	}
 

@@ -176,7 +176,8 @@ Dependency direction is one-way: `app` depends on `cake`, `compact`,
   run through `internal/suggest`, concurrently with an automatic compaction. It
   is read-only, bounded by a context timeout, and canceled by any composer use,
   a new session, a retarget, or quit. Its model/profile resolve from
-  `[suggestions]` first and then the turn selection. A result is applied only
+  `[suggestions]` first and then the turn selection; reasoning effort comes
+  from `[suggestions]` when set. A result is applied only
   while the request identity, session pin, idle state, and empty composer all
   still match; one that arrives while compaction gates the composer is held and
   applied after the compactor settles. It appears as dim placeholder ghost text
@@ -186,8 +187,9 @@ Dependency direction is one-way: `app` depends on `cake`, `compact`,
   layer can only disable it. See
   [`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
   [`docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md`](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+  [`docs/adr/031-run-after-turn-suggestions-alongside-compaction.md`](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md),
   and
-  [`docs/adr/031-run-after-turn-suggestions-alongside-compaction.md`](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md).
+  [`docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md`](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md).
 - **Compaction is opt-in, between-turns, and in place.** A completed turn whose
   newest complete `turn_usage` figure reaches the configured trigger starts one
   model-owned `cake-compact` subprocess through `internal/compact`. Absolute

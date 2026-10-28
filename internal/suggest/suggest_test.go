@@ -23,16 +23,18 @@ func writeFakeSuggester(t *testing.T, script string) string {
 
 func TestArgs(t *testing.T) {
 	args := Options{
-		SessionID: "11111111-2222-3333-4444-555555555555",
-		CakeBin:   "/usr/local/bin/cake",
-		Model:     "gpt-x",
-		Profile:   "work",
+		SessionID:       "11111111-2222-3333-4444-555555555555",
+		CakeBin:         "/usr/local/bin/cake",
+		Model:           "gpt-x",
+		Profile:         "work",
+		ReasoningEffort: "low",
 	}.Args()
 	want := []string{
 		"suggest", "-json",
 		"-cake-bin", "/usr/local/bin/cake",
 		"-model", "gpt-x",
 		"-profile", "work",
+		"-reasoning-effort", "low",
 		"--", "11111111-2222-3333-4444-555555555555",
 	}
 	if !slices.Equal(args, want) {
@@ -59,11 +61,12 @@ JSON
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	res := Suggest(ctx, Options{
-		Bin:       bin,
-		SessionID: "s-1",
-		CakeBin:   "cake",
-		Model:     "gpt-x",
-		Profile:   "work",
+		Bin:             bin,
+		SessionID:       "s-1",
+		CakeBin:         "cake",
+		Model:           "gpt-x",
+		Profile:         "work",
+		ReasoningEffort: "low",
 	})
 
 	if res.ExitCode != 0 || res.Err != nil || res.Canceled {
@@ -83,7 +86,7 @@ JSON
 	got := strings.Fields(string(raw))
 	want := []string{
 		"suggest", "-json", "-cake-bin", "cake", "-model", "gpt-x",
-		"-profile", "work", "--", "s-1",
+		"-profile", "work", "-reasoning-effort", "low", "--", "s-1",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("invoked args = %v, want %v", got, want)

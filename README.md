@@ -428,20 +428,24 @@ suggestion quality has not been qualified.
 [suggestions]
 enabled = true
 cake-suggest-bin = "cake-suggest"
-# Optional: use a different model/profile for the suggestion call. Each falls
-# back independently to the REPL's turn selection when unset.
+# Optional: use a different model/profile/effort for the suggestion call.
+# model/profile fall back independently to the turn selection when unset; an
+# unset reasoning-effort leaves cake's default.
 # model = "deepseek-flash-low"
 # profile = "suggestion"
+# reasoning-effort = "low"
 ```
 
 - The REPL runs one `cake-suggest suggest -json [-cake-bin <path>]
-  [-model <name>] [-profile <name>] -- <session-id>` after a completed turn
-  that ended cleanly and pinned a session. It passes the resolved
-  `[suggestions] model` and `profile` when set, falling back independently to
-  the REPL's `-model` and `-profile`, and omitting either when empty. The
-  suggester reads the session itself; cake-repl never reads or writes session
-  files. The request is read-only, bounded, and model-owned: it never blocks
-  prompt submission and is canceled when the composer is edited, a new session
+  [-model <name>] [-profile <name>] [-reasoning-effort <effort>] --
+  <session-id>` after a completed turn that ended cleanly and pinned a session.
+  It passes the resolved `[suggestions] model` and `profile` when set, falling
+  back independently to the REPL's `-model` and `-profile`, and omitting either
+  when empty. It passes `reasoning-effort` when set and omits it otherwise;
+  that key requires a `cake-suggest` build that accepts the flag. The suggester
+  reads the session itself; cake-repl never reads or writes session files. The
+  request is read-only, bounded, and model-owned: it never blocks prompt
+  submission and is canceled when the composer is edited, a new session
   starts, the session target changes, or the REPL quits. A canceled child is
   reaped before the REPL returns within the same bounded teardown, including
   the quit and SIGINT/SIGTERM paths; keyboard input is ignored while that exit
@@ -465,9 +469,9 @@ cake-suggest-bin = "cake-suggest"
   appear after the canceled compaction settles.
 - `-no-session` disables suggestions with a startup warning. The automatically
   loaded project-local `.cake-repl.toml` cannot enable suggestions, select
-  `cake-suggest-bin`, or set `suggestions.model` / `suggestions.profile`; it may
-  only set `enabled = false`. XDG config or an explicit `-config` supplies the
-  trusted values.
+  `cake-suggest-bin`, or set `suggestions.model`, `suggestions.profile`, or
+  `suggestions.reasoning-effort`; it may only set `enabled = false`. XDG config
+  or an explicit `-config` supplies the trusted values.
 - The suggester inherits the REPL's environment and runs in the same `-cwd`,
   so `CAKE_DATA_DIR` selects the same root and a relative `-cake-bin` resolves
   in that directory. There is no fallback to reading session files.
@@ -477,6 +481,9 @@ See
 [ADR 030](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
 and
 [ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md).
+See
+[ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md)
+for the reasoning-effort selection.
 
 ## Config file
 
@@ -492,8 +499,8 @@ cannot select `cake-bin`, cannot enable `compaction`, cannot set
 `keep-tokens`, `max-context-tokens`, or `trigger-tokens`, cannot select
 `compaction.model`, `compaction.profile`, or `compaction.reasoning-effort`, and
 cannot enable `suggestions`, set `suggestions.cake-suggest-bin`, or select
-`suggestions.model` / `suggestions.profile`; it may only disable compaction or
-suggestions.
+`suggestions.model`, `suggestions.profile`, or `suggestions.reasoning-effort`;
+it may only disable compaction or suggestions.
 
 | Path | Priority |
 |---|---|
@@ -511,10 +518,10 @@ It also cannot enable context compaction, set `compaction.cake-compact-bin`, tun
 or select `compaction.model`, `compaction.profile`, or
 `compaction.reasoning-effort`; each is ignored with a warning. It cannot enable
 prompt suggestions, set `suggestions.cake-suggest-bin`, or select
-`suggestions.model` or `suggestions.profile` either. It may disable compaction
-or suggestions. Set the executable, enable compaction or suggestions,
-and tune compaction in XDG config, an explicitly selected `-config` file, or
-`-cake-bin`. Explicitly selecting `.cake-repl.toml` with
+`suggestions.model`, `suggestions.profile`, or `suggestions.reasoning-effort`
+either. It may disable compaction or suggestions. Set the executable, enable
+compaction or suggestions, and tune compaction in XDG config, an explicitly
+selected `-config` file, or `-cake-bin`. Explicitly selecting `.cake-repl.toml` with
 `-config` allows its `cake-bin` and compaction/suggestion values. `-no-config`
 skips file values and these warnings.
 
@@ -564,16 +571,18 @@ keep-tokens = 20000
 
 # Ask the external cake-suggest binary for the next user prompt after a
 # completed turn (default: off). XDG or explicit -config only; the automatic
-# project-local file cannot enable suggestions, select the executable, or
-# select the suggestion model.
+# project-local file cannot enable suggestions, select the executable, or tune
+# the suggestion call.
 [suggestions]
 enabled = false
 cake-suggest-bin = "cake-suggest"
-# Optional: use a different model/profile for the suggestion call. Each falls
-# back independently to the turn selection when unset. Trusted config only;
-# project-local keys are ignored.
+# Optional: use a different model/profile/effort for the suggestion call.
+# model/profile fall back independently to the turn selection; reasoning-effort
+# leaves cake's default when unset. Trusted config only; project-local keys are
+# ignored.
 # model = "deepseek-flash-low"
 # profile = "suggestion"
+# reasoning-effort = "low"
 ```
 
 ### Merge order
@@ -586,8 +595,9 @@ applies to `compaction.enabled = true`, `compaction.cake-compact-bin`,
 `compaction.threshold-percent`, `compaction.keep-tokens`, `compaction.model`,
 `compaction.profile`, and `compaction.reasoning-effort`; the project-local layer
 may only disable compaction. It also applies to `suggestions.enabled = true`,
-`suggestions.cake-suggest-bin`, `suggestions.model`, and
-`suggestions.profile`; the project-local layer may only disable suggestions.
+`suggestions.cake-suggest-bin`, `suggestions.model`, `suggestions.profile`, and
+`suggestions.reasoning-effort`; the project-local layer may only disable
+suggestions.
 Trusted relative executable
 paths keep their usual resolution. A CLI flag always wins over the
 same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,

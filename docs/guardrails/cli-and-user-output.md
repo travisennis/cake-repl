@@ -36,7 +36,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   `cake-compact-bin`, `max-context-tokens`, `trigger-tokens`,
   `threshold-percent`, `keep-tokens`, and the summary's `model`, `profile`,
   `reasoning-effort`), and the opt-in `[suggestions]` table (`enabled`,
-  `cake-suggest-bin`, `model`, `profile`). The absolute trigger values are
+  `cake-suggest-bin`, `model`, `profile`, `reasoning-effort`). The absolute
+  trigger values are
   between-turn targets, not live caps: the REPL checks them only after a
   completed turn, from the newest complete `turn_usage`, so a long invocation
   can pass both before the next prompt. Merge order is
@@ -49,8 +50,9 @@ commands or help text (`internal/app/commands.go`), key bindings
   `threshold-percent`/`keep-tokens`/`max-context-tokens`/`trigger-tokens`,
   select `compaction.model`/`compaction.profile`/`compaction.reasoning-effort`,
   enable suggestions, set `suggestions.cake-suggest-bin`, or select
-  `suggestions.model`/`suggestions.profile`; each is ignored with a warning,
-  while `enabled = false` still applies. Explicit `-config` may
+  `suggestions.model`/`suggestions.profile`/`suggestions.reasoning-effort`;
+  each is ignored with a warning, while `enabled = false` still applies.
+  Explicit `-config` may
   select the project file; `-no-config` skips file values and warnings. Other
   project-local keys retain their existing behavior. See
   [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md)

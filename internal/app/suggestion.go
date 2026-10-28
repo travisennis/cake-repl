@@ -91,13 +91,14 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 	m.suggestionDone = done
 	m.suggesting = true
 	opts := suggest.Options{
-		Bin:       m.cfg.Suggestions.Bin,
-		Cwd:       m.cfg.Cwd,
-		SessionID: sessionID,
-		CakeBin:   m.cfg.CakeBin,
-		Model:     firstNonEmpty(m.cfg.Suggestions.Model, m.cfg.Model),
-		Profile:   firstNonEmpty(m.cfg.Suggestions.Profile, m.cfg.Profile),
-		DebugLog:  m.cfg.DebugLog,
+		Bin:             m.cfg.Suggestions.Bin,
+		Cwd:             m.cfg.Cwd,
+		SessionID:       sessionID,
+		CakeBin:         m.cfg.CakeBin,
+		Model:           firstNonEmpty(m.cfg.Suggestions.Model, m.cfg.Model),
+		Profile:         firstNonEmpty(m.cfg.Suggestions.Profile, m.cfg.Profile),
+		ReasoningEffort: m.cfg.Suggestions.ReasoningEffort,
+		DebugLog:        m.cfg.DebugLog,
 	}
 	return m, func() tea.Msg {
 		res := suggest.Suggest(ctx, opts)

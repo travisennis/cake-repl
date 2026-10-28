@@ -30,21 +30,23 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
 - **suggestion contract**: the opt-in after-turn suggester is run only through
   `internal/suggest` as
-  `cake-suggest suggest -json [-cake-bin …] [-model …] [-profile …] -- <session-id>`,
-  and only its one JSON document is decoded. It is read-only, never gates
-  input, and its result may populate the composer only while the request and
-  session identities still match and the composer is empty. The resolved
-  `[suggestions] model` / `profile` values are passed through, falling back
-  independently to the turn selection. The request starts alongside an
+  `cake-suggest suggest -json [-cake-bin …] [-model …] [-profile …]
+  [-reasoning-effort …] -- <session-id>`, and only its one JSON document is
+  decoded. It is read-only, never gates input, and its result may populate the
+  composer only while the request and session identities still match and the
+  composer is empty. The resolved `[suggestions] model` / `profile` values are
+  passed through, falling back independently to the turn selection;
+  `reasoning-effort` is passed only when set. The request starts alongside an
   automatic compaction; a result that arrives while the compacting gate is
   closed is held and applied after the compactor settles. `Ctrl+S` submits the
   ghost as a prompt and never as a slash command; typing dismisses it. Only
-  trusted config may enable it, select the executable, or select its model;
-  the automatic project-local layer may only disable it. See
+  trusted config may enable it, select the executable, or tune its model or
+  effort; the automatic project-local layer may only disable it. See
   [ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
   [ADR 030](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+  [ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md),
   and
-  [ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md).
+  [ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md).
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.
@@ -143,7 +145,8 @@ Consult:
   coordination.
 - [ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
   for the read-only suggester request, its composer application rules, and its
-  cancellation paths.
+  cancellation paths; [ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md),
+  for the suggestion reasoning-effort selection.
 
 Preserve session-hijack prevention and never leak raw stream content.
 

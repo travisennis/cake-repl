@@ -77,14 +77,17 @@ type Compaction struct {
 // REPL only invokes it and never reads a session file itself.
 //
 // Model and Profile select the metered suggestion call. Empty values fall back
-// to the REPL's turn selection. These are trusted-config only; a project-local
-// file may not select a suggestion model. See ADR 030.
+// to the REPL's turn selection. ReasoningEffort is passed through when set; an
+// empty value leaves Cake's own reasoning default. These are trusted-config
+// only; a project-local file may not select a suggestion model or effort. See
+// ADR 030 and ADR 032.
 type Suggestions struct {
-	Enabled        bool   `toml:"enabled"`
-	EnabledSet     bool   `toml:"-"`
-	CakeSuggestBin string `toml:"cake-suggest-bin"`
-	Model          string `toml:"model"`
-	Profile        string `toml:"profile"`
+	Enabled         bool   `toml:"enabled"`
+	EnabledSet      bool   `toml:"-"`
+	CakeSuggestBin  string `toml:"cake-suggest-bin"`
+	Model           string `toml:"model"`
+	Profile         string `toml:"profile"`
+	ReasoningEffort string `toml:"reasoning-effort"`
 }
 
 const (
@@ -121,10 +124,19 @@ func DefaultSuggestions() Suggestions {
 }
 
 // Validate checks the effective suggestion settings. Only an enabled feature
-// needs an executable; a disabled table may omit it.
+// needs an executable or a valid reasoning effort; a disabled table may omit
+// both.
 func (s Suggestions) Validate() error {
-	if s.Enabled && s.CakeSuggestBin == "" {
+	if !s.Enabled {
+		return nil
+	}
+	if s.CakeSuggestBin == "" {
 		return errMissingSuggester
+	}
+	switch s.ReasoningEffort {
+	case "", "none", "low", "medium", "high", "xhigh", "max":
+	default:
+		return fmt.Errorf("suggestions.reasoning-effort must be one of none, low, medium, high, xhigh, or max, got %q", s.ReasoningEffort)
 	}
 	return nil
 }
@@ -199,11 +211,11 @@ func Load(path string) (*Config, error) {
 // LoadProject loads automatically discovered project defaults. A project file is
 // untrusted provenance, so it cannot select an executable, cannot enable the
 // metered, session-mutating compactor or the metered suggester, and cannot tune
-// the compactor's thresholds or summarizer selection or the suggestion model.
-// ignored names each key dropped for that reason, in a stable order, and reports
-// key presence even when its value is empty. A project file may still disable
-// compaction or suggestions. See ADR 006, ADR 024, ADR 028, ADR 029, and ADR
-// 030.
+// the compactor's thresholds or summarizer selection or the suggestion model or
+// reasoning effort. ignored names each key dropped for that reason, in a stable
+// order, and reports key presence even when its value is empty. A project file
+// may still disable compaction or suggestions. See ADR 006, ADR 024, ADR 028,
+// ADR 029, ADR 030, and ADR 032.
 func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	cfg, meta, err := load(path)
 	if err != nil {
@@ -228,6 +240,10 @@ func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	if definedFold(meta, "suggestions", "profile") {
 		ignored = append(ignored, "suggestions.profile")
 		cfg.Suggestions.Profile = ""
+	}
+	if definedFold(meta, "suggestions", "reasoning-effort") {
+		ignored = append(ignored, "suggestions.reasoning-effort")
+		cfg.Suggestions.ReasoningEffort = ""
 	}
 	if definedFold(meta, "suggestions", "enabled") && cfg.Suggestions.Enabled {
 		// Disabling is allowed to win; enabling is not.
@@ -408,6 +424,9 @@ func mergeSuggestions(dst *Suggestions, src Suggestions) {
 	}
 	if src.Profile != "" {
 		dst.Profile = src.Profile
+	}
+	if src.ReasoningEffort != "" {
+		dst.ReasoningEffort = src.ReasoningEffort
 	}
 }
 

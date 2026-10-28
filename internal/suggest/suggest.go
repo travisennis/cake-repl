@@ -49,10 +49,11 @@ type Options struct {
 	// CakeBin is passed through as -cake-bin; empty lets the suggester resolve
 	// its own default the same way cake-repl did.
 	CakeBin string
-	// Model and Profile select the suggestion model call. Empty values omit the
-	// flag so the suggester can apply its own defaults.
-	Model   string
-	Profile string
+	// Model, Profile, and ReasoningEffort select the suggestion model call.
+	// Empty values omit the flag so the suggester can apply its own defaults.
+	Model           string
+	Profile         string
+	ReasoningEffort string
 	// DebugLog receives a content-free lifecycle line when set.
 	DebugLog io.Writer
 
@@ -71,6 +72,9 @@ func (o Options) Args() []string {
 	}
 	if o.Profile != "" {
 		args = append(args, "-profile", o.Profile)
+	}
+	if o.ReasoningEffort != "" {
+		args = append(args, "-reasoning-effort", o.ReasoningEffort)
 	}
 	// The session argument may be a path, so end flag parsing before it.
 	return append(args, "--", o.SessionID)
