@@ -36,9 +36,9 @@ profile = "suggestion"
   startup warning. They may only come from XDG config or an explicit `-config`,
   because they select a metered operation's cost and provider behavior. This
   extends ADR 024's provenance rule.
-- `reasoning-effort` is not added: `cake-suggest` does not accept it. If the
-  suggester grows that flag, the same table can expose it without changing this
-  resolution rule.
+- `reasoning-effort` is not added here. `cake-suggest` accepts
+  `-reasoning-effort`, so a later decision can expose it in the same table
+  without changing this resolution rule.
 
 ## Consequences
 

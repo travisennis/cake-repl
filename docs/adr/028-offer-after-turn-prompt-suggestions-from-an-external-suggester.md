@@ -96,13 +96,16 @@ cake-suggest-bin = "cake-suggest"
   `-no-session`, and while a compaction is running. If the turn starts an
   automatic compaction, the suggestion starts only after that compaction's
   result is reaped, so it never reads a session while the compactor appends to
-  it.
+  it. **Partially superseded by ADR 031:** the suggestion now starts alongside
+  the automatic compaction and holds its result until the compactor settles.
 - **Apply.** The result populates `input.Placeholder` with dim ghost text only
   when the request identity is current, the session pin is still the one the
   request named, no run/hydration/compaction/browser is active, the input is
   empty, and no other suggestion is showing. A draft, a typed character, or a
   session change wins over the suggestion. Applying it adds no timeline row and
-  does not change the composer's `ready` state.
+  does not change the composer's `ready` state. **Partially superseded by ADR
+  031:** a result that arrives during a compaction is held and applied after
+  the compactor settles, subject to these same checks.
 - **Accept and dismiss.** `Ctrl+S` with an empty input submits the suggestion as
   an ordinary user prompt, bypassing slash-command parsing so model output can
   never execute a command. Any composer key that can edit or recall input

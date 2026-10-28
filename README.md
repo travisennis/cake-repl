@@ -460,7 +460,9 @@ cake-suggest-bin = "cake-suggest"
   pre-checkpoint transcript or a compacted prefix. A result that arrives while
   compaction still gates the composer is held and applied once the compactor
   settles, only if the composer is still empty and the session pin matches. The
-  REPL does not start a second suggestion after compaction.
+  REPL does not start a second suggestion after compaction. `Ctrl+C` while
+  compaction runs cancels only the compactor; the held suggestion can still
+  appear after the canceled compaction settles.
 - `-no-session` disables suggestions with a startup warning. The automatically
   loaded project-local `.cake-repl.toml` cannot enable suggestions, select
   `cake-suggest-bin`, or set `suggestions.model` / `suggestions.profile`; it may

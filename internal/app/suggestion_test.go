@@ -610,6 +610,31 @@ func TestCompactionAndSuggestionRunTogether(t *testing.T) {
 	}
 }
 
+// TestStaleCompactionResultDropsHeldSuggestion checks a result for a
+// superseded compaction request cannot keep a held suggestion alive.
+func TestStaleCompactionResultDropsHeldSuggestion(t *testing.T) {
+	m := suggestionReady(t)
+	m.pendingSuggestion = "Add a test for the parallel path."
+	m.pendingSuggestionSession = suggestionSessionID
+	m.compactionReq = 2
+	m.compacting = true
+
+	m, cmd := m.finishCompaction(compactionDoneMsg{
+		req:       1,
+		sessionID: suggestionSessionID,
+		res:       compact.Result{ExitCode: 1, Stderr: "superseded"},
+	})
+	if cmd != nil {
+		t.Fatal("stale compaction result returned a command")
+	}
+	if !m.compacting {
+		t.Fatal("stale compaction result settled the live gate")
+	}
+	if m.pendingSuggestion != "" || m.pendingSuggestionSession != "" {
+		t.Fatalf("held suggestion survived: text=%q session=%q", m.pendingSuggestion, m.pendingSuggestionSession)
+	}
+}
+
 // TestCompactionSettleDropsHeldSuggestionWhenComposerChanges covers the held
 // result losing its claim before the compactor opens the gate.
 func TestCompactionSettleDropsHeldSuggestionWhenComposerChanges(t *testing.T) {

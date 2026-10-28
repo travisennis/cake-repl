@@ -49,9 +49,8 @@ type Options struct {
 	// CakeBin is passed through as -cake-bin; empty lets the suggester resolve
 	// its own default the same way cake-repl did.
 	CakeBin string
-	// Model and Profile are the identity cake-repl was configured with, so the
-	// suggestion runs the same model path as the REPL unless the suggester
-	// chooses its own defaults. Empty values omit the flag.
+	// Model and Profile select the suggestion model call. Empty values omit the
+	// flag so the suggester can apply its own defaults.
 	Model   string
 	Profile string
 	// DebugLog receives a content-free lifecycle line when set.

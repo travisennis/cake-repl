@@ -31,7 +31,9 @@ compaction checkpoint, so either view is acceptable.
   composer, and idle-apply conditions still match.
 - Typing, history recall, tab completion, `Ctrl+U`, a new session, a retarget,
   submit, and quit discard a held result exactly as they discard a visible
-  ghost.
+  ghost. `Ctrl+C` while compaction runs cancels only the compactor; the
+  suggestion was never the target of that cancellation and may still be held
+  and applied after the canceled compaction settles.
 - `finishCompaction` no longer starts a suggestion. A completed turn makes at
   most one suggestion attempt, even when the suggestion result arrives before
   the compactor exits.
@@ -52,6 +54,10 @@ compaction checkpoint, so either view is acceptable.
   not a persisted artifact.
 - Bad: the end-of-turn path now has two in-flight children, so tests and
   cancellation reasoning must cover both identities and the held-result state.
+- Bad: a turn whose composer becomes eligible only during compaction no longer
+  gets a suggestion after it settles, because "one attempt per turn" is
+  enforced from the completed-turn transition. This is the deliberate cost of
+  removing the second model call.
 
 ## More Information
 

@@ -206,6 +206,11 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 // non-in-place result keeps the session and status figure and warns.
 func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	if msg.req != m.compactionReq {
+		// A result for a superseded request cannot settle the current gate. Drop
+		// any suggestion held for that old compaction so it cannot leak into the
+		// next one; a live request keeps its own held result.
+		m.pendingSuggestion = ""
+		m.pendingSuggestionSession = ""
 		return m, nil
 	}
 	m.compacting = false
