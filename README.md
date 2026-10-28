@@ -394,7 +394,7 @@ profile, or reasoning effort from the coding turn:
 
 ```toml
 [compaction]
-summarizer-model = "deepseek-flash"
+summarizer-model = "deepseek-flash-max"
 summarizer-profile = "summary"
 summarizer-reasoning-effort = "low"
 ```
@@ -536,7 +536,7 @@ keep-tokens = 20000
 # Optional: use a different model/profile/reasoning effort for the summary.
 # Each falls back to the turn selection (model/profile) or cake's default
 # (reasoning effort). Trusted config only; project-local keys are ignored.
-# summarizer-model = "deepseek-flash"
+# summarizer-model = "deepseek-flash-max"
 # summarizer-profile = "summary"
 # summarizer-reasoning-effort = "low"
 

@@ -22,7 +22,7 @@ this decision.
 
 ```toml
 [compaction]
-summarizer-model = "deepseek-flash"
+summarizer-model = "deepseek-flash-max"
 summarizer-profile = "summary"
 summarizer-reasoning-effort = "low"
 ```
