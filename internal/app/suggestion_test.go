@@ -162,18 +162,21 @@ func TestSuggestionFromFakeBinary(t *testing.T) {
 	}
 }
 
-// TestSuggestionModelSelection checks the resolved -model/-profile passed to
-// the suggester: the [suggestions] value wins, and each unset value falls back
-// independently to the turn selection.
-func TestSuggestionModelSelection(t *testing.T) {
+// TestSuggestionSelection checks the resolved -model/-profile/-reasoning-effort
+// passed to the suggester: the [suggestions] value wins, each unset model or
+// profile falls back independently to the turn selection, and an empty effort
+// omits the flag.
+func TestSuggestionSelection(t *testing.T) {
 	tests := []struct {
 		name              string
 		suggestionModel   string
 		suggestionProfile string
+		suggestionEffort  string
 		turnModel         string
 		turnProfile       string
 		wantModel         string
 		wantProfile       string
+		wantEffort        string
 	}{
 		{
 			name:              "suggestion selection overrides the turn",
@@ -199,6 +202,14 @@ func TestSuggestionModelSelection(t *testing.T) {
 			wantModel:       "suggestion-model",
 			wantProfile:     "turn-profile",
 		},
+		{
+			name:             "configured reasoning effort is passed",
+			suggestionEffort: "low",
+			wantEffort:       "low",
+		},
+		{
+			name: "empty reasoning effort is omitted",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,6 +226,7 @@ func TestSuggestionModelSelection(t *testing.T) {
 			m.cfg.Suggestions.Bin = bin
 			m.cfg.Suggestions.Model = tt.suggestionModel
 			m.cfg.Suggestions.Profile = tt.suggestionProfile
+			m.cfg.Suggestions.ReasoningEffort = tt.suggestionEffort
 			m.cfg.Model = tt.turnModel
 			m.cfg.Profile = tt.turnProfile
 			m, cmd := m.maybeStartSuggestion()
@@ -236,49 +248,8 @@ func TestSuggestionModelSelection(t *testing.T) {
 			if got := argsValue(args, "-profile"); got != tt.wantProfile {
 				t.Fatalf("-profile = %q, want %q (args %v)", got, tt.wantProfile, args)
 			}
-		})
-	}
-}
-
-// TestSuggestionReasoningEffort checks that a configured reasoning effort is
-// passed through only when set.
-func TestSuggestionReasoningEffort(t *testing.T) {
-	tests := []struct {
-		name   string
-		effort string
-		want   string
-	}{
-		{name: "configured effort is passed", effort: "low", want: "low"},
-		{name: "empty effort is omitted"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			argsPath := filepath.Join(t.TempDir(), "args")
-			t.Setenv("ARGS_FILE", argsPath)
-			bin := filepath.Join(t.TempDir(), "fake-cake-suggest")
-			script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARGS_FILE\"\n" +
-				"printf '%s\\n' '{\"suggested\":false,\"session_id\":\"" + suggestionSessionID + "\",\"reason\":\"done\"}'\n"
-			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-				t.Fatal(err)
-			}
-
-			m := suggestionReady(t)
-			m.cfg.Suggestions.Bin = bin
-			m.cfg.Suggestions.ReasoningEffort = tt.effort
-			m, cmd := m.maybeStartSuggestion()
-			if cmd == nil {
-				t.Fatal("maybeStartSuggestion returned no command")
-			}
-			if _, ok := cmd().(suggestionDoneMsg); !ok {
-				t.Fatal("suggester command did not produce a suggestionDoneMsg")
-			}
-
-			raw, err := os.ReadFile(argsPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := argsValue(strings.Fields(string(raw)), "-reasoning-effort"); got != tt.want {
-				t.Fatalf("-reasoning-effort = %q, want %q", got, tt.want)
+			if got := argsValue(args, "-reasoning-effort"); got != tt.wantEffort {
+				t.Fatalf("-reasoning-effort = %q, want %q (args %v)", got, tt.wantEffort, args)
 			}
 		})
 	}

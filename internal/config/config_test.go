@@ -610,6 +610,52 @@ func TestCompactionValidate(t *testing.T) {
 	}
 }
 
+// TestReasoningEffortValidatorsAgree pins the shared reasoning-effort enum:
+// both the suggestion and compaction validators must accept and reject exactly
+// the same values.
+func TestReasoningEffortValidatorsAgree(t *testing.T) {
+	tests := []struct {
+		effort string
+		wantOK bool
+	}{
+		{"", true},
+		{"none", true},
+		{"low", true},
+		{"medium", true},
+		{"high", true},
+		{"xhigh", true},
+		{"max", true},
+		{"maximal", false},
+		{"HIGH", false},
+		{" high", false},
+	}
+	for _, tt := range tests {
+		name := tt.effort
+		if name == "" {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
+			suggestion := Suggestions{Enabled: true, CakeSuggestBin: DefaultCakeSuggestBin, ReasoningEffort: tt.effort}
+			suggestionErr := suggestion.Validate()
+			if got := suggestionErr == nil; got != tt.wantOK {
+				t.Errorf("Suggestions.Validate() error = %v, want accepted = %v", suggestionErr, tt.wantOK)
+			}
+
+			compaction := DefaultCompaction()
+			compaction.Enabled = true
+			compaction.ReasoningEffort = tt.effort
+			compactionErr := compaction.Validate()
+			if got := compactionErr == nil; got != tt.wantOK {
+				t.Errorf("Compaction.Validate() error = %v, want accepted = %v", compactionErr, tt.wantOK)
+			}
+
+			if (suggestionErr == nil) != (compactionErr == nil) {
+				t.Errorf("validators disagree for %q: suggestions=%v compaction=%v", tt.effort, suggestionErr, compactionErr)
+			}
+		})
+	}
+}
+
 func TestLoadSuggestionsTable(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
