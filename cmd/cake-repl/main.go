@@ -240,7 +240,7 @@ func bindFlags(fs *flag.FlagSet) *startupFlags {
 	f.noColor = fs.Bool("no-color", false, "disable styling")
 	f.debugLog = fs.String("debug-log", "", "write cake-repl debug output to this file")
 	f.historyFile = fs.String("history-file", "", "path to persist prompt history across restarts (default: no persistence)")
-	f.showVersion = fs.Bool("version", false, "print version and exit")
+	f.showVersion = fs.Bool("version", false, "print version, embedded revision, and commit time and exit")
 	f.configPath = fs.String("config", "", "path to config file (overrides default XDG and project-local config)")
 	f.noConfig = fs.Bool("no-config", false, "skip loading config file")
 	f.outputLimit = fs.Int("output-limit", 0, "truncate tool output after this many bytes, cut on rune boundaries (0 = use internal default 2000)")
@@ -358,7 +358,7 @@ func run() (err error) {
 		return err
 	}
 	if *f.showVersion {
-		fmt.Fprintln(os.Stdout, version.Binary)
+		fmt.Fprintln(os.Stdout, version.Text())
 		return nil
 	}
 

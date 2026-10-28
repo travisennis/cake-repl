@@ -27,6 +27,9 @@ commands or help text (`internal/app/commands.go`), key bindings
   REPL is interactive; an explicit empty value omits `--sandbox` so cake
   resolves its own policy. See
   [ADR 017](../adr/017-default-the-cake-sandbox-to-workspace-write-interactive.md).
+  `-version` prints the release version followed by the embedded
+  `vcs.revision` and `vcs.time` when available; a dirty build is marked
+  `(modified)`.
 - **Config file shape.** TOML config supports only stable REPL defaults:
   `cake-bin`, `model`, `profile`, `output-limit`, `max-timeline-items`,
   `tool-color`, the opt-in `[compaction]` policy table (`enabled`,

@@ -70,6 +70,11 @@ just install
 This installs `cake-repl` into `GOBIN`, or `GOPATH/bin` when `GOBIN` is unset.
 Make sure that directory is on your `PATH`.
 
+`cake-repl -version` prints the version line plus the embedded `vcs.revision` and
+`vcs.time` from the Git checkout. Compare the revision with `git rev-parse HEAD`
+to confirm the active binary; a build with local modifications is marked
+`(modified)`.
+
 ## Run
 
 ```bash
@@ -136,7 +141,7 @@ Flags:
 | `-output-limit <n>` | truncate tool output after `<n>` bytes, cut on rune boundaries (default: 2000) |
 | `-max-timeline-items <n>` | limit timeline to `<n>` entries (default: no limit) |
 | `-tool-color` | keep ANSI color in tool output instead of stripping it (default: strip) |
-| `-version` | print version and exit |
+| `-version` | print version, embedded revision, and commit time, then exit |
 
 cake-repl runs cake with the `workspace-write-interactive` sandbox policy by
 default, unlike cake's own `workspace-write` default, because a REPL is
