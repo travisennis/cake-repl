@@ -71,6 +71,11 @@ integrate name: (_check-branch-name name)
     git switch master
     git merge --ff-only "$name"
 
+# Install the .pre-commit-config.yaml hooks (pre-commit and commit-msg) with prek.
+hooks:
+    @command -v prek > /dev/null || { echo "ERROR: prek is not installed; see https://github.com/j178/prek" >&2; exit 1; }
+    prek install --hook-type pre-commit --hook-type commit-msg
+
 build:
     mkdir -p bin
     go build -trimpath -o bin/cake-repl ./cmd/cake-repl

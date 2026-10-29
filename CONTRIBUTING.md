@@ -174,7 +174,9 @@ Commit messages must use Conventional Commits:
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`,
 `ci`, `chore`, `revert`. A local `pre-commit` config
 (`.pre-commit-config.yaml`) runs `fmt-check`, `tidy-check`, `test`, and `lint`,
-and `conventional-pre-commit` checks the commit message.
+and `conventional-pre-commit` checks the commit message. Install both hooks in
+a clone with `just hooks` (requires
+[`prek`](https://github.com/j178/prek)).
 
 ```text
 feat: add session status command
