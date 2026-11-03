@@ -672,8 +672,22 @@ func (m *Model) removeItemAt(idx int) {
 }
 
 // insertItemAt inserts an item at the given index, shifting subsequent items
-// to the right, and updates the render cache and pending call indices.
+// to the right, and updates the render cache and pending call indices. When the
+// timeline is at MaxTimelineItems, the oldest items are trimmed first and idx is
+// clamped into the surviving slice, so the inserted item is never trimmed.
 func (m *Model) insertItemAt(idx int, it ui.Item) {
+	// Trim before inserting. Trimming after the shift would remove the newly
+	// inserted item when idx is 0 and the timeline is already at the cap.
+	trimmed := 0
+	if m.cfg.MaxTimelineItems > 0 && len(m.items) >= m.cfg.MaxTimelineItems {
+		trimmed = len(m.items) - m.cfg.MaxTimelineItems + 1
+		m.trimFront(trimmed)
+		idx -= trimmed
+		if idx < 0 {
+			idx = 0
+		}
+	}
+
 	m.items = append(m.items, ui.Item{}) // make room
 	copy(m.items[idx+1:], m.items[idx:])
 	m.items[idx] = it
@@ -685,25 +699,20 @@ func (m *Model) insertItemAt(idx int, it ui.Item) {
 		}
 	}
 
-	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
-		over := len(m.items) - m.cfg.MaxTimelineItems
-		m.trimFront(over)
-		if m.ready {
+	if m.ready {
+		if trimmed > 0 {
 			// Drop the render cache before rebuilding: rebuild reslices to
 			// length zero, which would otherwise keep the pre-trim strings
 			// reachable through the old backing array.
 			m.rendered = nil
 			m.rebuildTimeline()
+		} else {
+			rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
+			m.rendered = append(m.rendered, "") // make room
+			copy(m.rendered[idx+1:], m.rendered[idx:])
+			m.rendered[idx] = rendered
+			m.timelineDirty = true
 		}
-		return
-	}
-
-	if m.ready {
-		rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-		m.rendered = append(m.rendered, "") // make room
-		copy(m.rendered[idx+1:], m.rendered[idx:])
-		m.rendered[idx] = rendered
-		m.timelineDirty = true
 	}
 }
 

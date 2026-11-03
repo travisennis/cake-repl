@@ -1932,6 +1932,47 @@ func TestInsertItemAtRespectsMaxTimelineItems(t *testing.T) {
 	assertCacheMatchesFullRender(t, &m, "after cap-enforced insert and tool output")
 }
 
+func TestInsertItemAtCapPreservesInsertedMessage(t *testing.T) {
+	// Regression: when every visible item is a pending tool and the timeline
+	// is at the cap, an assistant message inserted before them must survive.
+	m := newLaidOutModel()
+	m.cfg.MaxTimelineItems = 2
+
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
+	m.applyEvent(cake.FunctionCall{ID: "fc-2", CallID: "c-2", Name: "bash", Arguments: `{}`})
+	if len(m.items) != 2 {
+		t.Fatalf("at cap: got %d items, want 2", len(m.items))
+	}
+	if idx := m.firstPendingToolIdx(); idx != 0 {
+		t.Fatalf("firstPendingToolIdx = %d, want 0", idx)
+	}
+
+	m.applyEvent(cake.Message{Role: "assistant", Content: "checking"})
+
+	if len(m.items) != 2 {
+		t.Fatalf("after insert+trim: got %d items, want 2", len(m.items))
+	}
+	if m.items[0].Kind != ui.KindAssistant || m.items[0].Text != "checking" {
+		t.Errorf("item[0] = %+v, want the inserted assistant message", m.items[0])
+	}
+	if m.items[1].Tool == nil {
+		t.Fatalf("item[1] = %+v, want the surviving pending tool", m.items[1])
+	}
+	if _, ok := m.pendingCalls["c-1"]; ok {
+		t.Error("pendingCalls still contains trimmed-away call c-1")
+	}
+	if idx, ok := m.pendingCalls["c-2"]; !ok || idx != 1 {
+		t.Errorf("pendingCalls['c-2'] = %d (ok=%v), want 1", idx, ok)
+	}
+
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-2", Output: "ok"})
+	if !m.items[1].Tool.Done || m.items[1].Tool.Output != "ok" {
+		t.Errorf("surviving tool after output: done=%v output=%q", m.items[1].Tool.Done, m.items[1].Tool.Output)
+	}
+
+	assertCacheMatchesFullRender(t, &m, "after capped insertion at index zero")
+}
+
 func TestInsertItemAtTrimsPendingCallsInFrontRange(t *testing.T) {
 	// When the front-trim removes a tool that was still pending, its
 	// pendingCalls entry should be removed, not left stale.
