@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/cellbuf"
 	"github.com/muesli/termenv"
 )
 
@@ -167,16 +168,50 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 		case strings.TrimSpace(output) == "":
 			lines = append(lines, th.ToolOutput.Render("  (no output)"))
 		default:
-			var out string
 			if outputMode == ToolOutputFull {
-				out = trimPartialEscape(strings.TrimRight(output, "\n"))
+				out := trimPartialEscape(strings.TrimRight(output, "\n"))
+				lines = append(lines, renderFullToolOutput(th.ToolOutput, out, width-2))
 			} else {
-				out = TruncateOutput(output, outputLimit)
+				lines = append(lines, indent(th.ToolOutput.Width(width-2).Render(TruncateOutput(output, outputLimit)), "  "))
 			}
-			lines = append(lines, indent(th.ToolOutput.Width(width-2).Render(out), "  "))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderFullToolOutput renders all retained output at the given content width
+// and skips the block padding lipgloss adds to every line. Full mode can show
+// a result of up to 1 MiB; padding each line to the panel width multiplied the
+// cached rendering by the terminal width, so a newline-heavy result retained
+// at 1 MiB cached tens of MB. The padding is unstyled and visually empty, so
+// omitting it keeps the displayed text honest while bounding the cached render
+// to the retained text plus a constant per line, independent of terminal
+// width.
+//
+// The wrap call matches what lipgloss Width would do; wrapping each line in
+// the style's open and close sequences then avoids the padding. That is safe
+// for embedded SGR because cellbuf.Wrap reopens an open color on every line it
+// wraps. Blank lines get no indent, so an empty interior line costs one
+// newline instead of the block width.
+func renderFullToolOutput(style lipgloss.Style, out string, width int) string {
+	wrapped := cellbuf.Wrap(out, width, "")
+	open, close := styleSequences(style)
+	var b strings.Builder
+	b.Grow(len(wrapped) + (len(open)+len(close)+2)*(strings.Count(wrapped, "\n")+1))
+	for {
+		line, rest, more := strings.Cut(wrapped, "\n")
+		if line != "" {
+			b.WriteString("  ")
+			b.WriteString(open)
+			b.WriteString(line)
+			b.WriteString(close)
+		}
+		if !more {
+			return b.String()
+		}
+		b.WriteByte('\n')
+		wrapped = rest
+	}
 }
 
 // keepOutputSGR reports whether tool output may keep its own SGR color. The
@@ -192,9 +227,22 @@ func keepOutputSGR(th Theme) bool {
 // style wrote before it; under the Ascii profile the style writes no escapes
 // and the result is empty.
 func styleOpen(style lipgloss.Style) string {
-	const sentinel = "\ue000"
-	open, _, _ := strings.Cut(style.Render(sentinel), sentinel)
+	open, _ := styleSequences(style)
 	return open
+}
+
+// styleSequences returns the sequences lipgloss puts before and after a styled
+// string. Callers use them to style many lines without constructing a styled
+// string per line; both are empty under the Ascii profile. The tool output
+// style is rendition-only (no border, margin, or padding), so wrapping each
+// line in these sequences matches what lipgloss renders for that line.
+func styleSequences(style lipgloss.Style) (open, close string) {
+	const sentinel = "\ue000"
+	open, rest, ok := strings.Cut(style.Render(sentinel), sentinel)
+	if !ok {
+		return "", ""
+	}
+	return open, rest
 }
 
 func indent(s, prefix string) string {

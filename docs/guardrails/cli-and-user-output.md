@@ -234,11 +234,15 @@ in plain text like every other surface.
   ingest with the same "… truncated (N bytes total)" marker, so one oversized
   result cannot pin tens of MB of memory. Full mode ignores the output limit
   and shows everything retained (including the ingest-cut marker when bytes
-  were dropped). The current mode also applies to tool blocks added later and
-  survives `/clear`. Only tool items are re-rendered on toggle; cached non-tool
-  renders and the viewport scroll offset are preserved. A failed tool's message
-  lives in its output, so hidden mode hides it until the user cycles output on;
-  the stream has no error flag and its text must not be parsed. See
+  were dropped). It renders the retained text without padding each line to the
+  panel width, so the cached form stays proportional to the retained payload
+  instead of growing by terminal width × lines; interior blank lines stay blank
+  and no content is dropped. The current mode also applies to tool blocks added
+  later and survives `/clear`. Only tool items are re-rendered on toggle;
+  cached non-tool renders and the viewport scroll offset are preserved. A
+  failed tool's message lives in its output, so hidden mode hides it until the
+  user cycles output on; the stream has no error flag and its text must not be
+  parsed. See
   [ADR 033](../adr/033-default-tool-output-to-hidden.md).
   `Ctrl+Y` copies the raw markdown source of the most recent `KindAssistant`
   timeline item (skipping trailing tool/completion items) to the system

@@ -572,6 +572,114 @@ func TestRenderToolOutputModes(t *testing.T) {
 	})
 }
 
+// TestRenderToolOutputFullBoundsRenderedCache pins the render-size bound for
+// Ctrl+O full mode. Full mode shows everything retained, so padding every line
+// to the panel width multiplied the cached render by the terminal width: a
+// 1 MiB newline-heavy result cached ~53 MB at 100 columns. The retained text,
+// its blank lines, and the ingest marker must all survive; only the invisible
+// block padding may go.
+func TestRenderToolOutputFullBoundsRenderedCache(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.Ascii)
+
+	const width = 100
+	const marker = "… truncated (2097152 bytes total)"
+	tests := []struct {
+		name   string
+		output string
+		marker bool
+	}{
+		{
+			name:   "newline-heavy",
+			output: strings.Repeat("x\n", (1<<20)/2),
+		},
+		{
+			name:   "ordinary-multiline",
+			output: strings.Repeat("build log line with a little detail\n", 40000),
+		},
+		{
+			name:   "ingest-cut-before-marker",
+			output: strings.Repeat("x\n", (1<<20)/2) + "\n" + marker,
+			marker: true,
+		},
+		{
+			name:   "interior-blank-lines",
+			output: "prefix" + strings.Repeat("\n", 256*1024) + "suffix",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := Item{Kind: KindTool, Tool: &ToolBlock{
+				Name:      "bash",
+				Arguments: `{"command":"cat huge.log"}`,
+				Output:    tt.output,
+				Done:      true,
+			}}
+			got := RenderItem(DefaultTheme(), item, width, DefaultOutputLimit, ToolOutputFull)
+
+			// Two bytes per retained byte plus room for the header and marker.
+			// Before the fix the same cases rendered width bytes per line.
+			if limit := 2*len(tt.output) + 1024; len(got) > limit {
+				t.Fatalf("full render = %d bytes, want <= %d for %d retained bytes", len(got), limit, len(tt.output))
+			}
+			for _, line := range strings.Split(got, "\n") {
+				if strings.HasSuffix(line, " ") {
+					t.Errorf("line has trailing block padding: %q", line)
+				}
+				if got := lipgloss.Width(line); got > width {
+					t.Errorf("line width = %d, want <= %d: %q", got, width, line)
+				}
+			}
+			// The retained text is unchanged: one content rune per input line
+			// for the newline-heavy cases, and the blank run survives verbatim.
+			if n, want := strings.Count(got, "x"), strings.Count(tt.output, "x"); n != want {
+				t.Errorf("rendered %d content runes, want %d", n, want)
+			}
+			// Rendering only adds line breaks (the header and any wrap), so a
+			// dropped blank line would show up as a smaller newline count.
+			if n, want := strings.Count(got, "\n"), strings.Count(tt.output, "\n"); n < want {
+				t.Errorf("rendered %d newlines, want at least the %d retained", n, want)
+			}
+			if tt.marker && !strings.Contains(got, marker) {
+				t.Error("full output dropped the ingest truncation marker")
+			}
+			if strings.HasSuffix(tt.output, "suffix") && !strings.Contains(got, "  suffix") {
+				t.Error("full output dropped the text after interior blank lines")
+			}
+		})
+	}
+}
+
+// TestRenderToolOutputFullKeepsSGRSpanningLines guards why the full renderer
+// wraps the whole block before styling its lines: an embedded color can stay
+// open across a newline, and cellbuf.Wrap re-emits it on each following line.
+func TestRenderToolOutputFullKeepsSGRSpanningLines(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	th := DefaultTheme()
+	th.ToolColor = true
+	item := Item{Kind: KindTool, Tool: &ToolBlock{
+		Name:      "bash",
+		Arguments: `{"command":"printf"}`,
+		Output:    "plain\n\x1b[31mred start\nstill red\x1b[0m\nplain again",
+		Done:      true,
+	}}
+	got := RenderItem(th, item, 80, DefaultOutputLimit, ToolOutputFull)
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.Contains(line, "still red") {
+			continue
+		}
+		if !strings.Contains(line, "\x1b[31m") {
+			t.Fatalf("spanned SGR was dropped: %q", line)
+		}
+		return
+	}
+	t.Fatal("continued colored line was not rendered")
+}
+
 func TestToolOutputModeCycle(t *testing.T) {
 	if got := ToolOutputHidden.Cycle(); got != ToolOutputTruncated {
 		t.Errorf("hidden.Cycle() = %v, want truncated", got)

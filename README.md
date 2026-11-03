@@ -657,13 +657,17 @@ validation is available with `just release-check`.
   "… truncated (N bytes total)" line, so it cannot pin tens of MB of memory —
   including a short prefix followed by megabytes of newlines. `Ctrl+O` full
   mode shows everything that was retained (including that marker); a result of
-  1 MiB or less is retained verbatim. This ceiling applies to tool-result
-  output only: assistant and user message text and tool arguments are kept
-  whole per entry and are not capped, while reasoning payloads are discarded
-  (the timeline keeps only a `(thinking)` marker).
+  1 MiB or less is retained verbatim. Full mode renders that retained text
+  without padding short lines to the panel width, so its rendered form stays
+  proportional to the result instead of growing with the terminal width. This
+  ceiling applies to tool-result output only: assistant and user message text
+  and tool arguments are kept whole per entry and are not capped, while
+  reasoning payloads are discarded (the timeline keeps only a `(thinking)`
+  marker).
 - The timeline keeps every entry by default (`-max-timeline-items` defaults to
   no limit). This is deliberate: the ceiling above bounds what one tool result
-  pins and `-output-limit` caps the rendered form, while trimming entries by
+  pins, truncated mode is capped by `-output-limit`, and full mode's rendered
+  form stays proportional to the retained result, while trimming entries by
   default would silently drop scroll-back history. Message text and tool
   arguments remain unbounded per entry, so a session that streams very large
   messages still grows; set `-max-timeline-items` to bound how many entries are
