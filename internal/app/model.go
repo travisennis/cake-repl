@@ -210,7 +210,9 @@ type Model struct {
 	pendingCalls map[string]int // call_id -> index into items
 	items        []ui.Item
 	// toolOutputMode applies to every tool block in the timeline and to tool
-	// blocks appended later in this REPL session.
+	// blocks appended later in this REPL session. It starts hidden so a session
+	// opens with one header per tool call; Ctrl+O reveals truncated and then
+	// full output. See ADR 033.
 	toolOutputMode ui.ToolOutputMode
 
 	// rendered caches one rendered string per item at renderedWidth and is the
@@ -287,16 +289,17 @@ func New(cfg Config) Model {
 	spin.Spinner = spinner.MiniDot
 
 	m := Model{
-		cfg:           cfg,
-		theme:         th,
-		keys:          defaultKeyMap(),
-		input:         input,
-		spin:          spin,
-		sessionList:   newSessionList(),
-		pendingCalls:  map[string]int{},
-		clipboard:     clipboard.WriteAll,
-		hydrating:     cfg.ResumeID != "",
-		replayPending: cfg.ResumeID != "",
+		cfg:            cfg,
+		theme:          th,
+		keys:           defaultKeyMap(),
+		input:          input,
+		spin:           spin,
+		sessionList:    newSessionList(),
+		pendingCalls:   map[string]int{},
+		clipboard:      clipboard.WriteAll,
+		toolOutputMode: ui.ToolOutputHidden,
+		hydrating:      cfg.ResumeID != "",
+		replayPending:  cfg.ResumeID != "",
 		session: sessionState{
 			NextMode: cfg.InitialMode,
 			ResumeID: cfg.ResumeID,

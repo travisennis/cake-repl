@@ -30,6 +30,13 @@ func newLaidOutModel() Model {
 	return laidOut(80, 24)
 }
 
+// TestNewStartsWithHiddenToolOutput pins the startup mode (ADR 033).
+func TestNewStartsWithHiddenToolOutput(t *testing.T) {
+	if got := New(Config{}).toolOutputMode; got != ui.ToolOutputHidden {
+		t.Errorf("default tool output mode = %v, want hidden", got)
+	}
+}
+
 // TestNewWiresToolColor checks that the -tool-color opt-in reaches the theme
 // (ADR 009) and that the default keeps tool output stripped.
 func TestNewWiresToolColor(t *testing.T) {
@@ -389,6 +396,10 @@ func TestToolOutputRerenderPreservesBottomPinning(t *testing.T) {
 	m.width, m.height = 40, 8
 	m.layout()
 
+	// The session default is hidden, but this test is about the output
+	// rerender, so make the output body visible.
+	m.toolOutputMode = ui.ToolOutputFull
+
 	for range 8 {
 		m.applyEvent(cake.Message{Role: "assistant", Content: "line one\nline two\nline three"})
 	}
@@ -414,6 +425,9 @@ func TestToolOutputRerenderPreservesBottomPinning(t *testing.T) {
 
 func TestFinishRunRerendersOrphanedToolCalls(t *testing.T) {
 	m := newLaidOutModel()
+	// The session default is hidden; the orphan terminal state is tool output,
+	// so switch to full mode to keep this test about the rerender itself.
+	m.toolOutputMode = ui.ToolOutputFull
 	m.applyEvent(cake.FunctionCall{CallID: "c-1", Name: "bash", Arguments: `{"command":"sleep 5"}`})
 
 	tm, _ := m.finishRun(cake.Result{ExitCode: 0})

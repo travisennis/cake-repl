@@ -190,29 +190,42 @@ func TestDescribeHook(t *testing.T) {
 
 func TestToggleToolOutputCyclesGlobalMode(t *testing.T) {
 	m := newLaidOutModel()
+	output := strings.Repeat("x", ui.DefaultOutputLimit+100)
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
-	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x", ui.DefaultOutputLimit+100)})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: output})
 
-	if m.toolOutputMode != ui.ToolOutputTruncated {
-		t.Fatalf("default mode = %v, want truncated", m.toolOutputMode)
+	if m.toolOutputMode != ui.ToolOutputHidden {
+		t.Fatalf("default mode = %v, want hidden", m.toolOutputMode)
+	}
+	if got := m.rendered[len(m.rendered)-1]; strings.Contains(got, "xxxx") || strings.Contains(got, "truncated") {
+		t.Errorf("hidden default rendered tool output: %q", tailPreview(got))
+	}
+	if got := m.rendered[len(m.rendered)-1]; !strings.Contains(got, "make") {
+		t.Errorf("hidden default did not render the tool header: %q", tailPreview(got))
 	}
 
 	tm, _ := m.toggleToolOutput()
 	m = tm.(Model)
+	if m.toolOutputMode != ui.ToolOutputTruncated {
+		t.Errorf("after first toggle: mode = %v, want truncated", m.toolOutputMode)
+	}
+	if got := m.rendered[len(m.rendered)-1]; !strings.Contains(got, "… truncated") {
+		t.Errorf("first toggle did not render truncated output: %q", tailPreview(got))
+	}
+
+	tm, _ = m.toggleToolOutput()
+	m = tm.(Model)
 	if m.toolOutputMode != ui.ToolOutputFull {
-		t.Errorf("after first toggle: mode = %v, want full", m.toolOutputMode)
+		t.Errorf("after second toggle: mode = %v, want full", m.toolOutputMode)
+	}
+	if got := strings.Count(m.rendered[len(m.rendered)-1], "x"); got != len(output) {
+		t.Errorf("second toggle rendered %d output bytes, want %d", got, len(output))
 	}
 
 	tm, _ = m.toggleToolOutput()
 	m = tm.(Model)
 	if m.toolOutputMode != ui.ToolOutputHidden {
-		t.Errorf("after second toggle: mode = %v, want hidden", m.toolOutputMode)
-	}
-
-	tm, _ = m.toggleToolOutput()
-	m = tm.(Model)
-	if m.toolOutputMode != ui.ToolOutputTruncated {
-		t.Errorf("after third toggle: mode = %v, want truncated", m.toolOutputMode)
+		t.Errorf("after third toggle: mode = %v, want hidden", m.toolOutputMode)
 	}
 	assertCacheMatchesFullRender(t, &m, "after cycling output modes")
 }
@@ -232,6 +245,8 @@ func TestToggleToolOutputRerendersEveryToolAndReusesNonToolCache(t *testing.T) {
 
 	tm, _ := m.toggleToolOutput()
 	m = tm.(Model)
+	tm, _ = m.toggleToolOutput()
+	m = tm.(Model)
 	if m.rendered[0] != "cached non-tool sentinel" {
 		t.Error("non-tool cached render was replaced")
 	}
@@ -248,6 +263,8 @@ func TestToggleToolOutputRerendersEveryToolAndReusesNonToolCache(t *testing.T) {
 func TestToggleToolOutputBeforeToolAppliesToFutureOutput(t *testing.T) {
 	m := newLaidOutModel()
 	tm, cmd := m.toggleToolOutput()
+	m = tm.(Model)
+	tm, _ = m.toggleToolOutput()
 	m = tm.(Model)
 	if cmd != nil {
 		t.Errorf("cmd = %v, want nil", cmd)
@@ -318,8 +335,8 @@ func TestHandleKeyToggleToolOutput(t *testing.T) {
 
 	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlO})
 	got := tm.(Model)
-	if got.toolOutputMode != ui.ToolOutputFull {
-		t.Errorf("handleKey ctrl+o did not toggle to full: mode = %v", got.toolOutputMode)
+	if got.toolOutputMode != ui.ToolOutputTruncated {
+		t.Errorf("handleKey ctrl+o did not toggle to truncated: mode = %v", got.toolOutputMode)
 	}
 }
 

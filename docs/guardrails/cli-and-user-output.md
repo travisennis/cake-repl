@@ -75,7 +75,7 @@ commands or help text (`internal/app/commands.go`), key bindings
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit; when the input is
   empty, submit the shown suggestion), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
-  through truncated/full/hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
+  through truncated/full/hidden, starting from hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll). `Ctrl+C` cancels a running task or compaction and quits only when
   idle; `Ctrl+N` cancels either and starts a new session. While the `/sessions` browser is open its keys are modal:
   `Up`/`Down`, `PgUp`/`PgDn`, and `Home`/`End` move the selection, `Enter`
@@ -224,17 +224,22 @@ in plain text like every other surface.
   [`session-and-security.md`](session-and-security.md),
   [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md),
   and [ADR 009](../adr/009-opt-in-sgr-passthrough-for-tool-output.md).
-  Tool *output* truncates at the configured output limit (default 2000 bytes) on
-  rune boundaries. Independently, at most the first 1 MiB of any single tool
-  result is *retained* for the session, cut at ingest with the same
-  "… truncated (N bytes total)" marker, so one oversized result cannot pin tens
-  of MB of memory. `Ctrl+O` cycles every tool block through three session-wide
-  output modes: truncated (default), full, and hidden. Full mode ignores the
-  output limit and shows everything retained (including the ingest-cut marker
-  when bytes were dropped). The current mode also applies
-  to tool blocks added later and survives `/clear`. Only tool items are
-  re-rendered on toggle; cached non-tool renders and the viewport scroll offset
-  are preserved.
+  Tool *output* is hidden by default: a tool call shows its header and argument
+  summary only. `Ctrl+O` cycles every tool block through three session-wide
+  output modes: hidden (default), truncated, and full, in the cycle order
+  truncated → full → hidden → truncated; from the hidden start the first press
+  shows truncated output. Truncated mode caps output at the configured output
+  limit (default 2000 bytes) on rune boundaries. Independently, at most the
+  first 1 MiB of any single tool result is *retained* for the session, cut at
+  ingest with the same "… truncated (N bytes total)" marker, so one oversized
+  result cannot pin tens of MB of memory. Full mode ignores the output limit
+  and shows everything retained (including the ingest-cut marker when bytes
+  were dropped). The current mode also applies to tool blocks added later and
+  survives `/clear`. Only tool items are re-rendered on toggle; cached non-tool
+  renders and the viewport scroll offset are preserved. A failed tool's message
+  lives in its output, so hidden mode hides it until the user cycles output on;
+  the stream has no error flag and its text must not be parsed. See
+  [ADR 033](../adr/033-default-tool-output-to-hidden.md).
   `Ctrl+Y` copies the raw markdown source of the most recent `KindAssistant`
   timeline item (skipping trailing tool/completion items) to the system
   clipboard via the platform helper: `pbcopy` on macOS, `xclip`/`xsel` on

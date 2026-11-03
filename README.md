@@ -161,7 +161,7 @@ another policy (`read-only`, `workspace-write`, `workspace-write-interactive`, o
 | `Ctrl+C` | cancel running cake task or context compaction; quit when idle |
 | `Ctrl+N` | start a new session (cancels a running task or compaction) |
 | `Ctrl+U` | clear input |
-| `Ctrl+O` | cycle all tool output: truncated / full / hidden |
+| `Ctrl+O` | cycle all tool output (starts hidden): truncated / full / hidden |
 | `Ctrl+Y` | copy the last assistant response (markdown) to the clipboard |
 | `Up` / `Down` | recall prompt history (at the input's first/last line) |
 | `PgUp` / `PgDn` | scroll timeline |
@@ -645,7 +645,11 @@ validation is available with `just release-check`.
   bare `-resume` at startup — needs a cake binary that supports
   `sessions list --json`; without it the picker shows a non-fatal warning and
   the prompt stays available.
-- Tool output is truncated at 2,000 bytes by default, cut on rune boundaries
+- Tool output is hidden by default: each tool call shows its header and argument
+  summary only, so a failed tool is quiet until you reveal its output with
+  `Ctrl+O`. The key cycles the session-wide mode through truncated, full, and
+  hidden; from the hidden start, the first press shows truncated output.
+  Truncated mode caps output at 2,000 bytes, cut on rune boundaries
   (configurable via `-output-limit` or config file). Independently of that
   display limit, the REPL bounds what one tool *result* pins: it retains at
   most the first 1 MiB (1,048,576 bytes) of the result's raw bytes, and a larger

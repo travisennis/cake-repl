@@ -76,3 +76,13 @@ only the most recent block could appear to do nothing when that block was off
 screen or its output fit below the truncation limit. A toggle re-renders every
 tool item while retaining cached renders for non-tool items. Viewport behavior
 is unchanged: it stays pinned at the bottom or restores the previous offset.
+
+## Partial Supersession (2026-11-03)
+
+Task 132, in the user-level `ahm` store, changes the startup mode recorded
+above. A REPL session now starts in **hidden** rather than truncated;
+[ADR 033](033-default-tool-output-to-hidden.md) records the decision. The cycle
+order (**truncated → full → hidden → truncated**), the session-wide scope, the
+key binding, and the rule that the mode is neither persisted nor configurable
+are unchanged. From the hidden start, the first `Ctrl+O` press shows truncated
+output and the second shows full output.

@@ -36,7 +36,8 @@ type ToolOutputMode int
 
 const (
 	// ToolOutputTruncated caps output at the configured output limit. It is the
-	// zero value so tool blocks that do not set a mode render the legacy view.
+	// zero value so tool blocks that do not set a mode render the legacy view;
+	// the REPL itself starts in ToolOutputHidden. See ADR 033.
 	ToolOutputTruncated ToolOutputMode = iota
 	// ToolOutputFull shows the complete raw output regardless of the limit.
 	ToolOutputFull

@@ -112,7 +112,7 @@ keybindings
   ctrl+c           cancel running task or compaction; quit when idle
   ctrl+n           start a new session (cancels a running task or compaction)
   ctrl+u           clear input
-  ctrl+o           cycle all tool output: truncated / full / hidden
+  ctrl+o           cycle all tool output (starts hidden): truncated / full / hidden
   ctrl+y           copy last assistant response (markdown)
   tab              complete slash commands
   up/down          recall prompt history (at the input's first/last line)
