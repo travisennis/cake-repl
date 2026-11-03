@@ -146,6 +146,17 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md),
   and
   [ADR 032](../adr/032-let-prompt-suggestions-select-reasoning-effort.md).
+- **Unobserved-exit shutdown.** `Model.CancelRunning` is the teardown main runs
+  after Bubble Tea returns a model without a final Update (SIGINT or SIGTERM).
+  It cancels the live run, a startup replay that may still be starting, the
+  compactor, the suggester, and every session-listing helper, then waits for
+  each child to be reaped under one five-second deadline. It waits on reaping
+  channels rather than result messages, so a dead Update loop cannot strand a
+  child; a run whose event buffer is full stops delivering events and keeps
+  draining stdout so cancellation can still reach `Wait`. A child that misses
+  the deadline is named on stderr and makes the process exit non-zero. Normal
+  quit paths continue to drain their own results. See
+  [ADR 034](../adr/034-bound-unobserved-exit-child-teardown.md).
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
   resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and

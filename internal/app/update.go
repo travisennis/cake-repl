@@ -124,7 +124,12 @@ func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 	m.sessionListReq = m.sessionListSeq
 	ctx, cancel := context.WithCancel(context.Background())
 	m.sessionListCancel = cancel
+	if m.sessionListDone == nil {
+		m.sessionListDone = map[uint64]chan struct{}{}
+	}
+	done := make(chan struct{})
 	req := m.sessionListReq
+	m.sessionListDone[req] = done
 	cfg := m.cfg
 	return m, func() tea.Msg {
 		sessions, err := cake.ListSessions(ctx, cake.SessionsOptions{
@@ -132,6 +137,7 @@ func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 			Cwd:      cfg.Cwd,
 			DebugLog: cfg.DebugLog,
 		})
+		close(done)
 		return sessionsLoadedMsg{req: req, sessions: sessions, err: err}
 	}
 }
@@ -150,8 +156,13 @@ type replayDoneMsg struct{ res cake.Result }
 
 // startReplayCmd starts the read-only replay without making the live prompt
 // state look busy. The command runs outside the Update loop because starting a
-// subprocess can block briefly.
-func startReplayCmd(cfg Config) tea.Cmd {
+// subprocess can block briefly. The model-owned context lets an unobserved exit
+// stop a replay that has not yet delivered replayStartedMsg; done closes after
+// the child is reaped even if that message is never observed.
+func startReplayCmd(cfg Config, ctx context.Context, done chan struct{}) tea.Cmd {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return func() tea.Msg {
 		run, err := cake.Replay(cake.ReplayOptions{
 			Bin:       cfg.CakeBin,
@@ -159,7 +170,20 @@ func startReplayCmd(cfg Config) tea.Cmd {
 			SessionID: cfg.ResumeID,
 			DebugLog:  cfg.DebugLog,
 			Registry:  cfg.Runs,
+			Context:   ctx,
 		})
+		if run == nil {
+			if done != nil {
+				close(done)
+			}
+			return replayStartedMsg{run: nil, err: err}
+		}
+		if done != nil {
+			go func() {
+				<-run.Done
+				close(done)
+			}()
+		}
 		return replayStartedMsg{run: run, err: err}
 	}
 }
@@ -298,6 +322,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case replayStartedMsg:
 		if msg.err != nil {
+			m.cancelReplay()
+			m.replayDone = nil
 			if m.replayPending {
 				m.replayPending = false
 				if m.hydrating {
@@ -365,6 +391,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sessionsLoadedMsg:
+		if m.sessionListDone != nil {
+			delete(m.sessionListDone, msg.req)
+		}
 		if msg.req != m.sessionListReq {
 			// A superseded or invalidated request: its items, error, selection,
 			// and loading state must not touch the request the browser is on
@@ -462,9 +491,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.hydrating || m.replayPending {
 			m.exitAfter = true
-			if m.replayRun != nil {
-				m.replayRun.Cancel()
-			}
+			m.cancelReplay()
 			return m, nil
 		}
 		return m.quit()
@@ -577,9 +604,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 		m.cancelCompaction()
 	}
 	if m.hydrating {
-		if m.replayRun != nil {
-			m.replayRun.Cancel()
-		}
+		m.cancelReplay()
 		// Keep consuming the canceled replay in the background, but suppress its
 		// records after this new-session boundary.
 		m.hydrating = false
@@ -807,9 +832,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		}
 		if m.hydrating || m.replayPending {
 			m.exitAfter = true
-			if m.replayRun != nil {
-				m.replayRun.Cancel()
-			}
+			m.cancelReplay()
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling session history load, then exiting…"})
 			return m, nil
 		}
@@ -1100,7 +1123,9 @@ func (m *Model) logDebug(text string) {
 }
 
 func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
+	m.cancelReplay()
 	m.replayRun = nil
+	m.replayDone = nil
 	m.replayPending = false
 	if !m.hydrating {
 		if m.exitAfter {

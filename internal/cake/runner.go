@@ -75,13 +75,21 @@ type ReplayOptions struct {
 	SessionID string
 	DebugLog  io.Writer
 	Registry  *Registry
+	// Context bounds the replay start and process lifetime. Nil uses
+	// context.Background(); the REPL owns a cancellable context so an
+	// unobserved exit can stop a replay that is still starting.
+	Context context.Context
 }
 
 // Replay launches cake's supported stream-json session replay command. Replay
 // uses the same event parser and subprocess lifecycle as a live invocation but
 // never supplies a prompt or starts a new task.
 func Replay(opts ReplayOptions) (*Run, error) {
-	return Start(Options{
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return start(ctx, Options{
 		Bin:      opts.Bin,
 		Cwd:      opts.Cwd,
 		ResumeID: opts.SessionID,
@@ -172,10 +180,13 @@ type ParseError struct {
 func (e ParseError) EventType() string { return "parse_error" }
 
 // Run is one cake subprocess. Events is closed when stdout reaches EOF;
-// Result then delivers exactly one value.
+// Result then delivers exactly one value. Done is closed when the child has
+// been reaped, independently of whether Result has been consumed, so shutdown
+// can wait for process teardown without stealing the result.
 type Run struct {
 	Events <-chan Event
 	Result <-chan Result
+	Done   <-chan struct{}
 	cancel context.CancelFunc
 	// pid is the engine's process id and, after Setsid, its process-group id.
 	// exited becomes true once cmd.Wait has reaped it; every group signal checks
@@ -281,7 +292,13 @@ func (b *tailBuffer) String() string {
 // missing); everything after a successful start is reported through Events
 // and Result.
 func Start(opts Options) (*Run, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+	return start(context.Background(), opts)
+}
+
+// start launches one cake process under parent. Replay supplies a model-owned
+// context; a live run uses context.Background and is stopped through Run.Cancel.
+func start(parent context.Context, opts Options) (*Run, error) {
+	ctx, cancel := context.WithCancel(parent)
 
 	cmd := exec.CommandContext(ctx, opts.Bin, opts.Args()...) // #nosec G204 -- opts.Bin intentionally comes from -cake-bin/config.
 	if opts.Cwd != "" {
@@ -310,7 +327,8 @@ func Start(opts Options) (*Run, error) {
 
 	events := make(chan Event, 64)
 	result := make(chan Result, 1)
-	run := &Run{Events: events, Result: result, cancel: cancel}
+	done := make(chan struct{})
+	run := &Run{Events: events, Result: result, Done: done, cancel: cancel}
 
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -359,6 +377,28 @@ func Start(opts Options) (*Run, error) {
 		// bufio.Reader instead of Scanner: tool outputs can produce very
 		// long single lines and must not abort the stream.
 		reader := bufio.NewReader(stdout)
+		// A dead Update loop stops consuming Events. Once cancellation is
+		// requested, drop further events and keep draining stdout so the
+		// process can exit and be reaped instead of blocking on a full channel.
+		dropping := false
+		sendEvent := func(ev Event) {
+			if dropping {
+				return
+			}
+			// Preserve the normal event stream while the consumer keeps up.
+			// Only a blocked send after cancellation is dropped, which is the
+			// unobserved-exit case where no Update loop will drain the channel.
+			select {
+			case events <- ev:
+				return
+			default:
+			}
+			select {
+			case events <- ev:
+			case <-ctx.Done():
+				dropping = true
+			}
+		}
 		for {
 			line, readErr := reader.ReadString('\n')
 			if line != "" {
@@ -367,9 +407,9 @@ func Start(opts Options) (*Run, error) {
 				}
 				ev, parseErr := ParseLine([]byte(line))
 				if parseErr != nil {
-					events <- ParseError{Line: snippet(line, 200), Err: parseErr}
+					sendEvent(ParseError{Line: snippet(line, 200), Err: parseErr})
 				} else if ev != nil {
-					events <- ev
+					sendEvent(ev)
 				}
 			}
 			if readErr != nil {
@@ -382,6 +422,7 @@ func Start(opts Options) (*Run, error) {
 
 		waitErr := cmd.Wait()
 		run.markExited()
+		close(done)
 		if opts.Registry != nil {
 			opts.Registry.Remove(run)
 		}

@@ -230,6 +230,12 @@ Dependency direction is one-way: `app` depends on `cake`, `compact`,
   from whether `cmd.Cancel` successfully signaled the process and, on POSIX,
   whether the process was signal-terminated—not from `ctx.Err()`—so a late
   Ctrl+C cannot relabel a finished run.
+- **Unobserved-exit teardown.** `Run.Done` closes when the child is reaped,
+  independently of whether its result was delivered. `Model.CancelRunning`
+  cancels every model-owned child and waits on those reaping signals under one
+  deadline, so an exit Bubble Tea never delivered to Update still reaps its
+  children; a missed deadline is reported and exits non-zero. See
+  [ADR 034](docs/adr/034-bound-unobserved-exit-child-teardown.md).
 - **The terminal is handed back before the process stops.** A catchable external
   SIGTSTP is handled in `cmd/cake-repl`: the terminal is released, each tracked
   live or replay engine group is stopped with SIGSTOP, and the REPL's own group

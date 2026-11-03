@@ -568,7 +568,9 @@ func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
 	}()
 	returned := make(chan struct{})
 	go func() {
-		m.CancelRunning()
+		if err := m.CancelRunning(); err != nil {
+			t.Errorf("CancelRunning: %v", err)
+		}
 		close(returned)
 	}()
 	select {
@@ -579,7 +581,7 @@ func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
 	close(release)
 	select {
 	case <-returned:
-	case <-time.After(suggestionTeardownTimeout):
+	case <-time.After(childTeardownTimeout):
 		t.Fatal("CancelRunning did not return after the child was reaped")
 	}
 }

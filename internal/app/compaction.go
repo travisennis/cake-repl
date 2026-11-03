@@ -160,9 +160,11 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	m.compactionSeq++
 	m.compactionReq = m.compactionSeq
 	m.compactionCancel = cancel
+	m.compactionDone = done
 	m.compacting = true
 	m.compactionStart = time.Now()
 	m.compactionElapsed = 0
@@ -184,7 +186,11 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 		opts.ThresholdPercent = m.cfg.Compaction.ThresholdPercent
 	}
 	run := func() tea.Msg {
-		return compactionDoneMsg{req: req, sessionID: sessionID, res: compact.Compact(ctx, opts)}
+		res := compact.Compact(ctx, opts)
+		// Close before returning the result: an unobserved exit can wait for
+		// the child to be reaped even if this message is never delivered.
+		close(done)
+		return compactionDoneMsg{req: req, sessionID: sessionID, res: res}
 	}
 	// The start notice is synced here, not left for the next event: the finished
 	// turn's Update has already pushed its completion row, and no spinner tick
@@ -215,6 +221,7 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	}
 	m.compacting = false
 	m.compactionCancel = nil
+	m.compactionDone = nil
 	m.compactionStart = time.Time{}
 	m.compactionElapsed = 0
 

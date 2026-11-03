@@ -444,16 +444,18 @@ func TestFinishRunRerendersOrphanedToolCalls(t *testing.T) {
 
 func TestCancelRunningNoopWhenNotRunning(t *testing.T) {
 	var m Model
-	m.CancelRunning() // must not panic or hang
+	if err := m.CancelRunning(); err != nil { // must not panic or hang
+		t.Fatalf("CancelRunning: %v", err)
+	}
 }
 
 func TestCancelRunningCancelsActiveRun(t *testing.T) {
 	bin := writeFakeCake(t, `
+trap 'exit 0' TERM
 cat <<'EOF'
 {"type":"task_start","session_id":"11111111-2222-3333-4444-555555555555","task_id":"t-1","timestamp":"2026-06-09T12:00:00Z"}
 EOF
-sleep 30
-exit 0
+while :; do sleep 0.05; done
 `)
 	run, err := cake.Start(cake.Options{Bin: bin, Prompt: "hi"})
 	if err != nil {
@@ -464,7 +466,14 @@ exit 0
 	<-run.Events
 
 	m := Model{run: run, running: true}
-	m.CancelRunning()
+	if err := m.CancelRunning(); err != nil {
+		t.Fatalf("CancelRunning: %v", err)
+	}
+	select {
+	case <-run.Done:
+	default:
+		t.Fatal("CancelRunning returned before the run was reaped")
+	}
 
 	// The result should indicate cancellation.
 	res := <-run.Result

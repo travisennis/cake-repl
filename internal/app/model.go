@@ -152,9 +152,15 @@ type Model struct {
 	hydrating     bool
 	replayPending bool
 	replayRun     *cake.Run
-	replayWarn    bool
-	sawComplete   bool
-	exitAfter     bool
+	// replayCtx and replayCancel own the startup replay command before its
+	// *cake.Run reaches the model. replayDone closes when that child is reaped,
+	// including when the start message is never observed. See CancelRunning.
+	replayCtx    context.Context
+	replayCancel context.CancelFunc
+	replayDone   chan struct{}
+	replayWarn   bool
+	sawComplete  bool
+	exitAfter    bool
 	// compacting is true while the external compactor runs. It gates prompt
 	// submission and session-target changes so the next cake process cannot
 	// race the compactor's session lock, and it marks the status line/title as
@@ -162,6 +168,10 @@ type Model struct {
 	// a compactionDoneMsg reaps it, even after a cancel.
 	compacting       bool
 	compactionCancel context.CancelFunc
+	// compactionDone closes when the compactor child has exited and been
+	// reaped. It stays set until the result is handled, so an unobserved exit
+	// can wait for teardown without consuming the result message.
+	compactionDone chan struct{}
 	// compactionStart is when the current compactor was launched and
 	// compactionElapsed is its whole-second age, refreshed from the spinner tick
 	// the REPL already runs while busy. Both are zero when no compaction is
@@ -260,6 +270,11 @@ type Model struct {
 	sessionListSeq    uint64
 	sessionListReq    uint64
 	sessionListCancel context.CancelFunc
+	// sessionListDone tracks every listing child by request identity. A
+	// replacement cancels the prior listing but does not wait for it, so more
+	// than one canceled helper can still be draining; shutdown waits for all
+	// of them.
+	sessionListDone map[uint64]chan struct{}
 
 	// clipboard writes text to the system clipboard. It is a field so tests
 	// can stub out the platform helper; New defaults to the OS clipboard.
@@ -288,18 +303,30 @@ func New(cfg Config) Model {
 	spin := spinner.New()
 	spin.Spinner = spinner.MiniDot
 
+	var replayCtx context.Context
+	var replayCancel context.CancelFunc
+	var replayDone chan struct{}
+	if cfg.ResumeID != "" {
+		replayCtx, replayCancel = context.WithCancel(context.Background())
+		replayDone = make(chan struct{})
+	}
+
 	m := Model{
-		cfg:            cfg,
-		theme:          th,
-		keys:           defaultKeyMap(),
-		input:          input,
-		spin:           spin,
-		sessionList:    newSessionList(),
-		pendingCalls:   map[string]int{},
-		clipboard:      clipboard.WriteAll,
-		toolOutputMode: ui.ToolOutputHidden,
-		hydrating:      cfg.ResumeID != "",
-		replayPending:  cfg.ResumeID != "",
+		cfg:             cfg,
+		theme:           th,
+		keys:            defaultKeyMap(),
+		input:           input,
+		spin:            spin,
+		sessionList:     newSessionList(),
+		sessionListDone: map[uint64]chan struct{}{},
+		pendingCalls:    map[string]int{},
+		clipboard:       clipboard.WriteAll,
+		toolOutputMode:  ui.ToolOutputHidden,
+		hydrating:       cfg.ResumeID != "",
+		replayPending:   cfg.ResumeID != "",
+		replayCtx:       replayCtx,
+		replayCancel:    replayCancel,
+		replayDone:      replayDone,
 		session: sessionState{
 			NextMode: cfg.InitialMode,
 			ResumeID: cfg.ResumeID,
@@ -437,34 +464,25 @@ func encodeHistoryEntry(text string) string {
 	return jsonlPrefix + string(j) + "\n"
 }
 
-// CancelRunning cancels any active cake subprocess. Safe to call when
-// nothing is running.
-func (m Model) CancelRunning() {
-	if m.run != nil {
-		m.run.Cancel()
+// CancelRunning cancels every active model-owned child and waits for it to be
+// reaped, up to childTeardownTimeout. It is safe to call when nothing is
+// running. The returned error names operations that did not finish within the
+// bound; main reports it because the Update loop that would normally surface a
+// failure is already gone.
+func (m Model) CancelRunning() error {
+	return m.cancelRunning(childTeardownTimeout)
+}
+
+// cancelReplay stops the startup replay whether it is still starting or already
+// running. Canceling before cake.Replay starts prevents a child from being
+// created after shutdown begins.
+func (m *Model) cancelReplay() {
+	if m.replayCancel != nil {
+		m.replayCancel()
+		m.replayCancel = nil
 	}
 	if m.replayRun != nil {
 		m.replayRun.Cancel()
-	}
-	m.cancelCompaction()
-	// A suggestion is read-only, but it is still a child the unobserved exit
-	// path must stop; no result may arrive after the program has returned. Wait
-	// for the child to be reaped because the Update loop that would normally
-	// process its result is already gone.
-	m.cancelSuggestion()
-	// A session listing can be in flight without the model ever seeing a key:
-	// the startup picker starts one before the first frame, and main calls this
-	// for an exit the Update loop never observed (SIGINT, SIGTERM, a recovered
-	// panic), which is exactly the path where quit() cannot cancel it. Cancel it
-	// before the suggestion wait so it is not held behind that child.
-	m.cancelSessionList()
-	if done := m.suggestionDone; done != nil {
-		timer := time.NewTimer(suggestionTeardownTimeout)
-		select {
-		case <-done:
-			timer.Stop()
-		case <-timer.C:
-		}
 	}
 }
 
@@ -508,7 +526,7 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, m.startupCmd)
 	}
 	if m.hydrating {
-		cmds = append(cmds, startReplayCmd(m.cfg))
+		cmds = append(cmds, startReplayCmd(m.cfg, m.replayCtx, m.replayDone))
 	}
 	return tea.Batch(cmds...)
 }

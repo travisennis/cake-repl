@@ -68,6 +68,11 @@ exit 0
 		t.Fatalf("Start: %v", err)
 	}
 	events, res := collect(t, run)
+	select {
+	case <-run.Done:
+	default:
+		t.Error("Done was not closed after the run was reaped")
+	}
 
 	if len(events) != 5 {
 		t.Fatalf("got %d events, want 5: %#v", len(events), events)
@@ -138,6 +143,55 @@ exit 2
 	}
 	if res.Canceled {
 		t.Error("run should not be marked canceled")
+	}
+}
+
+// TestRunDoneClosesAfterCancelWithFullEventBuffer covers the unobserved-exit
+// case: nobody consumes Events, so the runner fills the channel and would block
+// before Wait. Cancellation must drop further events, keep draining stdout, and
+// still reap the child so shutdown can wait on Done.
+func TestRunDoneClosesAfterCancelWithFullEventBuffer(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "emitted")
+	t.Setenv("MARKER_FILE", marker)
+	bin := writeFakeCake(t, `
+	i=0
+	while [ "$i" -lt 200 ]; do
+		echo '{"type":"message","role":"assistant","content":"x"}'
+		i=$((i+1))
+	done
+	: > "$MARKER_FILE"
+	while :; do sleep 0.05; done
+`)
+	run, err := Start(Options{Bin: bin, Prompt: "hi", waitDelay: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(run.Cancel)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake cake never filled the event buffer")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	run.Cancel()
+	select {
+	case <-run.Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run was not reaped after cancellation")
+	}
+
+	events, res := collectWithin(t, run, 5*time.Second)
+	if len(events) == 0 {
+		t.Error("expected the already-buffered events to remain readable")
+	}
+	if !res.Canceled {
+		t.Errorf("result = %+v, want Canceled", res)
 	}
 }
 

@@ -161,7 +161,10 @@ consumes cake events. This is the project's core external contract.
 - Add table cases to `parser_test.go` for new/changed event types and to
   `runner_test.go` (fake-cake shell scripts) for new subprocess behavior,
   including replay success and structured failure. `replay_test.go` covers
-  timeline hydration and continued prompt execution.
+  timeline hydration and continued prompt execution. Runner tests also cover
+  the reaping signal (`Run.Done`) and cancellation with a full `Events` buffer,
+  so unobserved-exit shutdown cannot block on event delivery. See
+  [ADR 034](../adr/034-bound-unobserved-exit-child-teardown.md).
 - For session listing, add fake-cake cases for a valid envelope, an empty
   `data.sessions`, malformed JSON, a non-zero exit, and an unknown
   `schema_version`; none may be fatal. Also cover cancellation, the bounded

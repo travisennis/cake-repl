@@ -811,8 +811,16 @@ func TestSessionsExitCancelsInFlightListing(t *testing.T) {
 // first frame. A listing whose helper is never stopped would outlive the REPL.
 func TestCancelRunningCancelsInFlightListing(t *testing.T) {
 	m, done := blockingListing(t, newLaidOutModel())
+	doneCh := m.sessionListDone[m.sessionListReq]
 
-	m.CancelRunning()
+	if err := m.CancelRunning(); err != nil {
+		t.Fatalf("CancelRunning: %v", err)
+	}
+	select {
+	case <-doneCh:
+	default:
+		t.Fatal("CancelRunning returned before the listing was reaped")
+	}
 
 	msg, ok := awaitListing(t, done).(sessionsLoadedMsg)
 	if !ok {

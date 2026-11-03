@@ -18,10 +18,6 @@ const (
 	// call made after every completed turn; a hung child must not keep a request
 	// identity or a child process alive for the life of the REPL.
 	suggestionTimeout = 60 * time.Second
-	// suggestionTeardownTimeout bounds how long an exit that never reaches the
-	// Update loop waits for a canceled suggester to be reaped. The suggester's
-	// own WaitDelay is three seconds; this leaves room for scheduling.
-	suggestionTeardownTimeout = 5 * time.Second
 	// maxSuggestionBytes bounds the ghost text placed in the composer. A prompt
 	// suggestion longer than this is not a useful one-line hint.
 	maxSuggestionBytes = 4 * 1024

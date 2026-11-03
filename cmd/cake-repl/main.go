@@ -415,9 +415,17 @@ func run() (err error) {
 	m, err := p.Run()
 	mod, ok := m.(app.Model)
 	if ok {
-		// CancelRunning is a no-op unless a run was still in flight, which is
-		// exactly the case for a quit that never reached the model.
-		mod.CancelRunning()
+		// CancelRunning is a no-op unless a child was still in flight, which is
+		// exactly the case for a quit that never reached the model. A child
+		// that misses its bounded teardown is reported here because the Update
+		// loop that would normally surface it is gone.
+		if shutdownErr := mod.CancelRunning(); shutdownErr != nil {
+			if err == nil {
+				err = shutdownErr
+			} else {
+				fmt.Fprintln(os.Stderr, "cake-repl: shutdown:", shutdownErr)
+			}
+		}
 		if *f.inline {
 			// Inline mode leaves the timeline on the terminal; drop the composer
 			// rows so the shell prompt is not preceded by a stale input box.
