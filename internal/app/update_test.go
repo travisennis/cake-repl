@@ -28,6 +28,19 @@ func lastItem(t *testing.T, m Model) ui.Item {
 	return m.items[len(m.items)-1]
 }
 
+// assertPendingToolAt checks that callID is pending and its stable tool block is
+// the one attached at idx.
+func assertPendingToolAt(t *testing.T, m Model, callID string, idx int) {
+	t.Helper()
+	tool, ok := m.pendingCalls[callID]
+	if !ok {
+		t.Fatalf("pendingCalls[%q] missing", callID)
+	}
+	if idx < 0 || idx >= len(m.items) || m.items[idx].Tool != tool {
+		t.Errorf("pendingCalls[%q] does not reference items[%d]", callID, idx)
+	}
+}
+
 // writeFakeCake writes an executable shell script standing in for the cake
 // binary and returns its path.
 func writeFakeCake(t *testing.T, script string) string {
@@ -1764,9 +1777,7 @@ func TestApplyEventReordersAssistantMessageBeforePendingTool(t *testing.T) {
 	if m.items[2].Kind != ui.KindTool {
 		t.Errorf("item[2].Kind = %v, want KindTool (should be after message)", m.items[2].Kind)
 	}
-	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 2 {
-		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 2", idx, ok)
-	}
+	assertPendingToolAt(t, m, "c-1", 2)
 	assertCacheMatchesFullRender(t, &m, "after message before pending tool")
 
 	// Step 3: tool output still correctly updates the tool at its new position
@@ -1816,12 +1827,21 @@ func TestApplyEventReordersAssistantBeforeMultiplePendingTools(t *testing.T) {
 	if m.items[2].Kind != ui.KindTool || m.items[3].Kind != ui.KindTool {
 		t.Errorf("items[2,3] should be tools, got kinds %v, %v", m.items[2].Kind, m.items[3].Kind)
 	}
-	// Both pending call indices should be updated
-	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 2 {
-		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 2", idx, ok)
+	// Both pending calls should still reference their tools at the shifted positions.
+	assertPendingToolAt(t, m, "c-1", 2)
+	assertPendingToolAt(t, m, "c-2", 3)
+
+	// Outputs arriving in reverse order must still land on the right blocks.
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-2", Output: "second"})
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "first"})
+	if got := m.items[2].Tool.Output; got != "first" {
+		t.Errorf("item[2] output = %q, want first", got)
 	}
-	if idx, ok := m.pendingCalls["c-2"]; !ok || idx != 3 {
-		t.Errorf("pendingCalls['c-2'] = %d (ok=%v), want 3", idx, ok)
+	if got := m.items[3].Tool.Output; got != "second" {
+		t.Errorf("item[3] output = %q, want second", got)
+	}
+	if len(m.pendingCalls) != 0 {
+		t.Errorf("pendingCalls not drained: %#v", m.pendingCalls)
 	}
 	assertCacheMatchesFullRender(t, &m, "after message before multiple pending tools")
 }
@@ -1843,15 +1863,13 @@ func TestApplyEventPreservesOrderWhenMessageBeforeTool(t *testing.T) {
 	if m.items[2].Kind != ui.KindTool {
 		t.Errorf("item[2].Kind = %v, want KindTool", m.items[2].Kind)
 	}
-	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 2 {
-		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 2", idx, ok)
-	}
+	assertPendingToolAt(t, m, "c-1", 2)
 	assertCacheMatchesFullRender(t, &m, "after correct-order events")
 }
 
 func TestInsertItemAtDoesNotPanicOnEmptyTimeline(t *testing.T) {
 	var m Model
-	m.pendingCalls = map[string]int{}
+	m.pendingCalls = map[string]*ui.ToolBlock{}
 	// insertItemAt on an empty model must not panic.
 	m.insertItemAt(0, ui.Item{Kind: ui.KindAssistant, Text: "hello"})
 	if len(m.items) != 1 || m.items[0].Text != "hello" {
@@ -1881,7 +1899,7 @@ func TestFirstPendingToolIdx(t *testing.T) {
 func TestInsertItemAtRespectsMaxTimelineItems(t *testing.T) {
 	// When MaxTimelineItems is set and the timeline is at its limit,
 	// inserting an assistant message before pending tools must not grow
-	// beyond the cap, and pendingCalls indices must remain valid.
+	// beyond the cap, and pending calls must stay attached to their tools.
 	m := newLaidOutModel()
 	m.cfg.MaxTimelineItems = 3
 
@@ -1918,10 +1936,8 @@ func TestInsertItemAtRespectsMaxTimelineItems(t *testing.T) {
 		t.Errorf("item[2].Kind = %v, want KindTool", m.items[2].Kind)
 	}
 
-	// Pending call index should still point to the tool at its new position.
-	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 2 {
-		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 2", idx, ok)
-	}
+	// Pending call should still reference the tool at its new position.
+	assertPendingToolAt(t, m, "c-1", 2)
 
 	// Tool output should still update correctly.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "files"})
@@ -1961,9 +1977,7 @@ func TestInsertItemAtCapPreservesInsertedMessage(t *testing.T) {
 	if _, ok := m.pendingCalls["c-1"]; ok {
 		t.Error("pendingCalls still contains trimmed-away call c-1")
 	}
-	if idx, ok := m.pendingCalls["c-2"]; !ok || idx != 1 {
-		t.Errorf("pendingCalls['c-2'] = %d (ok=%v), want 1", idx, ok)
-	}
+	assertPendingToolAt(t, m, "c-2", 1)
 
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-2", Output: "ok"})
 	if !m.items[1].Tool.Done || m.items[1].Tool.Output != "ok" {
@@ -1995,19 +2009,82 @@ func TestInsertItemAtTrimsPendingCallsInFrontRange(t *testing.T) {
 		t.Fatalf("after insert+trim: got %d items, want %d", len(m.items), m.cfg.MaxTimelineItems)
 	}
 
-	// c-1 should still be in pendingCalls and point to the tool.
-	if idx, ok := m.pendingCalls["c-1"]; !ok || idx != 1 {
-		t.Errorf("pendingCalls['c-1'] = %d (ok=%v), want 1", idx, ok)
-	}
+	// c-1 should still be in pendingCalls and reference the tool.
+	assertPendingToolAt(t, m, "c-1", 1)
 
 	assertCacheMatchesFullRender(t, &m, "after cap-enforced insert trims front")
 }
 
-func TestAppendItemUpdatesPendingCallsOnTrim(t *testing.T) {
-	// appendItem must adjust pendingCalls indices when MaxTimelineItems
-	// trimming shifts items left; otherwise a FunctionCallOutput resolves
-	// to the wrong index, writing output into a different pending tool's
-	// block.
+func TestRemoveItemAtDropsPendingCallAndLateOutputAppendsStandalone(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
+	if len(m.items) != 2 {
+		t.Fatalf("before remove: got %d items, want 2", len(m.items))
+	}
+	removed := m.items[1].Tool
+
+	m.removeItemAt(1)
+	if len(m.items) != 1 {
+		t.Fatalf("after remove: got %d items, want 1", len(m.items))
+	}
+	if _, ok := m.pendingCalls["c-1"]; ok {
+		t.Error("pendingCalls still contains the removed call")
+	}
+
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "late"})
+	last := lastItem(t, m)
+	if last.Kind != ui.KindTool || last.Tool == nil || last.Tool.Name != "(tool output)" || last.Tool.Output != "late" {
+		t.Errorf("late output = %+v, want standalone '(tool output)' block", last)
+	}
+	if removed.Done {
+		t.Error("removed tool block was mutated by late output")
+	}
+	assertCacheMatchesFullRender(t, &m, "after removing a pending tool and receiving late output")
+}
+
+func TestRemoveItemAtKeepsSurvivingPendingCallAttached(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
+	// items: [welcome, tool]
+	m.removeItemAt(0)
+	if len(m.items) != 1 {
+		t.Fatalf("after remove: got %d items, want 1", len(m.items))
+	}
+	assertPendingToolAt(t, m, "c-1", 0)
+
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "ok"})
+	if !m.items[0].Tool.Done || m.items[0].Tool.Output != "ok" {
+		t.Errorf("surviving tool after output: done=%v output=%q", m.items[0].Tool.Done, m.items[0].Tool.Output)
+	}
+	assertCacheMatchesFullRender(t, &m, "after removing an item before a pending tool")
+}
+
+func TestClearDropsPendingCallsAndLateOutputAppendsStandalone(t *testing.T) {
+	m := newLaidOutModel()
+	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
+	removed := m.items[1].Tool
+
+	tm, _ := m.execCommand(Command{Kind: CmdClear})
+	m = tm.(Model)
+	if len(m.items) != 0 || len(m.pendingCalls) != 0 {
+		t.Fatalf("after clear: items=%d pendingCalls=%d, want 0/0", len(m.items), len(m.pendingCalls))
+	}
+
+	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "late"})
+	last := lastItem(t, m)
+	if last.Kind != ui.KindTool || last.Tool == nil || last.Tool.Name != "(tool output)" || last.Tool.Output != "late" {
+		t.Errorf("late output = %+v, want standalone '(tool output)' block", last)
+	}
+	if removed.Done {
+		t.Error("cleared tool block was mutated by late output")
+	}
+	assertCacheMatchesFullRender(t, &m, "after clear and late output")
+}
+
+func TestAppendItemKeepsPendingCallsAttachedOnTrim(t *testing.T) {
+	// appendItem must keep pending calls attached when MaxTimelineItems
+	// trimming shifts items left; a stable block reference prevents a
+	// FunctionCallOutput from writing into a different pending tool's block.
 	m := newLaidOutModel()
 	m.cfg.MaxTimelineItems = 3
 
@@ -2020,13 +2097,9 @@ func TestAppendItemUpdatesPendingCallsOnTrim(t *testing.T) {
 	// After trim: [tool-A, tool-B, reasoning]
 	m.applyEvent(cake.Reasoning{})
 
-	// pendingCalls must reflect the left shift: A→0, B→1
-	if idx, ok := m.pendingCalls["A"]; !ok || idx != 0 {
-		t.Errorf("pendingCalls['A'] = %d (ok=%v), want 0", idx, ok)
-	}
-	if idx, ok := m.pendingCalls["B"]; !ok || idx != 1 {
-		t.Errorf("pendingCalls['B'] = %d (ok=%v), want 1", idx, ok)
-	}
+	// pendingCalls must still reference the surviving blocks after the trim.
+	assertPendingToolAt(t, m, "A", 0)
+	assertPendingToolAt(t, m, "B", 1)
 
 	// Output for A must go to tool A's block, not B's.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"})
@@ -2041,6 +2114,15 @@ func TestAppendItemUpdatesPendingCallsOnTrim(t *testing.T) {
 	// A's pending entry must be gone (consumed by output).
 	if _, ok := m.pendingCalls["A"]; ok {
 		t.Error("pendingCalls should not contain A after its output arrived")
+	}
+
+	// B's output must still land on B's block after the trim and A's output.
+	m.applyEvent(cake.FunctionCallOutput{CallID: "B", Output: "OUTPUT-B"})
+	if !m.items[1].Tool.Done || m.items[1].Tool.Output != "OUTPUT-B" {
+		t.Errorf("tool B after output: done=%v output=%q", m.items[1].Tool.Done, m.items[1].Tool.Output)
+	}
+	if len(m.pendingCalls) != 0 {
+		t.Errorf("pendingCalls not drained: %#v", m.pendingCalls)
 	}
 
 	assertCacheMatchesFullRender(t, &m, "after trim and tool A output")
@@ -2104,10 +2186,8 @@ func TestAppendItemRemovesPendingCallWhenToolTrimmedAway(t *testing.T) {
 	if _, ok := m.pendingCalls["A"]; ok {
 		t.Error("pendingCalls should not contain trimmed-away call A")
 	}
-	// B must be at the new correct index.
-	if idx, ok := m.pendingCalls["B"]; !ok || idx != 0 {
-		t.Errorf("pendingCalls['B'] = %d (ok=%v), want 0", idx, ok)
-	}
+	// B must still reference the tool at its new position.
+	assertPendingToolAt(t, m, "B", 0)
 
 	// Late output for A must append a standalone block. The append may
 	// trigger another front-trim that removes B's item, which is expected.
@@ -2161,7 +2241,7 @@ func TestPreReadyTrimDoesNotPanic(t *testing.T) {
 }
 
 func TestPreReadyTrimWithPendingCalls(t *testing.T) {
-	// Same scenario as above but with a mix of tool items whose call_ids
+	// Like the pre-ready trim above, but with pending tool calls whose blocks
 	// must survive the trim.
 	m := New(Config{MaxTimelineItems: 3})
 	// items: [welcome] → send events before layout
@@ -2175,13 +2255,9 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 		m = tm.(Model)
 	}
 
-	// pendingCalls must reflect the left shift.
-	if idx, ok := m.pendingCalls["A"]; !ok || idx != 0 {
-		t.Errorf("pendingCalls['A'] = %d (ok=%v), want 0", idx, ok)
-	}
-	if idx, ok := m.pendingCalls["B"]; !ok || idx != 1 {
-		t.Errorf("pendingCalls['B'] = %d (ok=%v), want 1", idx, ok)
-	}
+	// pendingCalls must still reference the surviving blocks after the trim.
+	assertPendingToolAt(t, m, "A", 0)
+	assertPendingToolAt(t, m, "B", 1)
 
 	// Late output for A must find the right item.
 	tm2, _ := m.Update(eventsMsg{evs: []cake.Event{cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"}}})

@@ -133,6 +133,11 @@ Dependency direction is one-way: `app` depends on `cake`, `compact`,
   strings out. The timeline is rendered through a per-item cache; width changes
   and `/clear` trigger a full re-render, while global tool-output mode changes
   re-render only tool items.
+- **Pending tool calls hold stable blocks.** `pendingCalls` maps a cake call id
+  to the `*ui.ToolBlock`, not a timeline index. Trimming, insertion, removal,
+  and cap eviction move the item slice; they cannot retarget a late function
+  output. A call whose block leaves the timeline is dropped, so its late output
+  appends a standalone block.
 - **Sanitize at the render boundary.** `ui.RenderItem` and `ui.StatusLine`
   strip terminal control sequences from stream content before styling it, so
   no timeline item kind can write escapes to the terminal and width math stays

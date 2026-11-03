@@ -217,7 +217,7 @@ type Model struct {
 
 	session      sessionState
 	history      promptHistory
-	pendingCalls map[string]int // call_id -> index into items
+	pendingCalls map[string]*ui.ToolBlock // call_id -> pending tool block
 	items        []ui.Item
 	// toolOutputMode applies to every tool block in the timeline and to tool
 	// blocks appended later in this REPL session. It starts hidden so a session
@@ -319,7 +319,7 @@ func New(cfg Config) Model {
 		spin:            spin,
 		sessionList:     newSessionList(),
 		sessionListDone: map[uint64]chan struct{}{},
-		pendingCalls:    map[string]int{},
+		pendingCalls:    map[string]*ui.ToolBlock{},
 		clipboard:       clipboard.WriteAll,
 		toolOutputMode:  ui.ToolOutputHidden,
 		hydrating:       cfg.ResumeID != "",
@@ -568,8 +568,9 @@ func IdleTitleSequence(cwd string) string {
 	return ansi.SetWindowTitle(windowTitle(cwd, false, false))
 }
 
-// trimFront removes the first `over` items from the timeline, adjusts
-// pendingCalls indices, and drops entries for trimmed-away pending calls. The
+// trimFront removes the first `over` items from the timeline and drops pending
+// calls whose tool block was trimmed away. Surviving pending calls need no
+// adjustment because they reference the block, not a slice position. The
 // survivors are copied into a fresh slice so the trimmed items' payloads
 // (tool outputs, assistant text) are released: reslicing would keep them
 // reachable through the old backing array, so -max-timeline-items would bound
@@ -578,19 +579,13 @@ func (m *Model) trimFront(over int) {
 	kept := make([]ui.Item, len(m.items)-over)
 	copy(kept, m.items[over:])
 	m.items = kept
-	for callID, callIdx := range m.pendingCalls {
-		if callIdx < over {
-			delete(m.pendingCalls, callID)
-		} else {
-			m.pendingCalls[callID] = callIdx - over
-		}
-	}
+	m.dropDetachedPendingCalls()
 }
 
-// appendItem adds a timeline item, renders it into the cache, and returns
-// its index. It marks the viewport payload dirty; the Update that applied the
-// event syncs it once via syncViewport.
-func (m *Model) appendItem(it ui.Item) int {
+// appendItem adds a timeline item and renders it into the cache. It marks the
+// viewport payload dirty; the Update that applied the event syncs it once via
+// syncViewport.
+func (m *Model) appendItem(it ui.Item) {
 	m.items = append(m.items, it)
 	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
 		over := len(m.items) - m.cfg.MaxTimelineItems
@@ -609,7 +604,6 @@ func (m *Model) appendItem(it ui.Item) int {
 	if m.ready {
 		m.appendTimelineContent(ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode))
 	}
-	return len(m.items) - 1
 }
 
 // firstPendingToolIdx returns the index of the first pending (not yet done)
@@ -650,8 +644,9 @@ func (m *Model) lastItemIsReasoning() bool {
 	return len(m.items) > 0 && m.items[len(m.items)-1].Kind == ui.KindReasoning
 }
 
-// removeItemAt removes one item and its cached rendering, adjusting pending
-// call indices the same way trimFront and insertItemAt do. It resolves the live
+// removeItemAt removes one item and its cached rendering. A pending call whose
+// tool block was removed is dropped; surviving calls need no adjustment because
+// they reference the block, not a slice position. It resolves the live
 // compaction start notice once its outcome is known. The surviving slices are
 // copied so the removed item and its rendered string are not kept reachable
 // through the old backing arrays.
@@ -663,15 +658,7 @@ func (m *Model) removeItemAt(idx int) {
 	copy(kept, m.items[:idx])
 	copy(kept[idx:], m.items[idx+1:])
 	m.items = kept
-
-	for callID, callIdx := range m.pendingCalls {
-		switch {
-		case callIdx == idx:
-			delete(m.pendingCalls, callID)
-		case callIdx > idx:
-			m.pendingCalls[callID] = callIdx - 1
-		}
-	}
+	m.dropDetachedPendingCalls()
 
 	if !m.ready {
 		return
@@ -690,9 +677,9 @@ func (m *Model) removeItemAt(idx int) {
 }
 
 // insertItemAt inserts an item at the given index, shifting subsequent items
-// to the right, and updates the render cache and pending call indices. When the
-// timeline is at MaxTimelineItems, the oldest items are trimmed first and idx is
-// clamped into the surviving slice, so the inserted item is never trimmed.
+// to the right, and updates the render cache. When the timeline is at
+// MaxTimelineItems, the oldest items are trimmed first and idx is clamped into
+// the surviving slice, so the inserted item is never trimmed.
 func (m *Model) insertItemAt(idx int, it ui.Item) {
 	// Trim before inserting. Trimming after the shift would remove the newly
 	// inserted item when idx is 0 and the timeline is already at the cap.
@@ -710,13 +697,6 @@ func (m *Model) insertItemAt(idx int, it ui.Item) {
 	copy(m.items[idx+1:], m.items[idx:])
 	m.items[idx] = it
 
-	// Adjust pendingCalls indices for the insertion shift.
-	for callID, callIdx := range m.pendingCalls {
-		if callIdx >= idx {
-			m.pendingCalls[callID] = callIdx + 1
-		}
-	}
-
 	if m.ready {
 		if trimmed > 0 {
 			// Drop the render cache before rebuilding: rebuild reslices to
@@ -730,6 +710,56 @@ func (m *Model) insertItemAt(idx int, it ui.Item) {
 			copy(m.rendered[idx+1:], m.rendered[idx:])
 			m.rendered[idx] = rendered
 			m.timelineDirty = true
+		}
+	}
+}
+
+// toolIndex returns the timeline index of tool, or -1 when the block is no
+// longer attached. A pending call holds the block itself, so trimming,
+// insertion, removal, and cap eviction cannot retarget it.
+func (m *Model) toolIndex(tool *ui.ToolBlock) int {
+	if tool == nil {
+		return -1
+	}
+	for i := range m.items {
+		if m.items[i].Tool == tool {
+			return i
+		}
+	}
+	return -1
+}
+
+// pendingTool resolves callID to its attached tool block and index. A call
+// whose block has left the timeline is dropped; ok is false so late output
+// appends a standalone block instead of mutating detached data.
+func (m *Model) pendingTool(callID string) (tool *ui.ToolBlock, idx int, ok bool) {
+	tool, ok = m.pendingCalls[callID]
+	if !ok {
+		return nil, -1, false
+	}
+	if idx = m.toolIndex(tool); idx >= 0 {
+		return tool, idx, true
+	}
+	delete(m.pendingCalls, callID)
+	return nil, -1, false
+}
+
+// dropDetachedPendingCalls removes pending entries whose tool block is no
+// longer in the timeline. It keeps a trim or removal from pinning detached
+// tool payloads; surviving entries keep their identity.
+func (m *Model) dropDetachedPendingCalls() {
+	if len(m.pendingCalls) == 0 {
+		return
+	}
+	attached := make(map[*ui.ToolBlock]struct{}, len(m.items))
+	for i := range m.items {
+		if tool := m.items[i].Tool; tool != nil {
+			attached[tool] = struct{}{}
+		}
+	}
+	for callID, tool := range m.pendingCalls {
+		if _, ok := attached[tool]; !ok {
+			delete(m.pendingCalls, callID)
 		}
 	}
 }

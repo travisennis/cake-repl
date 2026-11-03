@@ -258,15 +258,15 @@ func BenchmarkTimelineAppendEndToEnd(b *testing.B) {
 // re-render of that item, and a single viewport sync.
 func BenchmarkTimelineToolOutputEndToEnd(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, _ benchWorkload, _ int) {
-		idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
+		tool := &ui.ToolBlock{
 			Name:      "bash",
 			Arguments: `{"command":"go test ./internal/app/"}`,
-		}})
-		tool := m.items[idx].Tool
+		}
+		m.appendItem(ui.Item{Kind: ui.KindTool, Tool: tool})
 		b.ResetTimer()
 		for range b.N {
 			tool.Output, tool.Done = "", false
-			m.pendingCalls[benchCallID] = idx
+			m.pendingCalls[benchCallID] = tool
 			m.applyEvent(cake.FunctionCallOutput{CallID: benchCallID, Output: benchToolOutput})
 			m.syncViewport()
 		}
@@ -393,11 +393,12 @@ func BenchmarkTimelineRetainedMemory(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			m := newBenchModel(benchWorkloads[1], 200)
 			if output != "" {
-				idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
+				tool := &ui.ToolBlock{
 					Name:      "bash",
 					Arguments: `{"command":"cat huge.bin"}`,
-				}})
-				m.pendingCalls["c-huge"] = idx
+				}
+				m.appendItem(ui.Item{Kind: ui.KindTool, Tool: tool})
+				m.pendingCalls["c-huge"] = tool
 				m.applyEvent(cake.FunctionCallOutput{CallID: "c-huge", Output: output})
 				m.syncViewport()
 			}

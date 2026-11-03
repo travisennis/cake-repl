@@ -613,7 +613,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.sawComplete = false
 	m.replayWarn = false
 	m.items = nil
-	m.pendingCalls = map[string]int{}
+	m.pendingCalls = map[string]*ui.ToolBlock{}
 	m.rebuildTimeline()
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "New session"})
 	return m, nil
@@ -857,9 +857,10 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 
 	case CmdClear:
 		m.items = nil
-		// Indices in pendingCalls point into items; they are invalid now.
-		// Late outputs will be appended as standalone blocks instead.
-		m.pendingCalls = map[string]int{}
+		// Pending calls reference tool blocks directly; clear the map so a
+		// late output appends a standalone block instead of mutating one that
+		// is no longer on the timeline.
+		m.pendingCalls = map[string]*ui.ToolBlock{}
 		m.rebuildTimeline()
 	}
 	return m, nil
@@ -1027,16 +1028,17 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		}
 
 	case cake.FunctionCall:
-		idx := m.appendItem(ui.Item{Kind: ui.KindTool, Tool: &ui.ToolBlock{
+		tool := &ui.ToolBlock{
 			Name:      e.Name,
 			Arguments: e.Arguments,
-		}})
-		m.pendingCalls[e.CallID] = idx
+		}
+		m.appendItem(ui.Item{Kind: ui.KindTool, Tool: tool})
+		m.pendingCalls[e.CallID] = tool
 
 	case cake.FunctionCallOutput:
-		if idx, ok := m.pendingCalls[e.CallID]; ok && idx < len(m.items) && m.items[idx].Tool != nil {
-			m.items[idx].Tool.Output = capRetainedToolOutput(e.Output)
-			m.items[idx].Tool.Done = true
+		if tool, idx, ok := m.pendingTool(e.CallID); ok {
+			tool.Output = capRetainedToolOutput(e.Output)
+			tool.Done = true
 			delete(m.pendingCalls, e.CallID)
 			m.rerenderItem(idx)
 		} else {
@@ -1162,10 +1164,11 @@ func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
 // ended. Live runs and startup replay both reach this state: a task ends
 // mid-call, or a replay transcript ends at a partial tail.
 func (m *Model) finishPendingTools() {
-	for callID, idx := range m.pendingCalls {
-		if idx < len(m.items) && m.items[idx].Tool != nil {
-			m.items[idx].Tool.Done = true
-			m.items[idx].Tool.Output = "(no output — task ended)"
+	for callID := range m.pendingCalls {
+		tool, idx, ok := m.pendingTool(callID)
+		if ok {
+			tool.Done = true
+			tool.Output = "(no output — task ended)"
 			m.rerenderItem(idx)
 		}
 		delete(m.pendingCalls, callID)
