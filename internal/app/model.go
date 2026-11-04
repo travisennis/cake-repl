@@ -155,8 +155,14 @@ type Model struct {
 	noticeSeq uint64
 	spin      spinner.Model
 
-	running       bool
-	run           *cake.Run
+	// runOp owns the live run's phase, request identity, cancellation, and
+	// reaping channel. run is the subprocess handle while the run is active or
+	// draining. runSeq allocates the per-run request identity. A run remains a
+	// resource gate until its result is settled, even while it drains.
+	runOp  pendingOperation
+	run    *cake.Run
+	runSeq uint64
+
 	hydrating     bool
 	replayPending bool
 	replayRun     *cake.Run
@@ -167,8 +173,17 @@ type Model struct {
 	replayCancel context.CancelFunc
 	replayDone   chan struct{}
 	replayWarn   bool
-	sawComplete  bool
-	exitAfter    bool
+
+	// sawComplete and runOutcome describe the last run's result, not a lifecycle
+	// phase. runGeneration scopes that result so a later session boundary can
+	// invalidate it. completedTurn is the single answer post-turn operations use.
+	sawComplete   bool
+	runOutcome    outcome
+	runGeneration sessionGeneration
+
+	// exitPhase is idle or draining. Every quit path enters draining, cancels
+	// every child, and returns tea.Quit only after all of them are reaped.
+	exitPhase phase
 	// compaction is the pending between-turn compactor. It owns the request
 	// identity, cancellation, and reaping channel. A caller decides how its
 	// active and draining phases gate input; compaction blocks prompt submission
@@ -190,12 +205,6 @@ type Model struct {
 	// canceled or superseded run cannot touch the status line or context of a
 	// later one.
 	compactionSeq uint64
-	// newSessionPending is true while an old run canceled by Ctrl+N is being
-	// drained. Its remaining events and cancellation result belong before the
-	// new-session boundary and must not affect the fresh state. It also covers
-	// a canceled compaction being drained after Ctrl+N.
-	newSessionPending bool
-
 	// Suggestion state (ADR 028). At most one read-only suggestion request is in
 	// flight; suggestionSeq allocates a request identity that never repeats, and
 	// suggestion owns the identity whose result may still be applied. A draft, a
@@ -314,10 +323,7 @@ func New(cfg Config) Model {
 		replayCtx:       replayCtx,
 		replayCancel:    replayCancel,
 		replayDone:      replayDone,
-		session: sessionState{
-			NextMode: cfg.InitialMode,
-			ResumeID: cfg.ResumeID,
-		},
+		session:         newSessionState(cfg.InitialMode, cfg.ResumeID),
 	}
 	m.trackChild("replay", replayCancel, replayDone)
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "cake-repl — /help for commands"})
@@ -485,6 +491,12 @@ func (m *Model) cancelCompaction() {
 	m.compaction.cancel()
 }
 
+// cancelRun stops an in-flight run and keeps its request key so the reaped
+// result still settles the phase. While idle this is a no-op.
+func (m *Model) cancelRun() {
+	m.runOp.cancel()
+}
+
 // SessionData returns the id of the session the REPL is continuing and the
 // working directory, for display (the exit banner and /session copy). The
 // reported id wins when an invocation has announced one; otherwise the pending
@@ -547,7 +559,7 @@ func windowTitle(cwd string, running, compacting bool) string {
 // (a run starting or ending, a compaction starting or ending) so the title never
 // describes a state the REPL has left.
 func (m Model) titleCmd() tea.Cmd {
-	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.running, m.compactionBusy()))
+	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.runBusy(), m.compactionBusy()))
 }
 
 // IdleTitleSequence returns the escape sequence that restores the idle terminal

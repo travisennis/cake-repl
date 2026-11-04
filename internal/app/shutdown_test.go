@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/travisennis/cake-repl/internal/cake"
 	"github.com/travisennis/cake-repl/internal/childproc"
 )
@@ -61,13 +60,13 @@ while :; do sleep 0.05; done
 
 	m := compactionModel(t, bin)
 	m.cfg.Children = childproc.NewRegistry()
-	m, cmd := m.startCompaction()
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
 	done := m.compaction.doneChannel()
 	if cmd == nil || done == nil {
-		t.Fatal("startCompaction did not leave a bounded child")
+		t.Fatal("finishRun did not leave a bounded compactor child")
 	}
-	result := make(chan tea.Msg, 1)
-	go func() { result <- cmd() }()
+	result := runCompactionCmd(cmd)
 	waitForFile(t, started)
 
 	if err := m.CancelRunning(); err != nil {
@@ -78,8 +77,8 @@ while :; do sleep 0.05; done
 	default:
 		t.Fatal("CancelRunning returned before the compactor was reaped")
 	}
-	if msg := <-result; msg == nil {
-		t.Fatal("compactor command returned nil")
+	if msg := waitForCompaction(t, result); msg.req == 0 {
+		t.Fatal("compactor command returned an empty result")
 	}
 }
 

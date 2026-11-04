@@ -69,15 +69,18 @@ commands or help text (`internal/app/commands.go`), key bindings
   Session-specific values must stay out of config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
   `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
-  stable. `/new`, `/resume`, and `/sessions` require an idle REPL (no live run,
-  replay, or compaction); `Ctrl+N` remains the cancel-and-reset operation during
-  an active run or compaction, and `/exit` cancels either before exiting.
+  stable. `/new`, `/resume`, and `/sessions` require an idle REPL (no live or
+  draining run, replay, or compaction); `Ctrl+N` remains the cancel-and-reset
+  operation during an active run or compaction, and `/exit` cancels either
+  before exiting. A canceled child still gates prompt submission and session
+  retargeting until it has been reaped.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit; when the input is
   empty, submit the shown suggestion), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden, starting from hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll). `Ctrl+C` cancels a running task or compaction and quits only when
-  idle; `Ctrl+N` cancels either and starts a new session. While the `/sessions` browser is open its keys are modal:
+  idle; `Ctrl+N` cancels either and starts a new session. A canceled run remains
+  resource-busy until its result is settled. While the `/sessions` browser is open its keys are modal:
   `Up`/`Down`, `PgUp`/`PgDn`, and `Home`/`End` move the selection, `Enter`
   resumes the highlighted session, and `Esc`, `q`, or `Ctrl+C` close it.
 - **Session browser.** `/sessions` opens an idle-only overlay that replaces the

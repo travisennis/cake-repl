@@ -32,14 +32,6 @@ type suggestionDoneMsg struct {
 	res       suggest.Result
 }
 
-// suggestionTurnEligible reports whether a finished run is a completed turn
-// that may carry a suggestion. Cancellations and failures keep the previous
-// composer state; the next completed turn re-evaluates. A completion record
-// marked is_error is a task failure and is rejected by canSuggest.
-func (m Model) suggestionTurnEligible(res cake.Result) bool {
-	return !res.Canceled && res.Err == nil && res.ExitCode == 0 && m.sawComplete
-}
-
 // canSuggest reports whether the REPL may start a suggestion request now. It is
 // deliberately stricter than "a turn just ended": the request starts only with
 // an empty composer, an idle program, and a pinned session that has a completed
@@ -54,15 +46,14 @@ func (m Model) canSuggest() bool {
 	if !m.cfg.Suggestions.Enabled || m.cfg.NoSession {
 		return false
 	}
-	if m.running || m.hydrating || m.replayPending || m.replayRun != nil ||
-		m.browserOpen || m.exitAfter || m.newSessionPending {
+	if m.runBusy() || m.replayBusy() || m.browserOpen || m.exiting() {
 		return false
 	}
 	if m.suggestion.active() || m.suggestion.draining() || m.suggestionText != "" ||
 		m.pendingSuggestion != "" || m.input.Value() != "" {
 		return false
 	}
-	if m.session.LastComplete == nil || m.session.LastComplete.IsError {
+	if !m.completedTurn() {
 		return false
 	}
 	mode, sessionID := m.session.RunOptions()

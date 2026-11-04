@@ -51,7 +51,9 @@ deferred; 144 stays independent.
 - [x] (2026-11-04T20:00Z) 147: extracted `pendingOperation`
   (`internal/app/lifecycle.go`), adopted it for compaction and suggestion, and
   test-covered the caller gate policy for compaction, listing, and suggestion.
-- [ ] 138: type run and exit, add the generation boundary and the shared gates.
+- [x] (2026-11-04T20:29Z) 138: typed the run phase and shared admission gate,
+  added the session generation boundary and `completedTurn`, and covered the
+  Ctrl+N and Ctrl+C drains, stale results, and run/compaction mutual exclusion.
 - [x] (2026-11-04T20:10Z) 140: tracked the compaction start notice by a
   stable timeline identity instead of a text prefix; covered duplicate results
   as no-ops and prompt, `/new`, `/resume`, and `/sessions` refusal through a

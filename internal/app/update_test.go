@@ -90,7 +90,10 @@ printf '%s\n' "$@" >> "$ARGS_FILE"
 
 	tm, _ := m.startRun("first")
 	m = tm.(Model)
+	firstKey := m.runOp.key
 	drainRun(t, m.run)
+	tm, _ = m.finishRunKey(firstKey, cake.Result{ExitCode: 0})
+	m = tm.(Model)
 	if m.cfg.Fork {
 		t.Fatal("fork remained enabled after the first run")
 	}
@@ -913,30 +916,25 @@ func TestStatusLineAfterRetargetDropsPreviousSession(t *testing.T) {
 // partial record does not replace a complete one.
 func TestLiveTurnUsageUpdatesStatusContext(t *testing.T) {
 	m := laidOut(160, 24)
-	m.running = true
-	m.run = &cake.Run{} // re-issued waitForRun is never executed here.
+	beginTestRun(&m)
 
-	tm, _ := m.Update(eventsMsg{evs: []cake.Event{
-		cake.TurnUsage{
-			Turn:          1,
-			Usage:         cake.Usage{InputTokens: 14_383},
-			UsagePresence: "complete",
-			ContextWindow: 1_000_000,
-		},
-	}})
+	tm, _ := m.Update(eventBatch(m, cake.TurnUsage{
+		Turn:          1,
+		Usage:         cake.Usage{InputTokens: 14_383},
+		UsagePresence: "complete",
+		ContextWindow: 1_000_000,
+	}))
 	m = tm.(Model)
 	if line := m.statusLine(); !strings.Contains(line, "context: 14k/1M") {
 		t.Fatalf("status line missing live context: %q", line)
 	}
 
-	tm, _ = m.Update(eventsMsg{evs: []cake.Event{
-		cake.TurnUsage{
-			Turn:          2,
-			Usage:         cake.Usage{InputTokens: 99_999},
-			UsagePresence: "partial",
-			ContextWindow: 1_000_000,
-		},
-	}})
+	tm, _ = m.Update(eventBatch(m, cake.TurnUsage{
+		Turn:          2,
+		Usage:         cake.Usage{InputTokens: 99_999},
+		UsagePresence: "partial",
+		ContextWindow: 1_000_000,
+	}))
 	m = tm.(Model)
 	if line := m.statusLine(); !strings.Contains(line, "context: 14k/1M") {
 		t.Errorf("partial record replaced the live measurement: %q", line)
@@ -1045,8 +1043,7 @@ func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.
 
 func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
-	m.run = &cake.Run{} // Cancel on a zero Run is a safe no-op.
+	oldKey := beginTestRun(&m)
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "old-session", TaskID: "old-task"})
 
 	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
@@ -1054,29 +1051,35 @@ func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("cmd = %v, want nil", cmd)
 	}
-	if !m.newSessionPending {
-		t.Fatal("old run was not marked for draining")
+	if !m.runOp.draining() {
+		t.Fatal("old run was not put into its drain phase")
+	}
+	if m.session.Generation() == oldKey.generation {
+		t.Fatal("ctrl+n did not advance the session generation")
 	}
 
 	// A final old-run event can race with cancellation. Update must drain it
 	// without adding it to the fresh timeline.
-	tm, _ = m.Update(eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "late old output"}}})
+	tm, _ = m.Update(eventsMsg{key: oldKey, evs: []cake.Event{cake.Message{Role: "assistant", Content: "late old output"}}})
 	m = tm.(Model)
 	if len(m.timeline.items) != 1 || m.timeline.items[0].Text != "New session" {
 		t.Fatalf("late event crossed boundary: %#v", m.timeline.items)
 	}
 
-	tm, cmd = m.finishRun(cake.Result{Canceled: true})
+	tm, cmd = m.finishRunKey(oldKey, cake.Result{Canceled: true})
 	m = tm.(Model)
 	requireTitle(t, cmd, "cake-repl: ")
-	if m.running || m.newSessionPending {
-		t.Errorf("run state not settled: running=%v pending=%v", m.running, m.newSessionPending)
+	if m.runBusy() {
+		t.Error("run state not settled")
 	}
 	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
 		t.Errorf("old cancellation re-pinned session: mode=%v id=%q", mode, id)
 	}
 	if len(m.timeline.items) != 1 || m.timeline.items[0].Text != "New session" {
 		t.Errorf("cancel result crossed boundary: %#v", m.timeline.items)
+	}
+	if m.completedTurn() {
+		t.Error("stale cancellation left a completed turn behind")
 	}
 }
 
@@ -1088,7 +1091,7 @@ func TestWaitForRunBatchesQueuedEvents(t *testing.T) {
 	}
 	run := &cake.Run{Events: events, Result: result}
 
-	msg := waitForRun(run)()
+	msg := waitForRun(run, operationKey{request: 1})()
 	got, ok := msg.(eventsMsg)
 	if !ok {
 		t.Fatalf("waitForRun message type = %T, want eventsMsg", msg)
@@ -1112,7 +1115,7 @@ func TestWaitForRunRespectsBatchBound(t *testing.T) {
 	}
 	run := &cake.Run{Events: events, Result: result}
 
-	msg := waitForRun(run)()
+	msg := waitForRun(run, operationKey{request: 1})()
 	got, ok := msg.(eventsMsg)
 	if !ok {
 		t.Fatalf("waitForRun message type = %T, want eventsMsg", msg)
@@ -1129,7 +1132,7 @@ func TestWaitForRunClosedChannelReturnsRunDone(t *testing.T) {
 	result <- cake.Result{ExitCode: 0}
 	run := &cake.Run{Events: events, Result: result}
 
-	msg := waitForRun(run)()
+	msg := waitForRun(run, operationKey{request: 1})()
 	if _, ok := msg.(runDoneMsg); !ok {
 		t.Fatalf("waitForRun message type = %T, want runDoneMsg", msg)
 	}
@@ -1148,7 +1151,7 @@ func TestWaitForRunCloseMidDrainReturnsPartialBatchThenRunDone(t *testing.T) {
 	// The stream closes after some events are already queued: waitForRun
 	// returns the drained partial batch, and the next waitForRun delivers
 	// the run's final result.
-	msg := waitForRun(run)()
+	msg := waitForRun(run, operationKey{request: 1})()
 	got, ok := msg.(eventsMsg)
 	if !ok {
 		t.Fatalf("first waitForRun message type = %T, want eventsMsg", msg)
@@ -1157,7 +1160,7 @@ func TestWaitForRunCloseMidDrainReturnsPartialBatchThenRunDone(t *testing.T) {
 		t.Fatalf("partial batch size = %d, want 3", len(got.evs))
 	}
 
-	msg = waitForRun(run)()
+	msg = waitForRun(run, operationKey{request: 1})()
 	if _, ok := msg.(runDoneMsg); !ok {
 		t.Fatalf("second waitForRun message type = %T, want runDoneMsg", msg)
 	}
@@ -1165,15 +1168,14 @@ func TestWaitForRunCloseMidDrainReturnsPartialBatchThenRunDone(t *testing.T) {
 
 func TestEventBatchAppliesAllEventsWithSingleSync(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
-	m.run = &cake.Run{} // re-issued waitForRun is never executed here.
+	beginTestRun(&m)
 
 	before := len(m.timeline.items)
 	evs := make([]cake.Event, 0, 5)
 	for i := range 5 {
 		evs = append(evs, cake.Message{Role: "assistant", Content: fmt.Sprintf("msg %d", i)})
 	}
-	tm, cmd := m.Update(eventsMsg{evs: evs})
+	tm, cmd := m.Update(eventBatch(m, evs...))
 	got := tm.(Model)
 
 	if cmd == nil {
@@ -1237,7 +1239,7 @@ func TestSubmitReportsCommandParseError(t *testing.T) {
 
 func TestSubmitWhileRunningWarnsAndKeepsInput(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 	m.input.SetValue("second prompt")
 	tm, cmd := m.submit()
 	got := tm.(Model)
@@ -1260,7 +1262,7 @@ func TestSubmitStartFailureLandsOnTimeline(t *testing.T) {
 	m.input.SetValue("hello")
 	tm, cmd := m.submit()
 	got := tm.(Model)
-	if got.running {
+	if got.runBusy() {
 		t.Error("failed start left the model running")
 	}
 	it := lastItem(t, got)
@@ -1281,11 +1283,11 @@ func TestSubmitStartsRun(t *testing.T) {
 	m.cfg.CakeBin = writeFakeCake(t, "exit 0\n")
 	cwd := t.TempDir()
 	m.cfg.Cwd = cwd
-	m.sawComplete = true // stale value from a previous run must reset
+	markCompletedTurn(&m) // stale value from a previous run must reset
 	m.input.SetValue("do the thing")
 	tm, cmd := m.submit()
 	got := tm.(Model)
-	if !got.running || got.run == nil {
+	if !got.runBusy() || got.run == nil {
 		t.Fatal("submit did not start a run")
 	}
 	t.Cleanup(func() { drainRun(t, got.run) })
@@ -1296,8 +1298,8 @@ func TestSubmitStartsRun(t *testing.T) {
 	if got.input.Value() != "" {
 		t.Error("input not reset after starting a run")
 	}
-	if got.sawComplete {
-		t.Error("sawComplete not reset at run start")
+	if got.sawComplete || got.completedTurn() {
+		t.Error("completed-turn state not reset at run start")
 	}
 	if cmd == nil {
 		t.Error("expected spinner tick and run wait commands")
@@ -1418,12 +1420,11 @@ func TestExecCommandExitQuitsWhenIdle(t *testing.T) {
 
 func TestExecCommandExitWhileRunningCancelsFirst(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
-	m.run = &cake.Run{} // Cancel on a zero Run is a safe no-op
+	beginTestRun(&m)
 	tm, cmd := m.execCommand(Command{Kind: CmdExit})
 	got := tm.(Model)
-	if !got.exitAfter {
-		t.Error("exitAfter not set")
+	if !got.exiting() {
+		t.Error("exit phase not set")
 	}
 	if cmd != nil {
 		t.Errorf("cmd = %v, want nil — quitting happens in finishRun", cmd)
@@ -1436,7 +1437,7 @@ func TestExecCommandExitWhileRunningCancelsFirst(t *testing.T) {
 
 func TestFinishRunCanceledPinsToStartedSession(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
 	tm, cmd := m.finishRun(cake.Result{Canceled: true})
 	m = tm.(Model)
@@ -1453,7 +1454,7 @@ func TestFinishRunCanceledPinsToStartedSession(t *testing.T) {
 
 func TestFinishRunCanceledBeforeTaskStartDoesNotInventSession(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 	tm, cmd := m.finishRun(cake.Result{Canceled: true})
 	m = tm.(Model)
 	requireTitle(t, cmd, "cake-repl: ")
@@ -1465,7 +1466,7 @@ func TestFinishRunCanceledBeforeTaskStartDoesNotInventSession(t *testing.T) {
 
 func TestFinishRunNonzeroExitPinsAnnouncedSession(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 7, Stderr: "boom"})
 	m = tm.(Model)
@@ -1481,7 +1482,7 @@ func TestFinishRunNonzeroExitPinsAnnouncedSession(t *testing.T) {
 
 func TestFinishRunWaitErrorPinsAnnouncedSession(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
 	tm, cmd := m.finishRun(cake.Result{Err: errors.New("wait failed")})
 	m = tm.(Model)
@@ -1497,7 +1498,7 @@ func TestFinishRunWaitErrorPinsAnnouncedSession(t *testing.T) {
 
 func TestFinishRunIncompleteCleanExitPinsAnnouncedSession(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "d8fceb36", TaskID: "t-1"})
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = tm.(Model)
@@ -1513,7 +1514,7 @@ func TestFinishRunIncompleteCleanExitPinsAnnouncedSession(t *testing.T) {
 
 func TestFinishRunWithoutAnnouncedSessionLeavesModeUnchanged(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 	tm, _ := m.finishRun(cake.Result{ExitCode: 1})
 	m = tm.(Model)
 	if mode, resumeID := m.session.RunOptions(); mode != cake.RunFresh || resumeID != "" {
@@ -1526,7 +1527,7 @@ func TestFinishRunWithoutAnnouncedSessionLeavesModeUnchanged(t *testing.T) {
 func TestFinishRunAfterRetargetKeepsNewTarget(t *testing.T) {
 	const newTarget = "bbbbbbbb-1111-2222-3333-444444444444"
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "aaaaaaaa-1111-2222-3333-444444444444"})
 	m.session.OnTaskComplete(success("aaaaaaaa-1111-2222-3333-444444444444"))
 	m.session.UseResume(newTarget)
@@ -1553,14 +1554,14 @@ exit 3
 	m = tm.(Model)
 
 	for range 5 {
-		msg := waitForRun(m.run)()
+		msg := waitForRun(m.run, m.runOp.key)()
 		tm, _ = m.Update(msg)
 		m = tm.(Model)
 		if m.run == nil {
 			break
 		}
 	}
-	if m.running {
+	if m.runBusy() {
 		t.Fatal("run never settled")
 	}
 	mode, resumeID := m.session.RunOptions()
@@ -1571,8 +1572,8 @@ exit 3
 
 func TestFinishRunQuitsAfterExitCommand(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
-	m.exitAfter = true
+	beginTestRun(&m)
+	m.exitPhase = phaseDraining
 	_, cmd := m.finishRun(cake.Result{Canceled: true})
 	if cmd == nil {
 		t.Fatal("no command returned")
@@ -1595,7 +1596,7 @@ func TestExecSessionCommandsRejectedWhenRunning(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newLaidOutModel()
-			m.running = true
+			beginTestRun(&m)
 			m.session.OnTaskStart(cake.TaskStart{SessionID: activeID, TaskID: "t-1"})
 			modeBefore, resumeBefore := m.session.RunOptions()
 
@@ -2210,14 +2211,16 @@ func TestPreReadyTrimDoesNotPanic(t *testing.T) {
 	// WindowSizeMsg (when !m.ready) must not panic on the empty render
 	// cache. Drive through Update, not by calling appendItem directly.
 	m := New(Config{MaxTimelineItems: 3})
+	beginTestRun(&m)
+	key := m.runOp.key
 	// m.timeline.items starts with the welcome message (1 item at index 0).
 	// Sending events through Update before any layout exercises the
 	// pre-ready path.
 	for _, msg := range []tea.Msg{
-		eventsMsg{evs: []cake.Event{cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"}}},
-		eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "hello"}}},
-		eventsMsg{evs: []cake.Event{cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`}}},
-		eventsMsg{evs: []cake.Event{cake.FunctionCallOutput{CallID: "c-1", Output: "output"}}},
+		eventsMsg{key: key, evs: []cake.Event{cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"}}},
+		eventsMsg{key: key, evs: []cake.Event{cake.Message{Role: "assistant", Content: "hello"}}},
+		eventsMsg{key: key, evs: []cake.Event{cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`}}},
+		eventsMsg{key: key, evs: []cake.Event{cake.FunctionCallOutput{CallID: "c-1", Output: "output"}}},
 	} {
 		tm, _ := m.Update(msg)
 		m = tm.(Model)
@@ -2244,12 +2247,14 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 	// Like the pre-ready trim above, but with pending tool calls whose blocks
 	// must survive the trim.
 	m := New(Config{MaxTimelineItems: 3})
+	beginTestRun(&m)
+	key := m.runOp.key
 	// items: [welcome] → send events before layout
 	for _, msg := range []tea.Msg{
-		eventsMsg{evs: []cake.Event{cake.FunctionCall{ID: "fc-1", CallID: "A", Name: "bash", Arguments: `{}`}}},
-		eventsMsg{evs: []cake.Event{cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{}`}}},
+		eventsMsg{key: key, evs: []cake.Event{cake.FunctionCall{ID: "fc-1", CallID: "A", Name: "bash", Arguments: `{}`}}},
+		eventsMsg{key: key, evs: []cake.Event{cake.FunctionCall{ID: "fc-2", CallID: "B", Name: "bash", Arguments: `{}`}}},
 		// 4th item triggers trim; welcome trimmed away
-		eventsMsg{evs: []cake.Event{cake.Reasoning{}}},
+		eventsMsg{key: key, evs: []cake.Event{cake.Reasoning{}}},
 	} {
 		tm, _ := m.Update(msg)
 		m = tm.(Model)
@@ -2260,7 +2265,7 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 	assertPendingToolAt(t, m, "B", 1)
 
 	// Late output for A must find the right item.
-	tm2, _ := m.Update(eventsMsg{evs: []cake.Event{cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"}}})
+	tm2, _ := m.Update(eventBatch(m, cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"}))
 	m = tm2.(Model)
 	if !m.timeline.items[0].Tool.Done || m.timeline.items[0].Tool.Output != "OUTPUT-A" {
 		t.Errorf("tool A after output: done=%v output=%q", m.timeline.items[0].Tool.Done, m.timeline.items[0].Tool.Output)
@@ -2451,8 +2456,9 @@ func TestSettleSweepRepaintsAfterContentChanges(t *testing.T) {
 	if m.contentChanged {
 		t.Fatal("a fresh model already asked for a repaint")
 	}
+	beginTestRun(&m)
 
-	tm, _ := m.Update(eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "hello"}}})
+	tm, _ := m.Update(eventBatch(m, cake.Message{Role: "assistant", Content: "hello"}))
 	m = tm.(Model)
 	if !m.contentChanged {
 		t.Fatal("a viewport push did not arm the settle repaint")
@@ -2485,7 +2491,8 @@ func TestSettleSweepRepaintsAfterContentChanges(t *testing.T) {
 // an idle REPL repaints nothing and the sweep costs no frames.
 func TestSettleSweepWritesNothingWhenIdle(t *testing.T) {
 	m := newLaidOutModel()
-	tm, _ := m.Update(eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "hello"}}})
+	beginTestRun(&m)
+	tm, _ := m.Update(eventBatch(m, cake.Message{Role: "assistant", Content: "hello"}))
 	m = tm.(Model)
 
 	// The first sweep after the push is the scheduled repaint.

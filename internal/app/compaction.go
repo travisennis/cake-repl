@@ -52,21 +52,14 @@ type compactionDoneMsg struct {
 	res       compact.Result
 }
 
-// shouldCompactAfter reports whether a finished turn leaves the current session
-// over the configured trigger. It only compacts a run that delivered a
-// completion record and exited cleanly: a canceled or failed run keeps whatever
-// context it had, and the next successful turn re-evaluates.
-func (m Model) shouldCompactAfter(res cake.Result) bool {
-	if !m.cfg.Compaction.Enabled || m.cfg.NoSession || m.compactionBusy() || m.exitAfter {
-		return false
-	}
-	if res.Canceled || res.Err != nil || res.ExitCode != 0 || !m.sawComplete {
-		return false
-	}
-	// A task_complete that reports an error is a finished turn, but compacting a
-	// failed task spends quota on a transcript the user is likely still fixing.
-	// The next successful turn re-evaluates.
-	if m.session.LastComplete == nil || m.session.LastComplete.IsError {
+// shouldCompactAfter reports whether the just-finished turn leaves the current
+// session over the configured trigger. It only compacts a clean completed turn:
+// a canceled, failed, incomplete, or superseded run keeps whatever context it
+// had, and the next successful turn re-evaluates. completedTurn is the single
+// answer shared with the suggester.
+func (m Model) shouldCompactAfter() bool {
+	if !m.cfg.Compaction.Enabled || m.cfg.NoSession || m.runBusy() ||
+		m.compactionBusy() || m.exiting() || !m.completedTurn() {
 		return false
 	}
 	mode, sessionID := m.session.RunOptions()
@@ -142,7 +135,12 @@ func (m Model) compactionTriggerPercent() int {
 // also starts a suggestion uses one title command for both.
 func (m Model) startCompaction() (Model, tea.Cmd) {
 	mode, sessionID := m.session.RunOptions()
-	if mode != cake.RunResume || sessionID == "" || m.compactionBusy() {
+	// A run and a compaction are mutually exclusive: finishing the run is the
+	// only production transition that can start compaction, and no new run may
+	// start until this operation is reaped. Keep the invariant explicit here so
+	// a direct caller cannot overlap them.
+	if mode != cake.RunResume || sessionID == "" || m.runBusy() ||
+		m.compactionBusy() || m.exiting() {
 		return m, nil
 	}
 
@@ -212,25 +210,10 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 		// next one; a live request keeps its own held result.
 		m.pendingSuggestion = ""
 		m.pendingSuggestionSession = ""
-		return m, nil
+		return m.maybeQuit()
 	}
 	m.compactionStart = time.Time{}
 	m.compactionElapsed = 0
-
-	// Ctrl+N moved to a new session while the canceled child was draining; its
-	// result belongs before that boundary, and so does any suggestion held for
-	// the old one.
-	if m.newSessionPending {
-		m.newSessionPending = false
-		m.compactionNotice = 0
-		m.pendingSuggestion = ""
-		m.pendingSuggestionSession = ""
-		if m.exitAfter {
-			return m.quit()
-		}
-		m.syncViewport()
-		return m, m.titleCmd()
-	}
 
 	mode, sessionID := m.session.RunOptions()
 	if mode != cake.RunResume || sessionID != msg.sessionID {
@@ -240,8 +223,8 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 		m.removeCompactionStart()
 		m.pendingSuggestion = ""
 		m.pendingSuggestionSession = ""
-		if m.exitAfter {
-			return m.quit()
+		if m.exiting() {
+			return m.maybeQuit()
 		}
 		m.syncViewport()
 		return m, m.titleCmd()
@@ -257,8 +240,8 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	}
 
 	m.syncViewport()
-	if m.exitAfter {
-		return m.quit()
+	if m.exiting() {
+		return m.maybeQuit()
 	}
 	// The compactor is reaped, so the composer gate is open. A suggestion that
 	// completed while it ran has been waiting for exactly this transition; a

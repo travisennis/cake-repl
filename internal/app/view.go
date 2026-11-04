@@ -71,7 +71,7 @@ func (m Model) browserView() string {
 // about which operation is in flight or how long it has been running.
 func (m Model) activityState() string {
 	switch {
-	case m.running:
+	case m.runBusy():
 		return "running"
 	case m.compactionBusy():
 		return m.compactionStateLabel()
@@ -107,7 +107,7 @@ func (m Model) statusLine() string {
 
 	state := "idle"
 	switch {
-	case m.running:
+	case m.runBusy():
 		state = m.spin.View() + " running"
 	case m.compactionBusy():
 		state = m.spin.View() + " " + m.compactionStateLabel()

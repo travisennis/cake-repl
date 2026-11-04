@@ -208,7 +208,7 @@ exit 0
 	got.input.SetValue("continue")
 	tm, _ = got.submit()
 	got = tm.(Model)
-	if !got.running {
+	if !got.runBusy() {
 		t.Fatal("submitting after the pick did not start a run")
 	}
 	drainRun(t, got.run)
@@ -287,8 +287,7 @@ func TestBrowserEnterIgnoredWhileReloading(t *testing.T) {
 	m.session.UseResume(browserID2)
 	beforeMode, beforeID := m.session.RunOptions()
 
-	tm, cmd := m.execCommand(Command{Kind: CmdSessions})
-	m = tm.(Model)
+	m, cmd := m.openSessionBrowser()
 	if !m.browserOpen || !m.browserLoading {
 		t.Fatalf("reopen: open=%v loading=%v", m.browserOpen, m.browserLoading)
 	}
@@ -303,8 +302,8 @@ func TestBrowserEnterIgnoredWhileReloading(t *testing.T) {
 		t.Errorf("reload view should show loading only:\n%s", view)
 	}
 
-	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	got := tm.(Model)
+	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(Model)
 	if !got.browserOpen {
 		t.Error("Enter during a reload must leave the browser open")
 	}
@@ -323,9 +322,8 @@ func TestBrowserEnterIgnoredAfterFailedReload(t *testing.T) {
 	m.session.UseResume(browserID2)
 	beforeMode, beforeID := m.session.RunOptions()
 
-	tm, _ := m.execCommand(Command{Kind: CmdSessions})
-	m = tm.(Model)
-	tm, _ = m.Update(sessionsLoadedMsg{req: m.sessionListReq, err: errors.New("cake exploded")})
+	m, _ = m.openSessionBrowser()
+	tm, _ := m.Update(sessionsLoadedMsg{req: m.sessionListReq, err: errors.New("cake exploded")})
 	m = tm.(Model)
 	if items := m.sessionList.Items(); len(items) != 0 {
 		t.Fatalf("a failed reload left %d selectable rows", len(items))
@@ -366,10 +364,9 @@ func TestBrowserEnterIgnoredOnEmptyListing(t *testing.T) {
 func TestBrowserEnterSelectsOnlyTheCurrentListing(t *testing.T) {
 	m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
 
-	tm, _ := m.execCommand(Command{Kind: CmdSessions})
-	m = tm.(Model)
+	m, _ = m.openSessionBrowser()
 	m.input.SetValue("draft")
-	tm, _ = m.Update(sessionsLoadedMsg{req: m.sessionListReq, sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "two"}}})
+	tm, _ := m.Update(sessionsLoadedMsg{req: m.sessionListReq, sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "two"}}})
 	m = tm.(Model)
 	if m.sessionList.Index() != 0 {
 		t.Fatalf("cursor = %d, want the first row of the new listing", m.sessionList.Index())
@@ -516,7 +513,7 @@ func TestBrowserViewStaysWithinTimelineRegion(t *testing.T) {
 
 func TestSessionsRejectedWhileRunning(t *testing.T) {
 	m := newLaidOutModel()
-	m.running = true
+	beginTestRun(&m)
 
 	tm, _ := m.execCommand(Command{Kind: CmdSessions})
 	got := tm.(Model)
@@ -667,8 +664,7 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 	m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
 
 	// Reopening cancels A and starts B; the browser is now loading B.
-	tm, _ := m.execCommand(Command{Kind: CmdSessions})
-	m = tm.(Model)
+	m, _ = m.openSessionBrowser()
 	reqB := m.sessionListReq
 	if reqB == 0 {
 		t.Fatal("reload did not allocate a request identity")
@@ -677,8 +673,8 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 
 	// A's result, held until after B started, must be dropped: no rows, no
 	// error, still loading B.
-	tm, _ = m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "stale"}}})
-	m = tm.(Model)
+	next, _ := m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "stale"}}})
+	m = next.(Model)
 	if !m.browserLoading {
 		t.Error("a superseded result cleared B's loading state")
 	}
@@ -690,8 +686,8 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 	}
 
 	// A late failure from A must be ignored too.
-	tm, _ = m.Update(sessionsLoadedMsg{req: reqA, err: errors.New("stale failure")})
-	m = tm.(Model)
+	next, _ = m.Update(sessionsLoadedMsg{req: reqA, err: errors.New("stale failure")})
+	m = next.(Model)
 	if m.browserErr != "" {
 		t.Errorf("a superseded error reached the browser: %q", m.browserErr)
 	}
@@ -700,11 +696,11 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 	}
 
 	// B's own result applies.
-	tm, _ = m.Update(sessionsLoadedMsg{req: reqB, sessions: []cake.SessionSummary{
+	next, _ = m.Update(sessionsLoadedMsg{req: reqB, sessions: []cake.SessionSummary{
 		{SessionID: browserID1, FirstPrompt: "current one"},
 		{SessionID: browserID2, FirstPrompt: "current two"},
 	}})
-	m = tm.(Model)
+	m = next.(Model)
 	if m.browserLoading {
 		t.Error("B's result left the browser loading")
 	}
@@ -712,15 +708,15 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 		t.Fatalf("B's result put %d rows on screen, want 2", len(m.sessionList.Items()))
 	}
 	// Move the cursor so a stale result would be visible if it reset selection.
-	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
-	m = tm.(Model)
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(Model)
 	if m.sessionList.Index() != 1 {
 		t.Fatalf("cursor = %d, want 1", m.sessionList.Index())
 	}
 
 	// A delivered again after B completed still must not touch B.
-	tm, _ = m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "late"}}})
-	m = tm.(Model)
+	next, _ = m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "late"}}})
+	m = next.(Model)
 	items := m.sessionList.Items()
 	if len(items) != 2 {
 		t.Fatalf("a late result changed the listing: %d rows", len(items))
@@ -770,8 +766,7 @@ func TestSessionsReopenCancelsPriorListing(t *testing.T) {
 	m, done := blockingListing(t, newLaidOutModel())
 	reqA := m.sessionListReq
 
-	tm, _ := m.execCommand(Command{Kind: CmdSessions})
-	m = tm.(Model)
+	m, _ = m.openSessionBrowser()
 	if m.sessionListReq == reqA {
 		t.Fatal("reload reused the previous request identity")
 	}
@@ -781,8 +776,8 @@ func TestSessionsReopenCancelsPriorListing(t *testing.T) {
 	// The replaced request's helper must stop within the bound.
 	awaitListing(t, done)
 	// A's late result is superseded and ignored.
-	tm, _ = m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "stale"}}})
-	m = tm.(Model)
+	next, _ := m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "stale"}}})
+	m = next.(Model)
 	if !m.browserLoading || len(m.sessionList.Items()) != 0 {
 		t.Errorf("stale result touched the replacement: loading=%v items=%d", m.browserLoading, len(m.sessionList.Items()))
 	}
@@ -796,14 +791,23 @@ func TestSessionsExitCancelsInFlightListing(t *testing.T) {
 	m, done := blockingListing(t, newLaidOutModel())
 
 	tm, cmd := m.execCommand(Command{Kind: CmdExit})
+	if cmd != nil {
+		t.Fatalf("exit returned %v before the listing was reaped", cmd)
+	}
+	m = tm.(Model)
+	if !m.exiting() {
+		t.Fatal("exit did not enter its draining phase")
+	}
+
+	msg := awaitListing(t, done)
+	tm, cmd = m.Update(msg)
 	if cmd == nil {
-		t.Fatal("expected a quit command")
+		t.Fatal("expected a quit command after the listing was reaped")
 	}
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatalf("cmd() = %T, want tea.QuitMsg", cmd())
 	}
 	_ = tm
-	awaitListing(t, done)
 }
 
 // TestCancelRunningCancelsInFlightListing: the teardown main drives after the
@@ -853,7 +857,7 @@ EOF
 `)
 	tm, cmd := m.submit()
 	m = tm.(Model)
-	if cmd == nil || !m.running {
+	if cmd == nil || !m.runBusy() {
 		t.Fatal("a draining session listing blocked prompt submission")
 	}
 	_ = cmd
@@ -901,7 +905,7 @@ exit 0
 	m.cfg.CakeBin = bin
 	tm, cmd := m.submit()
 	got := tm.(Model)
-	if !got.running {
+	if !got.runBusy() {
 		t.Fatal("submitting after closing the browser did not start a run")
 	}
 	if got.input.Value() != "" {

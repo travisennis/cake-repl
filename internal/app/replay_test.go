@@ -108,8 +108,8 @@ fi
 	m.layout()
 	m = hydrateTestModel(t, m)
 
-	if m.hydrating || m.replayRun != nil || m.running {
-		t.Fatalf("replay did not settle: hydrating=%v replay=%v running=%v", m.hydrating, m.replayRun != nil, m.running)
+	if m.hydrating || m.replayRun != nil || m.runBusy() {
+		t.Fatalf("replay did not settle: hydrating=%v replay=%v running=%v", m.hydrating, m.replayRun != nil, m.runBusy())
 	}
 	if m.session.SessionID != replayTestSessionID || m.session.TaskID != "old-task" {
 		t.Fatalf("session context = %+v, want replayed ids", m.session)
@@ -139,7 +139,7 @@ fi
 	m.input.SetValue("next prompt")
 	tm, _ := m.submit()
 	live := tm.(Model)
-	if !live.running {
+	if !live.runBusy() {
 		t.Fatal("prompt did not start after replay hydration")
 	}
 	result := collectCakeRunResult(t, live.run)
@@ -371,8 +371,8 @@ exit 0
 	m.layout()
 	m = hydrateTestModel(t, m)
 
-	if m.hydrating || m.running {
-		t.Fatalf("failed replay left model unavailable: hydrating=%v running=%v", m.hydrating, m.running)
+	if m.hydrating || m.runBusy() {
+		t.Fatalf("failed replay left model unavailable: hydrating=%v running=%v", m.hydrating, m.runBusy())
 	}
 	var sawWarning bool
 	for _, item := range m.timeline.items {
@@ -391,7 +391,7 @@ exit 0
 	m.input.SetValue("continue after warning")
 	tm, _ := m.submit()
 	live := tm.(Model)
-	if !live.running {
+	if !live.runBusy() {
 		t.Fatal("prompt did not start after replay failure")
 	}
 	result := collectCakeRunResult(t, live.run)
@@ -453,8 +453,8 @@ func TestReplayStartupFailureHonorsPendingExit(t *testing.T) {
 
 	tm, cmd := m.execCommand(Command{Kind: CmdExit})
 	m = tm.(Model)
-	if !m.exitAfter || cmd != nil {
-		t.Fatalf("exit while hydrating: exitAfter=%v cmd set=%v", m.exitAfter, cmd != nil)
+	if !m.exiting() || cmd != nil {
+		t.Fatalf("exit while hydrating: exiting=%v cmd set=%v", m.exiting(), cmd != nil)
 	}
 
 	tm, cmd = m.Update(start)

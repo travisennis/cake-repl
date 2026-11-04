@@ -54,11 +54,20 @@ func capRetainedToolOutput(output string) string {
 }
 
 // eventsMsg delivers a batch of decoded cake stream events, applied in order
-// with a single viewport sync at the end of the Update.
-type eventsMsg struct{ evs []cake.Event }
+// with a single viewport sync at the end of the Update. key identifies the run
+// that produced them; a batch from a superseded session is drained but ignored.
+type eventsMsg struct {
+	key operationKey
+	evs []cake.Event
+}
 
-// runDoneMsg delivers the terminal state of a cake subprocess.
-type runDoneMsg struct{ res cake.Result }
+// runDoneMsg delivers the terminal state of one cake run. key scopes the result
+// to the run that produced it; a result for a superseded request must not settle
+// or mutate a newer one.
+type runDoneMsg struct {
+	key operationKey
+	res cake.Result
+}
 
 // clipboardResultMsg delivers the outcome of one off-loop clipboard write. It
 // deliberately carries no payload text: a result can only become the existing
@@ -72,12 +81,13 @@ type clipboardResultMsg struct {
 }
 
 // waitForRun pulls the next batch of events from a run, or its final result
-// once the event stream is closed. It is re-issued after every batch.
-func waitForRun(run *cake.Run) tea.Cmd {
+// once the event stream is closed. It is re-issued after every batch with the
+// same key, so every message stays scoped to the run that started it.
+func waitForRun(run *cake.Run, key operationKey) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-run.Events
 		if !ok {
-			return runDoneMsg{res: <-run.Result}
+			return runDoneMsg{key: key, res: <-run.Result}
 		}
 		evs := []cake.Event{ev}
 		// Drain the events already queued behind the first one so a burst of K
@@ -89,14 +99,14 @@ func waitForRun(run *cake.Run) tea.Cmd {
 				if !ok {
 					// The stream closed mid-drain; the next waitForRun delivers
 					// runDoneMsg.
-					return eventsMsg{evs: evs}
+					return eventsMsg{key: key, evs: evs}
 				}
 				evs = append(evs, ev)
 			default:
-				return eventsMsg{evs: evs}
+				return eventsMsg{key: key, evs: evs}
 			}
 		}
-		return eventsMsg{evs: evs}
+		return eventsMsg{key: key, evs: evs}
 	}
 }
 
@@ -296,7 +306,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if !m.running && !m.compactionBusy() {
+		if !m.runBusy() && !m.compactionBusy() {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -319,10 +329,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case suggestionDoneMsg:
 		next := m.finishSuggestion(msg)
-		if next.exitAfter {
+		if next.exiting() {
 			// quit() canceled the in-flight suggester and is waiting for this
 			// result to reap the child before returning the quit command.
-			return next.quit()
+			return next.maybeQuit()
 		}
 		return next, nil
 
@@ -342,13 +352,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// so push the warning into the viewport now instead of leaving it
 			// for the next key or resize to flush.
 			m.syncViewport()
-			if m.exitAfter {
-				return m.quit()
-			}
-			return m, nil
+			return m.maybeQuit()
 		}
 		m.replayRun = msg.run
-		if m.exitAfter || !m.hydrating {
+		if m.exiting() || !m.hydrating {
 			m.replayRun.Cancel()
 		}
 		return m, waitForReplay(m.replayRun)
@@ -369,16 +376,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishReplay(msg.res)
 
 	case eventsMsg:
-		if !m.newSessionPending {
+		if m.run == nil || msg.key != m.runOp.key {
+			return m, nil
+		}
+		if msg.key.generation == m.session.Generation() {
 			for _, ev := range msg.evs {
 				m.applyEvent(ev)
 			}
 		}
 		m.syncViewport()
-		return m, waitForRun(m.run)
+		return m, waitForRun(m.run, msg.key)
 
 	case runDoneMsg:
-		return m.finishRun(msg.res)
+		return m.finishRunMsg(msg)
 
 	case clipboardResultMsg:
 		if msg.err != nil {
@@ -399,6 +409,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionsLoadedMsg:
 		if m.sessionListDone != nil {
 			delete(m.sessionListDone, msg.req)
+		}
+		if m.exiting() {
+			return m.maybeQuit()
 		}
 		if msg.req != m.sessionListReq {
 			// A superseded or invalidated request: its items, error, selection,
@@ -451,29 +464,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// quit cancels any in-flight child and then quits, so the model-owned
-// operation stops before the program exits. An in-flight suggester is drained:
-// the quit waits for its result, which reaps the child, before returning
-// tea.Quit. It returns the updated model with the quit command, so no caller
-// reads the model in a sibling return operand whose order relative to this call
-// is unspecified.
+// quit enters the exit phase, cancels every model-owned child, and returns the
+// quit command only when every child has been reaped. Callers that cancel a
+// specific operation first append their own notice; this transition is
+// idempotent for the finish handlers that drive the drain. It returns the
+// updated model with the command, so no caller reads the model in a sibling
+// return operand whose order relative to this call is unspecified.
 func (m Model) quit() (Model, tea.Cmd) {
-	m.cancelCompaction()
-	m.cancelSessionList()
-	m.cancelSuggestion()
-	if m.suggestion.doneChannel() != nil {
-		if !m.exitAfter {
-			m.exitAfter = true
+	if !m.exiting() {
+		m.exitPhase = phaseDraining
+		if m.suggestion.doneChannel() != nil {
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling prompt suggestion, then exiting…"})
 		}
-		m.syncViewport()
+	}
+	m.cancelRun()
+	m.cancelReplay()
+	m.cancelCompaction()
+	m.cancelSuggestion()
+	m.cancelSessionList()
+	m.syncViewport()
+	return m.maybeQuit()
+}
+
+// maybeQuit returns tea.Quit only once every operation is idle. A resource-busy
+// run, replay, compaction, suggestion, or session listing keeps the exit in its
+// draining phase; its finish handler calls this again after settling.
+func (m Model) maybeQuit() (Model, tea.Cmd) {
+	if !m.exiting() {
+		return m, nil
+	}
+	if m.runBusy() || m.replayBusy() || m.compactionBusy() ||
+		m.suggestion.active() || m.suggestion.draining() || len(m.sessionListDone) > 0 {
 		return m, nil
 	}
 	return m, tea.Quit
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.exitAfter {
+	if m.exiting() {
 		// The REPL is draining a child before it exits. A submission or session
 		// change here would start new work behind the quit.
 		return m, nil
@@ -483,8 +511,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch {
 	case key.Matches(msg, m.keys.CancelQuit):
-		if m.running {
-			m.run.Cancel()
+		if m.runBusy() {
+			// A draining run is also re-canceled; its key stays until the reaped
+			// result settles it, so the gate cannot open early.
+			m.cancelRun()
 			return m, nil
 		}
 		if m.compactionBusy() {
@@ -493,11 +523,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// The reaped result supplies the one "canceled" notice, matching a
 			// canceled run, so no second notice is added here.
 			m.cancelCompaction()
-			return m, nil
-		}
-		if m.hydrating || m.replayPending {
-			m.exitAfter = true
-			m.cancelReplay()
 			return m, nil
 		}
 		return m.quit()
@@ -601,12 +626,13 @@ func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // or re-pin the new session.
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.clearSuggestion()
-	if m.running {
-		m.newSessionPending = true
-		m.run.Cancel()
+	// Advance the generation before canceling the old children, so any result
+	// already queued still carries the old key and can only settle its drain.
+	m.session.Reset()
+	if m.runBusy() {
+		m.cancelRun()
 	}
 	if m.compactionBusy() {
-		m.newSessionPending = true
 		m.cancelCompaction()
 	}
 	if m.hydrating {
@@ -615,8 +641,9 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 		// records after this new-session boundary.
 		m.hydrating = false
 	}
-	m.session.Reset()
 	m.sawComplete = false
+	m.runOutcome = outcomeNone
+	m.runGeneration = 0
 	m.replayWarn = false
 	m.timeline.clear()
 	m.pendingCalls = map[string]*ui.ToolBlock{}
@@ -741,7 +768,7 @@ func (m Model) handleTabComplete() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submit() (tea.Model, tea.Cmd) {
-	if m.exitAfter {
+	if m.exiting() {
 		// The quit path is waiting for a child to be reaped. Never start a run or
 		// execute a command behind it.
 		return m, nil
@@ -775,23 +802,10 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.hydrating || m.replayPending || m.replayRun != nil {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "waiting for session history to load…"})
-		return m, nil
-	}
-
-	if m.newSessionPending {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "waiting for the canceled operation to exit…"})
-		return m, nil
-	}
-
-	if m.compactionBusy() {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "context compaction is running — wait for it or press Ctrl+C to cancel"})
-		return m, nil
-	}
-
-	if m.running {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "a task is already running — Ctrl+C cancels it"})
+	if gate := m.admitPrompt(); !gate.allowed {
+		if gate.text != "" {
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: gate.text})
+		}
 		return m, nil
 	}
 	return m.startRun(text)
@@ -805,17 +819,16 @@ func needsIdle(kind CommandKind) bool {
 }
 
 func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
-	if (m.hydrating || m.replayPending || m.replayRun != nil) && needsIdle(cmd.Kind) {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "wait for session history to load first"})
+	if m.exiting() {
 		return m, nil
 	}
-	if m.running && needsIdle(cmd.Kind) {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "finish or cancel the running task first"})
-		return m, nil
-	}
-	if m.compactionBusy() && needsIdle(cmd.Kind) {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "wait for context compaction to finish (Ctrl+C cancels it)"})
-		return m, nil
+	if needsIdle(cmd.Kind) {
+		if gate := m.admitRetarget(); !gate.allowed {
+			if gate.text != "" {
+				m.appendItem(ui.Item{Kind: ui.KindWarning, Text: gate.text})
+			}
+			return m, nil
+		}
 	}
 
 	switch cmd.Kind {
@@ -823,23 +836,13 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: HelpText})
 
 	case CmdExit:
-		if m.compactionBusy() {
-			m.exitAfter = true
-			m.cancelCompaction()
-			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling context compaction, then exiting…"})
-			return m, nil
-		}
-		if m.running {
-			m.exitAfter = true
-			m.run.Cancel()
+		switch {
+		case m.runBusy():
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling task, then exiting…"})
-			return m, nil
-		}
-		if m.hydrating || m.replayPending {
-			m.exitAfter = true
-			m.cancelReplay()
+		case m.compactionBusy():
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling context compaction, then exiting…"})
+		case m.replayBusy():
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling session history load, then exiting…"})
-			return m, nil
 		}
 		return m.quit()
 
@@ -911,6 +914,14 @@ func (m Model) persistHistory(text string) (oversized bool) {
 }
 
 func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
+	if m.exiting() || m.runBusy() || m.compactionBusy() {
+		return m, nil
+	}
+	// A prompt attempt supersedes the previous completed-turn answer even if
+	// cake.Start itself fails and no run phase begins.
+	m.sawComplete = false
+	m.runOutcome = outcomeNone
+	m.runGeneration = 0
 	mode, resumeID := m.session.RunOptions()
 	run, err := cake.Start(cake.Options{
 		Bin:          m.cfg.CakeBin,
@@ -940,9 +951,10 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	}
 	m.trackChild("run", run.Cancel, run.Done)
 
+	m.runSeq++
+	key := operationKey{generation: m.session.Generation(), request: m.runSeq, sessionID: resumeID}
+	m.runOp.begin(key, run.Cancel, run.Done)
 	m.run = run
-	m.running = true
-	m.sawComplete = false
 	// A fork creates one fresh session boundary. Once the process has
 	// started, future prompts must use the session pin rather than fork again.
 	m.cfg.Fork = false
@@ -953,7 +965,7 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	m.clearSuggestion()
 	m.layout()
-	return m, tea.Batch(m.spin.Tick, waitForRun(run), m.titleCmd())
+	return m, tea.Batch(m.spin.Tick, waitForRun(run, key), m.titleCmd())
 }
 
 func (m *Model) applyEvent(ev cake.Event) {
@@ -1135,10 +1147,7 @@ func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
 	m.replayDone = nil
 	m.replayPending = false
 	if !m.hydrating {
-		if m.exitAfter {
-			return m.quit()
-		}
-		return m, nil
+		return m.maybeQuit()
 	}
 	m.hydrating = false
 
@@ -1158,10 +1167,7 @@ func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
 	}
 	m.finishPendingTools()
 	m.syncViewport()
-	if m.exitAfter {
-		return m.quit()
-	}
-	return m, nil
+	return m.maybeQuit()
 }
 
 // finishPendingTools marks tool calls that never received an output as done,
@@ -1180,36 +1186,64 @@ func (m *Model) finishPendingTools() {
 	}
 }
 
+// finishRun applies one live-run result. It is the compatibility entry point
+// used by focused tests; production passes the result's own key through
+// finishRunMsg.
 func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
-	m.running = false
+	return m.finishRunKey(m.runOp.key, res)
+}
+
+func (m Model) finishRunMsg(msg runDoneMsg) (tea.Model, tea.Cmd) {
+	return m.finishRunKey(msg.key, msg.res)
+}
+
+func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.Cmd) {
+	// Settle before checking the generation: a stale result still releases the
+	// resource gate once its child is reaped. An unknown key belongs to an
+	// already-settled request and must not touch the newer one.
+	if !m.runOp.settle(key) {
+		return m.maybeQuit()
+	}
 	m.run = nil
-	// The run has ended, so the title drops the working marker. Quitting paths
-	// skip this: main writes the idle title once the program returns, which is
-	// the only way to cover exits the model never observes.
-	if m.newSessionPending {
-		m.newSessionPending = false
-		if m.exitAfter {
-			return m.quit()
+
+	if key.generation != m.session.Generation() {
+		// Ctrl+N advanced the target while this run drained. Its events, outcome,
+		// and pin belong before the boundary.
+		m.sawComplete = false
+		m.runOutcome = outcomeNone
+		m.runGeneration = 0
+		if m.exiting() {
+			return m.maybeQuit()
 		}
 		return m, m.titleCmd()
 	}
 
 	m.finishPendingTools()
 
+	result := outcomeSuccess
 	switch {
 	case res.Canceled:
+		result = outcomeCanceled
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceled"})
 	case res.Err != nil:
+		result = outcomeFailure
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: "cake failed: " + res.Err.Error()})
 	case res.ExitCode != 0:
+		result = outcomeFailure
 		text := fmt.Sprintf("cake exited with code %d", res.ExitCode)
 		if res.Stderr != "" {
 			text += "\n" + ui.TruncateOutput(res.Stderr, m.cfg.OutputLimit)
 		}
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: text})
 	case !m.sawComplete:
+		result = outcomeFailure
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "cake exited before completing the task"})
+	case m.session.LastComplete == nil || m.session.LastComplete.IsError:
+		result = outcomeFailure
 	}
+	m.sawComplete = false
+	m.runOutcome = result
+	m.runGeneration = key.generation
 
 	// Whatever ended the run — cancellation, a nonzero exit, a wait error, or
 	// a clean EOF before task_complete — a session id announced for this
@@ -1219,8 +1253,8 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	m.session.OnRunEnded()
 
 	m.syncViewport()
-	if m.exitAfter {
-		return m.quit()
+	if m.exiting() {
+		return m.maybeQuit()
 	}
 
 	// Start both between-turn background calls from the same transition. The
@@ -1229,7 +1263,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	// start or finish. A result that arrives while compaction gates the composer
 	// is held until finishCompaction applies it. See ADR 031.
 	var cmds []tea.Cmd
-	if m.suggestionTurnEligible(res) {
+	if m.completedTurn() {
 		next, cmd := m.maybeStartSuggestion()
 		m = next
 		if cmd != nil {
@@ -1238,7 +1272,7 @@ func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
 	}
 	// Compact between turns, after the pin is settled and the completed turn's
 	// measurement is known. The compactor re-checks the session and may decline.
-	if m.shouldCompactAfter(res) {
+	if m.shouldCompactAfter() {
 		next, cmd := m.startCompaction()
 		m = next
 		if cmd != nil {

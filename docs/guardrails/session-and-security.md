@@ -178,7 +178,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
   resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
   drains an active run without letting its late events or cancellation restore
-  the old session pin; `/resume` sets the next mode explicitly. A bare `-resume`
+  the old session pin; the new session generation suppresses those side effects,
+  while the draining run keeps prompt submission and session retargeting gated
+  until its result is settled; `/resume` sets the next mode explicitly. A bare `-resume`
   starts at `RunFresh` and only the picked row moves it to `RunResume`. An initial
   `--fork` is consumed by its first fresh prompt, then the resulting session
   is pinned with `--resume`. **Retargeting drops the identity of the session
@@ -192,10 +194,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   next-run field names that target. Re-selecting the already current target is
   a no-op that keeps the reported identity and model; `/session`'s `last:` line
   stays as the previous run's labeled history — it is display only and can
-  never pin. **Active-run restriction:** `/new`, `/resume`, and
-  `/sessions` are rejected while a task is running with a warning to finish or
-  cancel first. Only `/session`, `/help`, `/clear`, and `/exit` remain available
-  during a run.
+  never pin. **Active-run restriction:** prompt submission and `/new`, `/resume`,
+  and `/sessions` are rejected while a task is in flight or draining, with
+  distinct in-flight and drain warnings. Only `/session`, `/help`, `/clear`, and
+  `/exit` remain available during a run; the prompt and retarget gates open only
+  when the canceled child is reaped.
   Keep session transitions pure and I/O-free so they stay testable.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
   secrets. They go **only** to `-debug-log` (opened `0o600`; the mode applies

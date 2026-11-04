@@ -61,44 +61,45 @@ func TestShouldCompactAfter(t *testing.T) {
 			UsagePresence: "complete",
 			ContextWindow: 200_000,
 		})
-		m.sawComplete = true
+		markCompletedTurn(&m)
 		return m
 	}
-	clean := cake.Result{ExitCode: 0}
 
 	tests := []struct {
 		name  string
 		setup func(*Model)
-		res   cake.Result
 		want  bool
 	}{
-		{"threshold crossed", func(*Model) {}, clean, true},
+		{"threshold crossed", func(*Model) {}, true},
 		{"below the trigger headroom", func(m *Model) {
 			m.session.Context.Tokens = 149_000 // trigger is 75% of 200k
-		}, clean, false},
+		}, false},
 		{"at the trigger headroom", func(m *Model) {
 			m.session.Context.Tokens = 150_000
-		}, clean, true},
+		}, true},
 		{"estimated figure is re-checked", func(m *Model) {
 			m.session.Context.Estimated = true
-		}, clean, true},
-		{"no window", func(m *Model) { m.session.Context.Window = 0 }, clean, false},
-		{"no measurement", func(m *Model) { m.session.Context = nil }, clean, false},
-		{"no pinned session", func(m *Model) { m.session.Reset() }, clean, false},
-		{"incomplete turn", func(m *Model) { m.sawComplete = false }, clean, false},
-		{"errored completion", func(m *Model) { m.session.LastComplete.IsError = true }, clean, false},
-		{"canceled run", func(*Model) {}, cake.Result{Canceled: true}, false},
-		{"failed run", func(*Model) {}, cake.Result{ExitCode: 1}, false},
-		{"wait error", func(*Model) {}, cake.Result{Err: os.ErrDeadlineExceeded}, false},
-		{"disabled", func(m *Model) { m.cfg.Compaction.Enabled = false }, clean, false},
-		{"no session", func(m *Model) { m.cfg.NoSession = true }, clean, false},
-		{"invalid threshold", func(m *Model) { m.cfg.Compaction.ThresholdPercent = 0 }, clean, false},
+		}, true},
+		{"no window", func(m *Model) { m.session.Context.Window = 0 }, false},
+		{"no measurement", func(m *Model) { m.session.Context = nil }, false},
+		{"no pinned session", func(m *Model) { m.session.Reset() }, false},
+		{"incomplete turn", func(m *Model) { m.runOutcome = outcomeFailure }, false},
+		{"errored completion", func(m *Model) {
+			m.session.LastComplete.IsError = true
+			m.runOutcome = outcomeFailure
+		}, false},
+		{"canceled run", func(m *Model) { m.runOutcome = outcomeCanceled }, false},
+		{"failed run", func(m *Model) { m.runOutcome = outcomeFailure }, false},
+		{"wait error", func(m *Model) { m.runOutcome = outcomeFailure }, false},
+		{"disabled", func(m *Model) { m.cfg.Compaction.Enabled = false }, false},
+		{"no session", func(m *Model) { m.cfg.NoSession = true }, false},
+		{"invalid threshold", func(m *Model) { m.cfg.Compaction.ThresholdPercent = 0 }, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := ready(t)
 			tt.setup(&m)
-			if got := m.shouldCompactAfter(tt.res); got != tt.want {
+			if got := m.shouldCompactAfter(); got != tt.want {
 				t.Fatalf("shouldCompactAfter = %v, want %v (context %+v)", got, tt.want, m.session.Context)
 			}
 		})
@@ -123,7 +124,7 @@ func TestShouldCompactAfterAbsolute(t *testing.T) {
 			UsagePresence: "complete",
 			ContextWindow: window,
 		})
-		m.sawComplete = true
+		markCompletedTurn(&m)
 		return m
 	}
 
@@ -145,7 +146,7 @@ func TestShouldCompactAfterAbsolute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := ready(tt.tokens, tt.window)
-			if got := m.shouldCompactAfter(cake.Result{ExitCode: 0}); got != tt.want {
+			if got := m.shouldCompactAfter(); got != tt.want {
 				t.Fatalf("shouldCompactAfter = %v, want %v (context %+v)", got, tt.want, m.session.Context)
 			}
 		})
@@ -154,7 +155,7 @@ func TestShouldCompactAfterAbsolute(t *testing.T) {
 	t.Run("incomplete absolute config disables the trigger", func(t *testing.T) {
 		m := ready(900_000, 1_000_000)
 		m.cfg.Compaction.TriggerTokens = 0
-		if m.shouldCompactAfter(cake.Result{ExitCode: 0}) {
+		if m.shouldCompactAfter() {
 			t.Fatal("partial absolute config fell back to percent mode")
 		}
 	})
@@ -254,7 +255,7 @@ func compactionModelWithConfig(t *testing.T, cfg CompactionConfig, tokens, windo
 		ContextWindow: window,
 	})
 	m.applyEvent(cake.TaskComplete{Subtype: "success", SessionID: compactionSessionID, TaskID: "t-1"})
-	m.running = true
+	beginTestRun(&m)
 	return m
 }
 
@@ -321,7 +322,7 @@ JSON
 	if !m.compactionBusy() || !m.compaction.active() || m.compaction.draining() {
 		t.Fatalf("compaction phase = active:%v draining:%v, want in-flight", m.compaction.active(), m.compaction.draining())
 	}
-	if m.running {
+	if m.runBusy() {
 		t.Fatal("run state survived finishRun")
 	}
 	if idx := compactionStartIndex(m); idx < 0 {
@@ -760,7 +761,7 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 		if retargetCmd != nil {
 			t.Fatalf("%s returned a command while the canceled compactor drained: %v", tt.name, retargetCmd)
 		}
-		if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "wait for context compaction") {
+		if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "canceled context compaction") {
 			t.Fatalf("%s while the canceled compactor drained = %+v", tt.name, it)
 		}
 	}
@@ -809,8 +810,8 @@ func TestExitWhileCompactingCancelsThenQuits(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("/exit returned %v, want no command before the child is reaped", cmd)
 	}
-	if !m.exitAfter || !m.compactionBusy() {
-		t.Fatalf("/exit state = exitAfter:%v compacting:%v", m.exitAfter, m.compactionBusy())
+	if !m.exiting() || !m.compactionBusy() {
+		t.Fatalf("/exit state = exiting:%v compacting:%v", m.exiting(), m.compactionBusy())
 	}
 	if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "canceling context compaction, then exiting") {
 		t.Fatalf("/exit notice = %+v", it)
@@ -836,11 +837,15 @@ func TestCtrlNWhileCompactingResetsWithoutApplyingResult(t *testing.T) {
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = tm.(Model)
 	done := runCompactionCmd(cmd)
+	generation := m.session.Generation()
 
 	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
 	m = tm.(Model)
-	if !m.newSessionPending {
-		t.Fatal("ctrl+n did not mark the canceled compaction for draining")
+	if !m.compaction.draining() {
+		t.Fatal("ctrl+n did not put the canceled compaction into its drain phase")
+	}
+	if m.session.Generation() <= generation {
+		t.Fatalf("ctrl+n did not advance the session generation: %d -> %d", generation, m.session.Generation())
 	}
 	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
 		t.Fatalf("ctrl+n session state = %v %q", mode, id)
@@ -849,9 +854,6 @@ func TestCtrlNWhileCompactingResetsWithoutApplyingResult(t *testing.T) {
 	tm, _ = m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
 	assertCompactionIdle(t, m)
-	if m.newSessionPending {
-		t.Fatal("new-session boundary survived the reaped compaction")
-	}
 	if m.session.Context != nil {
 		t.Fatalf("stale compaction result seeded the new session: %+v", m.session.Context)
 	}

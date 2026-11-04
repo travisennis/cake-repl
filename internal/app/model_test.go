@@ -162,11 +162,11 @@ func TestInitSetsWindowTitleToWorkingDirectory(t *testing.T) {
 
 func TestTitleCmdTracksWorkingState(t *testing.T) {
 	// The title is the only status signal that survives an unfocused or
-	// minimized window, so the working marker must follow m.running exactly.
+	// minimized window, so the working marker must follow the run phase exactly.
 	m := New(Config{Cwd: "/tmp/project\x1b]2;injected\a"})
 	requireTitle(t, m.titleCmd(), "cake-repl: /tmp/project")
 
-	m.running = true
+	beginTestRun(&m)
 	requireTitle(t, m.titleCmd(), "[working] cake-repl: /tmp/project")
 }
 
@@ -182,11 +182,11 @@ func TestIdleTitleSequenceRestoresIdleTitle(t *testing.T) {
 func TestFinishRunResetsTitleToIdle(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Cwd = "/tmp/project"
-	m.running = true
+	beginTestRun(&m)
 
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	got := tm.(Model)
-	if got.running {
+	if got.runBusy() {
 		t.Fatal("finishRun left the model running")
 	}
 	requireTitle(t, cmd, "cake-repl: /tmp/project")
@@ -429,6 +429,7 @@ func TestFinishRunRerendersOrphanedToolCalls(t *testing.T) {
 	// so switch to full mode to keep this test about the rerender itself.
 	m.toolOutputMode = ui.ToolOutputFull
 	m.applyEvent(cake.FunctionCall{CallID: "c-1", Name: "bash", Arguments: `{"command":"sleep 5"}`})
+	beginTestRun(&m)
 
 	tm, _ := m.finishRun(cake.Result{ExitCode: 0})
 	got := tm.(Model)
@@ -465,7 +466,8 @@ while :; do sleep 0.05; done
 	// Consume the one event so the goroutine lands in stdout reads.
 	<-run.Events
 
-	m := Model{run: run, running: true}
+	m := Model{run: run}
+	beginTestRunHandle(&m, run)
 	if err := m.CancelRunning(); err != nil {
 		t.Fatalf("CancelRunning: %v", err)
 	}
@@ -614,8 +616,7 @@ func TestViewHeightFitsTheTerminal(t *testing.T) {
 			return m
 		},
 		"running": func(m Model) Model {
-			m.running = true
-			m.run = &cake.Run{}
+			beginTestRun(&m)
 			m.session.OnTaskStart(cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t1"})
 			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "run"})
 			m.syncViewport()

@@ -5,6 +5,10 @@ import "github.com/travisennis/cake-repl/internal/cake"
 // sessionState tracks which cake session the next prompt should target. It is
 // a pure state machine so run-mode transitions stay testable.
 type sessionState struct {
+	// generation identifies continuity of the session target. It starts at 1
+	// and advances only when the target is left, never when a run reports its
+	// own id.
+	generation   sessionGeneration
 	SessionID    string
 	TaskID       string
 	NextMode     cake.RunMode
@@ -27,6 +31,18 @@ type sessionState struct {
 	// target changed, so the status line omits the segment rather than showing a
 	// stale figure.
 	Context *ContextUsage
+}
+
+// newSessionState builds the initial target with generation 1. A zero-value
+// sessionState is still usable in pure transition tests; its first Reset or
+// target change advances it to 1.
+func newSessionState(next cake.RunMode, resumeID string) sessionState {
+	return sessionState{generation: 1, NextMode: next, ResumeID: resumeID}
+}
+
+// Generation returns the current session-target epoch.
+func (s *sessionState) Generation() sessionGeneration {
+	return s.generation
 }
 
 // ContextUsage is one context figure: Tokens is the prompt size the model saw on
@@ -158,9 +174,12 @@ func (s *sessionState) pinToSession() {
 	s.ResumeID = s.AnnouncedID
 }
 
-// Reset clears all session state; the next prompt starts a fresh session.
+// Reset clears all session state and advances the generation before clearing;
+// the next prompt starts a fresh session, and a child from the previous target
+// can never apply to it.
 func (s *sessionState) Reset() {
-	*s = sessionState{NextMode: cake.RunFresh}
+	generation := s.generation + 1
+	*s = sessionState{generation: generation, NextMode: cake.RunFresh}
 }
 
 // UseResume makes the next prompt resume a specific session. Retargeting away
@@ -173,6 +192,7 @@ func (s *sessionState) Reset() {
 // result, so it reads as the history it is and never as the current identity.
 func (s *sessionState) UseResume(id string) {
 	if s.NextMode != cake.RunResume || s.ResumeID != id {
+		s.generation++
 		s.SessionID = ""
 		s.TaskID = ""
 		// The previous invocation's announced id belongs to the old target; drop

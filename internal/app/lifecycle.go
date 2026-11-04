@@ -13,17 +13,59 @@ const (
 	phaseDraining
 )
 
-// operationKey identifies one request. The request counter is per operation
-// and never repeats. The run/replay migration adds the session generation and
-// target session to this key; compaction and suggestion only need the counter
-// today.
+// sessionGeneration identifies continuity of the session target. It advances
+// only when the user leaves the current target (/new, Ctrl+N, or a /resume pick
+// that actually changes the target), never when a run merely reports its own id.
+type sessionGeneration uint64
+
+// outcome is what a completed request did. It is not a lifecycle phase: a
+// phase says whether a child still holds a resource, while the outcome says
+// whether the result may drive a later action.
+type outcome uint8
+
+const (
+	outcomeNone outcome = iota
+	outcomeSuccess
+	outcomeFailure
+	outcomeCanceled
+)
+
+// operationKey identifies one request. The generation scopes the request to the
+// session target it started for; request is per operation and never repeats;
+// sessionID is the target session when the request has one. A stale generation
+// suppresses application, but the caller still settles the phase so the
+// resource gate opens once the child is reaped.
 type operationKey struct {
-	request uint64
+	generation sessionGeneration
+	request    uint64
+	sessionID  string
 }
 
 func (k operationKey) zero() bool {
 	return k == operationKey{}
 }
+
+// admission is one capability's gate decision. A refusal carries the exact
+// text for that capability, so a prompt and a session command can share the
+// same blocking phase without sharing the user-facing wording.
+type admission struct {
+	allowed bool
+	reason  refusalReason
+	text    string
+}
+
+type refusalReason uint8
+
+const (
+	refuseNone refusalReason = iota
+	refuseExiting
+	refuseBrowserOpen
+	refuseRunActive
+	refuseRunDraining
+	refuseReplayLoading
+	refuseCompactionActive
+	refuseCompactionDraining
+)
 
 // pendingOperation owns the request identity, cancel function, and reaping
 // channel for one model-owned child. It deliberately knows nothing about input
@@ -34,13 +76,13 @@ type pendingOperation struct {
 	key      operationKey
 	drainKey operationKey
 	cancelFn context.CancelFunc
-	done     chan struct{}
+	done     <-chan struct{}
 }
 
 // begin starts one request. Callers start a request only after the previous
 // one has settled; a begin therefore replaces any stale zero value left by a
 // test or a zero-value Model.
-func (o *pendingOperation) begin(key operationKey, cancel context.CancelFunc, done chan struct{}) {
+func (o *pendingOperation) begin(key operationKey, cancel context.CancelFunc, done <-chan struct{}) {
 	o.phase = phaseInFlight
 	o.key = key
 	o.drainKey = operationKey{}
@@ -130,4 +172,87 @@ func (o *pendingOperation) clear() {
 func (o *pendingOperation) clearReap() {
 	o.cancelFn = nil
 	o.done = nil
+}
+
+// runBusy reports whether a run holds a resource that gates prompt submission
+// and session retargeting. Both an active and a draining run stay busy until its
+// result is settled.
+func (m Model) runBusy() bool {
+	return m.runOp.active() || m.runOp.draining()
+}
+
+// runActive reports whether a run is still in flight (not merely draining).
+func (m Model) runActive() bool {
+	return m.runOp.active()
+}
+
+// replayBusy reports whether startup hydration still owns a child. Replay is
+// typed as its own phase by task 139; until then these fields are the same
+// loading/draining resource gate.
+func (m Model) replayBusy() bool {
+	return m.hydrating || m.replayPending || m.replayRun != nil
+}
+
+// exiting reports whether the exit phase is draining. Input is ignored from
+// that point until every child is reaped.
+func (m Model) exiting() bool {
+	return m.exitPhase == phaseDraining
+}
+
+// completedTurn is the one answer both post-turn operations use. A clean
+// completed turn is an outcomeSuccess result for the current session target;
+// canceled, failed, incomplete, or superseded runs never qualify.
+func (m Model) completedTurn() bool {
+	return m.runOutcome == outcomeSuccess && m.runGeneration == m.session.Generation()
+}
+
+// admitPrompt and admitRetarget are the two capability-specific uses of the
+// same gate. They check the same resource-busy phases but return the distinct
+// refusal wording each caller already showed.
+func (m Model) admitPrompt() admission {
+	return m.admit(false)
+}
+
+func (m Model) admitRetarget() admission {
+	return m.admit(true)
+}
+
+func (m Model) admit(retarget bool) admission {
+	if m.exiting() {
+		return admission{reason: refuseExiting}
+	}
+	if m.browserOpen {
+		return admission{reason: refuseBrowserOpen, text: "close the session browser first"}
+	}
+	if m.runActive() {
+		if retarget {
+			return admission{reason: refuseRunActive, text: "finish or cancel the running task first"}
+		}
+		return admission{reason: refuseRunActive, text: "a task is already running — Ctrl+C cancels it"}
+	}
+	if m.runOp.draining() {
+		if retarget {
+			return admission{reason: refuseRunDraining, text: "wait for the canceled task to exit first"}
+		}
+		return admission{reason: refuseRunDraining, text: "the canceled task is still stopping — wait for it to exit"}
+	}
+	if m.replayBusy() {
+		if retarget {
+			return admission{reason: refuseReplayLoading, text: "wait for session history to load first"}
+		}
+		return admission{reason: refuseReplayLoading, text: "waiting for session history to load…"}
+	}
+	if m.compaction.active() {
+		if retarget {
+			return admission{reason: refuseCompactionActive, text: "wait for context compaction to finish (Ctrl+C cancels it)"}
+		}
+		return admission{reason: refuseCompactionActive, text: "context compaction is running — wait for it or press Ctrl+C to cancel"}
+	}
+	if m.compaction.draining() {
+		if retarget {
+			return admission{reason: refuseCompactionDraining, text: "wait for canceled context compaction to exit first"}
+		}
+		return admission{reason: refuseCompactionDraining, text: "canceled context compaction is still stopping — wait for it to exit"}
+	}
+	return admission{allowed: true, reason: refuseNone}
 }

@@ -32,13 +32,16 @@ func (m Model) cancelRunning(timeout time.Duration) error {
 	if m.run != nil {
 		m.run.Cancel()
 	}
+	m.cancelRun()
 	m.cancelReplay()
 	m.cancelCompaction()
 	m.cancelSuggestion()
 	m.cancelSessionList()
 
 	ops := make([]childproc.Operation, 0, 5+len(m.sessionListDone))
-	if m.run != nil {
+	if done := m.runOp.doneChannel(); done != nil {
+		ops = append(ops, childproc.Operation{Name: "run", Done: done})
+	} else if m.run != nil {
 		ops = append(ops, childproc.Operation{Name: "run", Done: m.run.Done})
 	}
 	if m.replayRun != nil {

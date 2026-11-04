@@ -26,7 +26,16 @@ func suggestionReady(t *testing.T) Model {
 	m.cfg.Suggestions = SuggestionConfig{Enabled: true, Bin: "cake-suggest"}
 	m.session.OnTaskStart(cake.TaskStart{SessionID: suggestionSessionID, TaskID: "t-1"})
 	m.session.OnTaskComplete(success(suggestionSessionID))
-	m.sawComplete = true
+	markCompletedTurn(&m)
+	return m
+}
+
+// suggestionRunReady is the same completed turn with the run that produced it
+// still active, for tests that drive finishRun directly.
+func suggestionRunReady(t *testing.T) Model {
+	t.Helper()
+	m := suggestionReady(t)
+	beginTestRun(&m)
 	return m
 }
 
@@ -75,20 +84,26 @@ func TestCanSuggest(t *testing.T) {
 		{"idle completed pinned turn", func(*Model) {}, true},
 		{"disabled", func(m *Model) { m.cfg.Suggestions.Enabled = false }, false},
 		{"no session", func(m *Model) { m.cfg.NoSession = true }, false},
-		{"no completion record", func(m *Model) { m.session.LastComplete = nil }, false},
-		{"errored completion", func(m *Model) { m.session.LastComplete.IsError = true }, false},
+		{"no completion record", func(m *Model) {
+			m.session.LastComplete = nil
+			m.runOutcome = outcomeFailure
+		}, false},
+		{"errored completion", func(m *Model) {
+			m.session.LastComplete.IsError = true
+			m.runOutcome = outcomeFailure
+		}, false},
 		{"no pinned session", func(m *Model) { m.session.Reset() }, false},
 		{"draft in the composer", func(m *Model) { m.input.SetValue("draft") }, false},
 		{"request already in flight", func(m *Model) { m.suggestion.begin(operationKey{request: 1}, nil, make(chan struct{})) }, false},
 		{"ghost already showing", func(m *Model) { m.suggestionText = "shown" }, false},
 		{"held result waiting for compaction", func(m *Model) { m.pendingSuggestion = "held" }, false},
-		{"run in flight", func(m *Model) { m.running = true }, false},
+		{"run in flight", func(m *Model) { beginTestRun(m) }, false},
+		{"run draining", func(m *Model) { beginTestRun(m); m.runOp.cancel() }, false},
 		{"compaction in flight", func(m *Model) { m.compaction.begin(operationKey{request: 1}, nil, make(chan struct{})) }, true},
 		{"hydrating", func(m *Model) { m.hydrating = true }, false},
 		{"replay pending", func(m *Model) { m.replayPending = true }, false},
 		{"session browser open", func(m *Model) { m.browserOpen = true }, false},
-		{"exit pending", func(m *Model) { m.exitAfter = true }, false},
-		{"new session pending", func(m *Model) { m.newSessionPending = true }, false},
+		{"exit pending", func(m *Model) { m.exitPhase = phaseDraining }, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -303,8 +318,8 @@ func TestSubmitUsesSuggestionAsPrompt(t *testing.T) {
 
 	next, cmd := m.submit()
 	m = next.(Model)
-	if cmd == nil || !m.running {
-		t.Fatalf("submit did not start a run: running=%v cmd nil=%v", m.running, cmd == nil)
+	if cmd == nil || !m.runBusy() {
+		t.Fatalf("submit did not start a run: running=%v cmd nil=%v", m.runBusy(), cmd == nil)
 	}
 	if got := m.timeline.items[len(m.timeline.items)-1]; got.Kind != ui.KindUser || got.Text != "/exit" {
 		t.Fatalf("last item = %+v, want the suggestion as an ordinary user prompt", got)
@@ -416,7 +431,7 @@ func TestSuggestionCancelOnNewSession(t *testing.T) {
 }
 
 func TestFinishRunStartsSuggestion(t *testing.T) {
-	m := suggestionReady(t)
+	m := suggestionRunReady(t)
 	next, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	finished := next.(Model)
 	if cmd == nil || !finished.suggestion.active() {
@@ -431,7 +446,7 @@ func TestFinishRunFailureSkipsSuggestion(t *testing.T) {
 		{ExitCode: 1},
 		{Err: os.ErrDeadlineExceeded},
 	} {
-		m := suggestionReady(t)
+		m := suggestionRunReady(t)
 		next, cmd := m.finishRun(res)
 		finished := next.(Model)
 		if finished.suggestion.active() || cmd == nil {
@@ -443,7 +458,7 @@ func TestFinishRunFailureSkipsSuggestion(t *testing.T) {
 }
 
 func TestFinishRunErroredCompletionSkipsSuggestion(t *testing.T) {
-	m := suggestionReady(t)
+	m := suggestionRunReady(t)
 	m.session.LastComplete.IsError = true
 	next, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	finished := next.(Model)
@@ -503,7 +518,7 @@ EOF
 
 	tm, cmd := m.submit()
 	m = tm.(Model)
-	if cmd == nil || !m.running {
+	if cmd == nil || !m.runBusy() {
 		t.Fatal("an in-flight suggestion blocked prompt submission")
 	}
 	if !m.suggestion.draining() {
@@ -559,8 +574,8 @@ func TestQuitDrainsSuggestion(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("quit returned a command while the suggester child was in flight")
 	}
-	if !m.exitAfter || m.suggestion.doneChannel() == nil {
-		t.Fatalf("quit did not enter the drain state: exitAfter=%v done=%v", m.exitAfter, m.suggestion.doneChannel() != nil)
+	if !m.exiting() || m.suggestion.doneChannel() == nil {
+		t.Fatalf("quit did not enter the drain state: exiting=%v done=%v", m.exiting(), m.suggestion.doneChannel() != nil)
 	}
 	if m.suggestion.active() || m.suggestion.key.request != 0 || m.suggestion.cancelFn != nil {
 		t.Fatalf("quit did not invalidate the request: active=%v req=%d cancel=%v",
@@ -581,8 +596,8 @@ func TestQuitDrainsSuggestion(t *testing.T) {
 	m.input.SetValue("draft")
 	next, cmd := m.submit()
 	m = next.(Model)
-	if cmd != nil || m.running {
-		t.Fatalf("submit during quit drain started work: running=%v cmd nil=%v", m.running, cmd == nil)
+	if cmd != nil || m.runBusy() {
+		t.Fatalf("submit during quit drain started work: running=%v cmd nil=%v", m.runBusy(), cmd == nil)
 	}
 	next, keyCmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	m = next.(Model)
@@ -611,20 +626,21 @@ func TestQuitDrainsCanceledSuggestion(t *testing.T) {
 		t.Fatal("clearSuggestion dropped the drain channel before the child was reaped")
 	}
 	m, cmd := m.quit()
-	if cmd != nil || !m.exitAfter || m.suggestion.doneChannel() == nil {
-		t.Fatalf("quit of a canceled child = cmd nil %v, exitAfter %v, done %v; want a drain",
-			cmd == nil, m.exitAfter, m.suggestion.doneChannel() != nil)
+	if cmd != nil || !m.exiting() || m.suggestion.doneChannel() == nil {
+		t.Fatalf("quit of a canceled child = cmd nil %v, exiting %v, done %v; want a drain",
+			cmd == nil, m.exiting(), m.suggestion.doneChannel() != nil)
 	}
 }
 
 func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
-	ready := suggestionReady(t)
-	ready.cfg.Children = childproc.NewRegistry()
-	m := startSuggestionForTest(t, ready)
-	done := m.suggestion.done
-	if done == nil {
-		t.Fatal("suggestion has no drain channel")
-	}
+	m := suggestionReady(t)
+	m.cfg.Children = childproc.NewRegistry()
+	// Model an invalidated suggestion child whose reaping command the test
+	// controls, without launching the real suggester.
+	done := make(chan struct{})
+	m.suggestionSeq++
+	m.suggestion.begin(operationKey{request: m.suggestionSeq}, func() {}, done)
+	m.trackChild("suggestion", func() {}, done)
 	release := make(chan struct{})
 	go func() {
 		<-release
@@ -654,7 +670,7 @@ func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
 // starts both background calls and that a suggestion result arriving while the
 // compacting gate is closed is held until the compactor settles.
 func TestCompactionAndSuggestionRunTogether(t *testing.T) {
-	m := suggestionReady(t)
+	m := suggestionRunReady(t)
 	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
 	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
 
@@ -718,7 +734,7 @@ func TestStaleCompactionResultDropsHeldSuggestion(t *testing.T) {
 // TestCompactionSettleDropsHeldSuggestionWhenComposerChanges covers the held
 // result losing its claim before the compactor opens the gate.
 func TestCompactionSettleDropsHeldSuggestionWhenComposerChanges(t *testing.T) {
-	m := suggestionReady(t)
+	m := suggestionRunReady(t)
 	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
 	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
 
@@ -744,7 +760,7 @@ func TestCompactionSettleDropsHeldSuggestionWhenComposerChanges(t *testing.T) {
 // TestNewSessionDropsHeldSuggestion checks the new-session boundary discards a
 // result held for the old session before the compactor settles.
 func TestNewSessionDropsHeldSuggestion(t *testing.T) {
-	m := suggestionReady(t)
+	m := suggestionRunReady(t)
 	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
 	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
 
@@ -773,7 +789,7 @@ func TestNewSessionDropsHeldSuggestion(t *testing.T) {
 // TestFinishCompactionDoesNotStartSuggestion checks that settling a compaction
 // does not spend a second suggestion call after the turn's one attempt.
 func TestFinishCompactionDoesNotStartSuggestion(t *testing.T) {
-	m := suggestionReady(t)
+	m := suggestionRunReady(t)
 	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
 	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
 

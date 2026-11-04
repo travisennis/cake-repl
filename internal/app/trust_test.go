@@ -73,7 +73,7 @@ exit 9
 
 	m = runStartupTrustProbe(t, m)
 
-	if m.running {
+	if m.runBusy() {
 		t.Fatal("the startup trust probe started a run")
 	}
 	it := lastItem(t, m)

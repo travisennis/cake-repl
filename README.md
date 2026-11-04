@@ -237,6 +237,8 @@ down. The status line and timeline only show it shortened.
 - `/new` clears local session state; the next prompt starts fresh.
 - `Ctrl+N` clears the timeline and local session state immediately. If a task
   is running, it is canceled and its remaining events are discarded. Prompt
+  submission and `/new`, `/resume`, and `/sessions` stay refused until the
+  canceled child is reaped, so the next cake process cannot race it. Prompt
   history, the current input draft, and model/profile settings are preserved.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts
   stay pinned to the same session. Choosing a different session — through
@@ -279,9 +281,10 @@ down. The status line and timeline only show it shortened.
   `/resume <uuid>`, and `Esc` or `q` leaves the REPL idle and fresh so the next
   prompt starts a new session. `-resume <uuid>` keeps the replay-and-pin startup
   path above, and `-fork` stays mutually exclusive with `-resume` in both forms.
-- `/new` and `/resume` are rejected while a task or context compaction is
-  running. Finish or cancel it first (Ctrl+C), or use `Ctrl+N` to cancel and
-  start a new session in one action.
+- `/new` and `/resume` are rejected while a task, startup replay, or context
+  compaction is running or draining. Finish or cancel it first (Ctrl+C), or use
+  `Ctrl+N` to cancel and start a new session in one action; the retarget stays
+  refused until the canceled child has been reaped.
 - On exit, cake-repl prints the command that resumes the session. The hint
   reproduces the effective startup run controls — `-cwd`, `-config <path>` or
   `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
@@ -368,7 +371,8 @@ keep-tokens = 20000
   line read `compacting <elapsed>` with whole seconds, the composer footer
   names `Ctrl+C cancel · Ctrl+N new session`, and the terminal title carries
   the `[compacting]` prefix. Prompt submission is rejected, and
-  `/new`, `/resume`, and `/sessions` are refused. `Ctrl+C` cancels the child;
+  `/new`, `/resume`, and `/sessions` are refused until the child is reaped.
+  `Ctrl+C` cancels the child;
   `/exit` cancels and then exits; `Ctrl+N` cancels and starts a new session.
   The elapsed display is driven by the spinner the REPL already runs, so it
   adds no second timer and stops when the operation ends.
