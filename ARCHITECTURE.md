@@ -187,6 +187,20 @@ way.
   completion leaves the current mode unchanged; the REPL has no latest-session
   fallback. See
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
+- **Lifecycle state is typed and generation-scoped.** The model owns one
+  private state per operation (run, replay, compaction, suggestion, browser,
+  exit) with only idle, in-flight, and draining phases; success, no-op,
+  failure, and cancellation are completion outcomes, and ghost text is
+  presentation. Every child request carries the session generation of the
+  target it started for; `/new`, Ctrl+N, and a `/resume` or browser pick that
+  changes the target advance it. A generation mismatch suppresses late events
+  and results but never skips settling the request, so a resource-busy drain
+  keeps prompt submission and session retargeting closed until the child is
+  reaped. Run, replay, and compaction are resource-busy; a canceled replay
+  stays so until reaped, while suggestion and session-listing drains never
+  gate. One admission source and one presentation derivation serve submit,
+  slash commands, Ctrl+C, the title, status line, and composer. See
+  [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 - **Config is startup-only.** Config files set stable REPL defaults before the
   TUI starts, using hardcoded defaults < XDG config < project-local config <
   CLI flags. The automatic project-local layer cannot set `cake-bin`: that key
