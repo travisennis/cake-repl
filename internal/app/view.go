@@ -14,7 +14,7 @@ func (m Model) View() string {
 	if !m.ready {
 		return "starting cake-repl…"
 	}
-	body := m.timeline.View()
+	body := m.viewport.View()
 	if m.browserOpen {
 		body = m.browserView()
 	}
@@ -39,7 +39,7 @@ func (m Model) View() string {
 // not move while the browser is open, so every state is bounded to the
 // timeline's width and height however long or multiline its text is.
 func (m Model) browserView() string {
-	bodyHeight := browserBodyHeight(m.timeline.Height)
+	bodyHeight := browserBodyHeight(m.viewport.Height)
 	// fill pads a short text body to the full region and caps a long or
 	// multiline one; capBody only truncates, leaving the list's own layout
 	// alone. The error body is arbitrary stderr, so it must be capped, not just
@@ -58,7 +58,7 @@ func (m Model) browserView() string {
 	default:
 		body = capBody.Render(m.sessionList.View())
 	}
-	if m.timeline.Height <= 1 {
+	if m.viewport.Height <= 1 {
 		return body
 	}
 	hint := m.theme.PromptHint.MaxWidth(m.width).MaxHeight(1).Render("↑/↓ move · enter resume · esc close")

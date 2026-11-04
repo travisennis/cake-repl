@@ -19,8 +19,8 @@ import (
 // compactionStartIndex returns the live start notice's index, or -1 when the
 // timeline carries none.
 func compactionStartIndex(m Model) int {
-	for i := len(m.items) - 1; i >= 0; i-- {
-		if m.items[i].Kind == ui.KindInfo && strings.HasPrefix(m.items[i].Text, compactionStartPrefix) {
+	for i := len(m.timeline.items) - 1; i >= 0; i-- {
+		if m.timeline.items[i].Kind == ui.KindInfo && strings.HasPrefix(m.timeline.items[i].Text, compactionStartPrefix) {
 			return i
 		}
 	}
@@ -306,7 +306,7 @@ JSON
 	}
 	if idx := compactionStartIndex(m); idx < 0 {
 		t.Fatal("finishRun did not add a compaction start notice")
-	} else if got := m.items[idx].Text; got != compactionStartText {
+	} else if got := m.timeline.items[idx].Text; got != compactionStartText {
 		t.Errorf("start notice = %q, want %q", got, compactionStartText)
 	}
 	if line := m.statusLine(); !strings.Contains(line, "compacting 0s") {
@@ -347,7 +347,7 @@ JSON
 		t.Fatal("compaction state survived the result")
 	}
 	if idx := compactionStartIndex(m); idx >= 0 {
-		t.Fatalf("start notice survived the result: %+v", m.items[idx])
+		t.Fatalf("start notice survived the result: %+v", m.timeline.items[idx])
 	}
 	if line := m.statusLine(); strings.Contains(line, "compacting") {
 		t.Errorf("status line kept the busy state: %q", line)
@@ -367,13 +367,13 @@ JSON
 		t.Fatalf("timeline notice = %+v", it)
 	}
 	markers := 0
-	for _, it := range m.items {
+	for _, it := range m.timeline.items {
 		if it.Kind == ui.KindInfo && strings.HasPrefix(it.Text, "context compacted") {
 			markers++
 		}
 	}
 	if markers != 1 {
-		t.Fatalf("timeline has %d completion markers, want 1: %+v", markers, m.items)
+		t.Fatalf("timeline has %d completion markers, want 1: %+v", markers, m.timeline.items)
 	}
 	if title, ok := titleSetBy(m.titleCmd()); !ok || strings.HasPrefix(title, "[") {
 		t.Errorf("post-compaction title = %q, %v", title, ok)
@@ -527,7 +527,7 @@ JSON
 		t.Fatalf("context = %+v, want unchanged %+v", m.session.Context, before)
 	}
 	if idx := compactionStartIndex(m); idx >= 0 {
-		t.Fatalf("no-op left the start notice pending: %+v", m.items[idx])
+		t.Fatalf("no-op left the start notice pending: %+v", m.timeline.items[idx])
 	}
 	if it := lastItem(t, m); it.Kind != ui.KindInfo || it.Text != "context compaction skipped: below threshold" {
 		t.Fatalf("no-op notice = %+v", it)
@@ -563,7 +563,7 @@ func TestCompactionFailureKeepsSessionAndWarns(t *testing.T) {
 		t.Fatalf("failure notice = %+v", it)
 	}
 	if idx := compactionStartIndex(m); idx >= 0 {
-		t.Fatalf("failure left the start notice pending: %+v", m.items[idx])
+		t.Fatalf("failure left the start notice pending: %+v", m.timeline.items[idx])
 	}
 }
 
@@ -591,7 +591,7 @@ JSON
 		t.Fatalf("non-in-place notice = %+v", it)
 	}
 	if idx := compactionStartIndex(m); idx >= 0 {
-		t.Fatalf("non-in-place result left the start notice pending: %+v", m.items[idx])
+		t.Fatalf("non-in-place result left the start notice pending: %+v", m.timeline.items[idx])
 	}
 }
 
@@ -602,14 +602,14 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = tm.(Model)
 	done := runCompactionCmd(cmd)
-	before := len(m.items)
+	before := len(m.timeline.items)
 
 	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = tm.(Model)
 	// Cancellation is reported once, when the child is reaped; the keypress
 	// itself adds no notice, matching the run path. The start notice is still
 	// pending while the child drains.
-	if got := len(m.items); got != before {
+	if got := len(m.timeline.items); got != before {
 		t.Fatalf("ctrl+c changed the timeline from %d to %d items", before, got)
 	}
 	if idx := compactionStartIndex(m); idx < 0 {
@@ -632,7 +632,7 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 		t.Fatalf("canceled notice = %+v", it)
 	}
 	if idx := compactionStartIndex(m); idx >= 0 {
-		t.Fatalf("canceled result left the start notice pending: %+v", m.items[idx])
+		t.Fatalf("canceled result left the start notice pending: %+v", m.timeline.items[idx])
 	}
 	if m.session.Context == nil || m.session.Context.Tokens != 170_000 {
 		t.Fatalf("context changed on cancellation: %+v", m.session.Context)
@@ -697,8 +697,8 @@ func TestCtrlNWhileCompactingResetsWithoutApplyingResult(t *testing.T) {
 	if m.session.Context != nil {
 		t.Fatalf("stale compaction result seeded the new session: %+v", m.session.Context)
 	}
-	if len(m.items) != 1 || m.items[0].Text != "New session" {
-		t.Fatalf("timeline = %#v, want only the new-session boundary", m.items)
+	if len(m.timeline.items) != 1 || m.timeline.items[0].Text != "New session" {
+		t.Fatalf("timeline = %#v, want only the new-session boundary", m.timeline.items)
 	}
 }
 
@@ -861,8 +861,8 @@ JSON
 
 	tm, _ = m.execCommand(Command{Kind: CmdClear})
 	m = tm.(Model)
-	if len(m.items) != 0 {
-		t.Fatalf("timeline after /clear = %+v, want empty", m.items)
+	if len(m.timeline.items) != 0 {
+		t.Fatalf("timeline after /clear = %+v, want empty", m.timeline.items)
 	}
 
 	tm, _ = m.Update(waitForCompaction(t, done))
@@ -895,7 +895,7 @@ JSON
 	m = tm.(Model)
 	tm, _ = m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
-	if len(m.items) != 0 {
-		t.Fatalf("cleared no-op added a timeline item: %+v", m.items)
+	if len(m.timeline.items) != 0 {
+		t.Fatalf("cleared no-op added a timeline item: %+v", m.timeline.items)
 	}
 }

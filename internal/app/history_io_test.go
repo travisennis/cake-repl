@@ -447,7 +447,7 @@ func (r *errAfterReader) Read(p []byte) (int, error) {
 
 // warningItem returns the first warning timeline item.
 func warningItem(m Model) (ui.Item, bool) {
-	for _, it := range m.items {
+	for _, it := range m.timeline.items {
 		if it.Kind == ui.KindWarning {
 			return it, true
 		}
@@ -457,7 +457,7 @@ func warningItem(m Model) (ui.Item, bool) {
 
 // timelineContains reports whether any timeline item's text is exactly want.
 func timelineContains(m Model, want string) bool {
-	for _, it := range m.items {
+	for _, it := range m.timeline.items {
 		if it.Text == want {
 			return true
 		}

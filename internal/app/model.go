@@ -144,7 +144,8 @@ type Model struct {
 	ready  bool
 
 	input    textarea.Model
-	timeline viewport.Model
+	viewport viewport.Model
+	timeline timeline
 	spin     spinner.Model
 
 	running       bool
@@ -218,23 +219,11 @@ type Model struct {
 	session      sessionState
 	history      promptHistory
 	pendingCalls map[string]*ui.ToolBlock // call_id -> pending tool block
-	items        []ui.Item
 	// toolOutputMode applies to every tool block in the timeline and to tool
 	// blocks appended later in this REPL session. It starts hidden so a session
 	// opens with one header per tool call; Ctrl+O reveals truncated and then
 	// full output. See ADR 033.
 	toolOutputMode ui.ToolOutputMode
-
-	// rendered caches one rendered string per item at renderedWidth and is the
-	// source of truth for the viewport payload: syncViewport joins it with a
-	// double newline once per Update. timelineDirty records whether a mutation
-	// since the last sync needs a viewport push, so a burst of events costs one
-	// viewport.SetContent per Update instead of one per event. SetContent still
-	// re-parses the whole payload, so per-event cost stays linear in the
-	// timeline size; coalescing only removes the per-event constant.
-	rendered      []string
-	renderedWidth int
-	timelineDirty bool
 
 	// contentChanged is set by the updates that reshape the live region's
 	// visible content (a viewport push, a composer key) and read by the settle
@@ -568,41 +557,20 @@ func IdleTitleSequence(cwd string) string {
 	return ansi.SetWindowTitle(windowTitle(cwd, false, false))
 }
 
-// trimFront removes the first `over` items from the timeline and drops pending
-// calls whose tool block was trimmed away. Surviving pending calls need no
-// adjustment because they reference the block, not a slice position. The
-// survivors are copied into a fresh slice so the trimmed items' payloads
-// (tool outputs, assistant text) are released: reslicing would keep them
-// reachable through the old backing array, so -max-timeline-items would bound
-// the visible timeline but not the memory it pins.
-func (m *Model) trimFront(over int) {
-	kept := make([]ui.Item, len(m.items)-over)
-	copy(kept, m.items[over:])
-	m.items = kept
-	m.dropDetachedPendingCalls()
+// renderTimelineItem is the timeline owner's render callback. It captures the
+// current theme, output limit, and tool-output mode, so a toggle or resize is
+// reflected in every row the owner renders next.
+func (m *Model) renderTimelineItem(it ui.Item, width int) string {
+	return ui.RenderItem(m.theme, it, width, m.cfg.OutputLimit, m.toolOutputMode)
 }
 
-// appendItem adds a timeline item and renders it into the cache. It marks the
-// viewport payload dirty; the Update that applied the event syncs it once via
+// appendItem adds a timeline item, enforces the cap, and drops pending calls
+// whose tool block was trimmed away. The owner renders the item and keeps the
+// cached rows in step; the Update that applied the event syncs it once via
 // syncViewport.
 func (m *Model) appendItem(it ui.Item) {
-	m.items = append(m.items, it)
-	if m.cfg.MaxTimelineItems > 0 && len(m.items) > m.cfg.MaxTimelineItems {
-		over := len(m.items) - m.cfg.MaxTimelineItems
-		m.trimFront(over)
-		if m.ready {
-			// Copy the surviving renders too: reslicing would keep the old
-			// backing array (and the trimmed strings) reachable. The O(n) copy
-			// per trim over the cap is the cost of actually releasing the
-			// trimmed entries.
-			kept := make([]string, len(m.rendered)-over)
-			copy(kept, m.rendered[over:])
-			m.rendered = kept
-			m.timelineDirty = true
-		}
-	}
-	if m.ready {
-		m.appendTimelineContent(ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode))
+	if m.timeline.append(it, m.cfg.MaxTimelineItems, m.renderTimelineItem) > 0 {
+		m.dropDetachedPendingCalls()
 	}
 }
 
@@ -611,12 +579,12 @@ func (m *Model) appendItem(it ui.Item) {
 // This is used to insert assistant messages before pending tool calls when
 // cake emits function_call events before message events.
 func (m *Model) firstPendingToolIdx() int {
-	i := len(m.items) - 1
-	for i >= 0 && m.items[i].Kind == ui.KindTool && m.items[i].Tool != nil && !m.items[i].Tool.Done {
+	i := len(m.timeline.items) - 1
+	for i >= 0 && m.timeline.items[i].Kind == ui.KindTool && m.timeline.items[i].Tool != nil && !m.timeline.items[i].Tool.Done {
 		i--
 	}
 	i++ // first pending tool, or len(items) if none found
-	if i < len(m.items) {
+	if i < len(m.timeline.items) {
 		return i
 	}
 	return -1
@@ -627,8 +595,8 @@ func (m *Model) firstPendingToolIdx() int {
 // has arrived yet. Content is copied as received from cake, not sanitized:
 // the clipboard receives the same markdown source the user sees rendered.
 func (m Model) lastAssistantMarkdown() (text string, ok bool) {
-	for i := len(m.items) - 1; i >= 0; i-- {
-		it := m.items[i]
+	for i := len(m.timeline.items) - 1; i >= 0; i-- {
+		it := m.timeline.items[i]
 		if it.Kind == ui.KindAssistant && strings.TrimSpace(it.Text) != "" {
 			return it.Text, true
 		}
@@ -641,39 +609,18 @@ func (m Model) lastAssistantMarkdown() (text string, ok bool) {
 // "(thinking)" entry; any other event type ends the burst, and a marker
 // trimmed off the timeline simply starts a fresh one.
 func (m *Model) lastItemIsReasoning() bool {
-	return len(m.items) > 0 && m.items[len(m.items)-1].Kind == ui.KindReasoning
+	return len(m.timeline.items) > 0 && m.timeline.items[len(m.timeline.items)-1].Kind == ui.KindReasoning
 }
 
 // removeItemAt removes one item and its cached rendering. A pending call whose
 // tool block was removed is dropped; surviving calls need no adjustment because
 // they reference the block, not a slice position. It resolves the live
-// compaction start notice once its outcome is known. The surviving slices are
-// copied so the removed item and its rendered string are not kept reachable
-// through the old backing arrays.
+// compaction start notice once its outcome is known. The owner copies the
+// surviving slices so the removed item and its rendered string are released.
 func (m *Model) removeItemAt(idx int) {
-	if idx < 0 || idx >= len(m.items) {
-		return
+	if m.timeline.remove(idx) {
+		m.dropDetachedPendingCalls()
 	}
-	kept := make([]ui.Item, len(m.items)-1)
-	copy(kept, m.items[:idx])
-	copy(kept[idx:], m.items[idx+1:])
-	m.items = kept
-	m.dropDetachedPendingCalls()
-
-	if !m.ready {
-		return
-	}
-	if len(m.rendered) == len(m.items)+1 {
-		keptRenders := make([]string, len(m.rendered)-1)
-		copy(keptRenders, m.rendered[:idx])
-		copy(keptRenders[idx:], m.rendered[idx+1:])
-		m.rendered = keptRenders
-		m.timelineDirty = true
-		return
-	}
-	// The cache was not in step with items (an item appended before the first
-	// layout); rebuild it rather than leave a removed row in the payload.
-	m.rebuildTimeline()
 }
 
 // insertItemAt inserts an item at the given index, shifting subsequent items
@@ -681,36 +628,11 @@ func (m *Model) removeItemAt(idx int) {
 // MaxTimelineItems, the oldest items are trimmed first and idx is clamped into
 // the surviving slice, so the inserted item is never trimmed.
 func (m *Model) insertItemAt(idx int, it ui.Item) {
-	// Trim before inserting. Trimming after the shift would remove the newly
-	// inserted item when idx is 0 and the timeline is already at the cap.
-	trimmed := 0
-	if m.cfg.MaxTimelineItems > 0 && len(m.items) >= m.cfg.MaxTimelineItems {
-		trimmed = len(m.items) - m.cfg.MaxTimelineItems + 1
-		m.trimFront(trimmed)
-		idx -= trimmed
-		if idx < 0 {
-			idx = 0
-		}
-	}
-
-	m.items = append(m.items, ui.Item{}) // make room
-	copy(m.items[idx+1:], m.items[idx:])
-	m.items[idx] = it
-
-	if m.ready {
-		if trimmed > 0 {
-			// Drop the render cache before rebuilding: rebuild reslices to
-			// length zero, which would otherwise keep the pre-trim strings
-			// reachable through the old backing array.
-			m.rendered = nil
-			m.rebuildTimeline()
-		} else {
-			rendered := ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-			m.rendered = append(m.rendered, "") // make room
-			copy(m.rendered[idx+1:], m.rendered[idx:])
-			m.rendered[idx] = rendered
-			m.timelineDirty = true
-		}
+	// The owner trims before inserting: trimming after the shift would remove
+	// the newly inserted item when idx is 0 and the timeline is already at the
+	// cap.
+	if m.timeline.insert(idx, it, m.cfg.MaxTimelineItems, m.renderTimelineItem) > 0 {
+		m.dropDetachedPendingCalls()
 	}
 }
 
@@ -721,8 +643,8 @@ func (m *Model) toolIndex(tool *ui.ToolBlock) int {
 	if tool == nil {
 		return -1
 	}
-	for i := range m.items {
-		if m.items[i].Tool == tool {
+	for i := range m.timeline.items {
+		if m.timeline.items[i].Tool == tool {
 			return i
 		}
 	}
@@ -751,9 +673,9 @@ func (m *Model) dropDetachedPendingCalls() {
 	if len(m.pendingCalls) == 0 {
 		return
 	}
-	attached := make(map[*ui.ToolBlock]struct{}, len(m.items))
-	for i := range m.items {
-		if tool := m.items[i].Tool; tool != nil {
+	attached := make(map[*ui.ToolBlock]struct{}, len(m.timeline.items))
+	for i := range m.timeline.items {
+		if tool := m.timeline.items[i].Tool; tool != nil {
 			attached[tool] = struct{}{}
 		}
 	}
@@ -767,60 +689,13 @@ func (m *Model) dropDetachedPendingCalls() {
 // rerenderItem refreshes one item's cached rendering after it mutated in
 // place (a tool block receiving its output).
 func (m *Model) rerenderItem(idx int) {
-	if !m.ready || idx < 0 || idx >= len(m.rendered) {
-		return
-	}
-	m.rendered[idx] = ui.RenderItem(m.theme, m.items[idx], m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-	m.timelineDirty = true
+	m.timeline.rerender(idx, m.renderTimelineItem)
 }
 
 // rerenderToolItems refreshes every tool item's cached rendering while
 // reusing the cached strings for all other timeline item kinds.
 func (m *Model) rerenderToolItems() {
-	if !m.ready {
-		return
-	}
-	for i, it := range m.items {
-		if it.Kind == ui.KindTool {
-			m.rendered[i] = ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-		}
-	}
-	m.timelineDirty = true
-}
-
-// rebuildTimeline re-renders every item at the current viewport width. Width
-// changes and /clear use this; other changes update the cache incrementally.
-func (m *Model) rebuildTimeline() {
-	if !m.ready {
-		return
-	}
-	m.renderedWidth = m.timeline.Width
-	if len(m.items) == 0 {
-		// /clear and Ctrl+N empty the timeline; drop the backing array too, or
-		// reslicing to zero would keep every old rendered string pinned.
-		m.rendered = nil
-		m.timelineDirty = true
-		return
-	}
-	m.rendered = m.rendered[:0]
-	for _, it := range m.items {
-		m.rendered = append(m.rendered, ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode))
-	}
-	m.timelineDirty = true
-}
-
-// appendTimelineContent extends the render cache with one item's rendering.
-// The viewport payload is joined lazily at sync time, so appending never
-// copies the accumulated timeline string.
-func (m *Model) appendTimelineContent(rendered string) {
-	m.rendered = append(m.rendered, rendered)
-	m.timelineDirty = true
-}
-
-// rebuildTimelineContent returns the viewport payload: every cached rendering
-// joined with a double newline. syncViewport recomputes it once per Update.
-func (m *Model) rebuildTimelineContent() string {
-	return strings.Join(m.rendered, "\n\n")
+	m.timeline.rerenderTools(m.renderTimelineItem)
 }
 
 // syncViewport pushes the joined render cache into the viewport, keeping the
@@ -834,18 +709,17 @@ func (m *Model) rebuildTimelineContent() string {
 // content a terminal that measures a glyph wider than charmbracelet/x/ansi can
 // wrap, scrolling the screen under the renderer. See ADR 020.
 func (m *Model) syncViewport() {
-	if !m.timelineDirty {
+	if !m.timeline.takeDirty() {
 		return
 	}
-	m.timelineDirty = false
 	m.contentChanged = true
-	atBottom := m.timeline.AtBottom()
-	yOffset := m.timeline.YOffset
-	m.timeline.SetContent(m.rebuildTimelineContent())
+	atBottom := m.viewport.AtBottom()
+	yOffset := m.viewport.YOffset
+	m.viewport.SetContent(m.timeline.content())
 	if atBottom {
-		m.timeline.GotoBottom()
+		m.viewport.GotoBottom()
 	} else {
-		m.timeline.SetYOffset(yOffset)
+		m.viewport.SetYOffset(yOffset)
 	}
 }
 
@@ -873,21 +747,21 @@ func (m *Model) layout() {
 	}
 	m.resizeSessionList(vpHeight)
 	if !m.ready {
-		m.timeline = viewport.New(m.width, vpHeight)
+		m.viewport = viewport.New(m.width, vpHeight)
 		m.ready = true
-		m.rebuildTimeline()
+		m.timeline.resize(m.width, m.renderTimelineItem)
 		return
 	}
 
-	atBottom := m.timeline.AtBottom()
-	m.timeline.Height = vpHeight
-	if m.timeline.Width != m.width {
-		m.timeline.Width = m.width
-		m.rebuildTimeline()
+	atBottom := m.viewport.AtBottom()
+	m.viewport.Height = vpHeight
+	if m.viewport.Width != m.width {
+		m.viewport.Width = m.width
+		m.timeline.resize(m.width, m.renderTimelineItem)
 		return
 	}
 	if atBottom {
-		m.timeline.GotoBottom()
+		m.viewport.GotoBottom()
 	}
 }
 

@@ -78,7 +78,8 @@ internal/compact/        External compactor: one documented subprocess and its r
 internal/suggest/        External prompt suggester: one documented subprocess and its result document.
   suggest.go             Args, Suggest: bounded subprocess lifecycle + document decoding.
 internal/app/            Bubble Tea state machine (the REPL itself).
-  model.go               Model struct, layout, timeline render cache.
+  model.go               Model struct, layout, viewport wiring.
+  timeline.go            Timeline owner: items, cached rendered rows, cap trim, dirty state.
   update.go              Event/key/command handling (the Update loop).
   session.go             sessionState: pure run-mode state machine.
   compaction.go          Between-turn trigger and ceiling policy, gate, and compactor result handling (ADR 023, ADR 025).
@@ -129,10 +130,15 @@ Dependency direction is one-way: `app` depends on `cake`, `compact`,
   `-resume` requests, which lists through this same operation and pins the
   chosen session through the `/resume <uuid>` transition. See
   [`docs/adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md`](docs/adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
-- **Pure rendering.** `internal/ui` is side-effect-free and takes data in,
-  strings out. The timeline is rendered through a per-item cache; width changes
-  and `/clear` trigger a full re-render, while global tool-output mode changes
-  re-render only tool items.
+- **Timeline state has one owner.** `internal/app/timeline.go` owns the
+  structured items, their cached rendered rows, the render width, and the dirty
+  flag. Append, insert, remove, trim, rerender, and clear are the only
+  mutations, so the rows and items cannot drift apart: once a width is known,
+  `len(rendered) == len(items)`. Width changes rebuild explicitly; `/clear` and
+  a new session drop both slices; a global tool-output mode change re-renders
+  only tool rows. The viewport is a separate widget that receives the joined
+  payload once per Update. Rendering itself stays in side-effect-free
+  `internal/ui`, which takes data in and returns strings.
 - **Pending tool calls hold stable blocks.** `pendingCalls` maps a cake call id
   to the `*ui.ToolBlock`, not a timeline index. Trimming, insertion, removal,
   and cap eviction move the item slice; they cannot retarget a late function

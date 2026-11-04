@@ -311,9 +311,10 @@ in plain text like every other surface.
   `AGENTS.md`/routing. Update the applicable surfaces together.
 - **Color assumptions.** Don't hardcode escape codes; go through `internal/ui`
   theme/lipgloss so `-no-color` (termenv `Ascii`) still works.
-- **Width/layout regressions.** The timeline caches per-item renders; width
-  changes and `/clear` force a full rebuild, while `Ctrl+O` re-renders only tool
-  items. Don't bypass the cache.
+- **Width/layout regressions.** The timeline owner keeps the items and their
+  cached renders in step; width changes rebuild every row, `/clear` and a new
+  session drop both, and `Ctrl+O` re-renders only tool rows. Don't bypass the
+  owner.
 - **Truncation surprises.** Respect rune-safe truncation; never cut mid-rune.
 - **Mistaking a green suite for proof that output is right.** Tests call
   `Update` and `View` directly and assert on strings; nothing drives the

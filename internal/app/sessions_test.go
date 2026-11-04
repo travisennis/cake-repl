@@ -394,7 +394,7 @@ func TestBrowserCloseKeysLeaveNoState(t *testing.T) {
 		{Type: tea.KeyCtrlC},
 	} {
 		m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
-		before := len(m.items)
+		before := len(m.timeline.items)
 		tm, _ := m.handleKey(k)
 		got := tm.(Model)
 		if got.browserOpen {
@@ -403,7 +403,7 @@ func TestBrowserCloseKeysLeaveNoState(t *testing.T) {
 		if got.session.ResumeID != "" {
 			t.Errorf("%v should not pin a session, got %q", k, got.session.ResumeID)
 		}
-		if len(got.items) != before {
+		if len(got.timeline.items) != before {
 			t.Errorf("%v appended a timeline item", k)
 		}
 	}
@@ -503,7 +503,7 @@ func TestBrowserViewStaysWithinTimelineRegion(t *testing.T) {
 			if len(lines) != m.height {
 				t.Fatalf("view height = %d, want %d: the composer/status line moved\n%s", len(lines), m.height, view)
 			}
-			region := lines[:m.timeline.Height]
+			region := lines[:m.viewport.Height]
 			for i, line := range region {
 				if w := lipgloss.Width(line); w > m.width {
 					t.Errorf("region row %d width = %d, want <= %d: %q", i, w, m.width, line)

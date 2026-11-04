@@ -210,8 +210,8 @@ func renderItemsFull(th ui.Theme, items []ui.Item, width int, outputLimit int, t
 // the same join, computed lazily at sync time.
 func assertCacheMatchesFullRender(t *testing.T, m *Model, step string) {
 	t.Helper()
-	want := renderItemsFull(m.theme, m.items, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-	got := strings.Join(m.rendered, "\n\n")
+	want := renderItemsFull(m.theme, m.timeline.items, m.timeline.width, m.cfg.OutputLimit, m.toolOutputMode)
+	got := strings.Join(m.timeline.rendered, "\n\n")
 	if got != want {
 		t.Fatalf("%s: cached render diverged from full render\ngot:\n%s\nwant:\n%s", step, got, want)
 	}
@@ -238,8 +238,8 @@ func TestTimelineCacheMatchesFullRender(t *testing.T) {
 
 	m.width = 60
 	m.layout()
-	if m.renderedWidth != 60 {
-		t.Errorf("renderedWidth = %d after resize, want 60", m.renderedWidth)
+	if m.timeline.width != 60 {
+		t.Errorf("timeline width = %d after resize, want 60", m.timeline.width)
 	}
 	assertCacheMatchesFullRender(t, &m, "after width change")
 }
@@ -248,16 +248,16 @@ func TestHeightOnlyLayoutDoesNotRerender(t *testing.T) {
 	m := newLaidOutModel()
 	m.applyEvent(cake.Message{Role: "assistant", Content: "hello"})
 
-	m.rendered[0] = "sentinel"
+	m.timeline.rendered[0] = "sentinel"
 	m.height = 40
 	m.layout()
-	if m.rendered[0] != "sentinel" {
+	if m.timeline.rendered[0] != "sentinel" {
 		t.Error("height-only resize should not re-render items")
 	}
 
 	m.width = 79
 	m.layout()
-	if m.rendered[0] == "sentinel" {
+	if m.timeline.rendered[0] == "sentinel" {
 		t.Error("width change should re-render items")
 	}
 }
@@ -265,8 +265,8 @@ func TestHeightOnlyLayoutDoesNotRerender(t *testing.T) {
 func TestLayoutAccountsForPromptComposerChrome(t *testing.T) {
 	m := newLaidOutModel()
 	wantMinHeight := 24 - minInputHeight - composerVerticalChrome - statusHeight
-	if m.timeline.Height != wantMinHeight {
-		t.Fatalf("minimum-input timeline height = %d, want %d", m.timeline.Height, wantMinHeight)
+	if m.viewport.Height != wantMinHeight {
+		t.Fatalf("minimum-input timeline height = %d, want %d", m.viewport.Height, wantMinHeight)
 	}
 	inputLine := strings.Split(m.input.View(), "\n")[0]
 	if got := lipgloss.Width(inputLine); got != 80-composerHorizontalChrome {
@@ -276,8 +276,8 @@ func TestLayoutAccountsForPromptComposerChrome(t *testing.T) {
 	m.input.SetValue(strings.Repeat("line\n", maxInputHeight+2))
 	m.layout()
 	wantMaxHeight := 24 - maxInputHeight - composerVerticalChrome - statusHeight
-	if m.timeline.Height != wantMaxHeight {
-		t.Fatalf("maximum-input timeline height = %d, want %d", m.timeline.Height, wantMaxHeight)
+	if m.viewport.Height != wantMaxHeight {
+		t.Fatalf("maximum-input timeline height = %d, want %d", m.viewport.Height, wantMaxHeight)
 	}
 	if got := len(strings.Split(m.View(), "\n")); got != m.height {
 		t.Errorf("view height = %d lines, want terminal height %d", got, m.height)
@@ -306,8 +306,8 @@ func TestInlineLayoutKeepsHistoryVisible(t *testing.T) {
 			m.layout()
 
 			inputHeight := inputHeightFor(m.input.LineCount())
-			region := m.timeline.Height + inputHeight + composerVerticalChrome + statusHeight
-			if half := tt.height / 2; region > half && m.timeline.Height > 1 {
+			region := m.viewport.Height + inputHeight + composerVerticalChrome + statusHeight
+			if half := tt.height / 2; region > half && m.viewport.Height > 1 {
 				t.Errorf("live region = %d rows, want at most half of %d", region, tt.height)
 			}
 			if history := tt.height - region; history < 1 {
@@ -324,8 +324,8 @@ func TestInlineLayoutCapsViewportHeight(t *testing.T) {
 	m := New(Config{Inline: true})
 	m.width, m.height = 80, 60
 	m.layout()
-	if want := inlineViewportMax; m.timeline.Height != want {
-		t.Fatalf("tall-terminal inline timeline height = %d, want cap %d", m.timeline.Height, want)
+	if want := inlineViewportMax; m.viewport.Height != want {
+		t.Fatalf("tall-terminal inline timeline height = %d, want cap %d", m.viewport.Height, want)
 	}
 }
 
@@ -333,13 +333,13 @@ func TestInlineLayoutRecomputesOnResize(t *testing.T) {
 	m := New(Config{Inline: true})
 	m.width, m.height = 80, 24
 	m.layout()
-	initial := m.timeline.Height
+	initial := m.viewport.Height
 
 	// Growing the terminal must grow the capped region, not leave the old one.
 	m.width, m.height = 100, 40
 	m.layout()
-	if m.timeline.Height <= initial {
-		t.Fatalf("timeline height after growing = %d, want more than %d", m.timeline.Height, initial)
+	if m.viewport.Height <= initial {
+		t.Fatalf("timeline height after growing = %d, want more than %d", m.viewport.Height, initial)
 	}
 
 	// Shrinking must leave the capped region within the terminal and at least
@@ -347,7 +347,7 @@ func TestInlineLayoutRecomputesOnResize(t *testing.T) {
 	m.width, m.height = 60, 12
 	m.layout()
 	inputHeight := inputHeightFor(m.input.LineCount())
-	region := m.timeline.Height + inputHeight + composerVerticalChrome + statusHeight
+	region := m.viewport.Height + inputHeight + composerVerticalChrome + statusHeight
 	if history := m.height - region; history < 1 {
 		t.Errorf("history rows above the region after shrinking = %d, want at least 1", history)
 	}
@@ -376,17 +376,17 @@ func TestComposerRowsTracksInputHeight(t *testing.T) {
 
 func TestAppendItemExtendsRenderCacheWithoutRebuild(t *testing.T) {
 	m := newLaidOutModel()
-	before := len(m.rendered)
-	m.rendered[0] = "sentinel"
+	before := len(m.timeline.rendered)
+	m.timeline.rendered[0] = "sentinel"
 	m.appendItem(ui.Item{Kind: ui.KindAssistant, Text: "hello"})
 
-	if m.rendered[0] != "sentinel" {
+	if m.timeline.rendered[0] != "sentinel" {
 		t.Fatal("append rebuilt existing cache entries")
 	}
-	if len(m.rendered) != before+1 {
-		t.Fatalf("render cache length = %d, want %d", len(m.rendered), before+1)
+	if len(m.timeline.rendered) != before+1 {
+		t.Fatalf("render cache length = %d, want %d", len(m.timeline.rendered), before+1)
 	}
-	if !m.timelineDirty {
+	if !m.timeline.dirty {
 		t.Error("append did not mark the viewport payload dirty")
 	}
 }
@@ -404,8 +404,8 @@ func TestToolOutputRerenderPreservesBottomPinning(t *testing.T) {
 		m.applyEvent(cake.Message{Role: "assistant", Content: "line one\nline two\nline three"})
 	}
 	m.applyEvent(cake.FunctionCall{CallID: "c-1", Name: "bash", Arguments: `{"command":"printf hi"}`})
-	m.timeline.GotoBottom()
-	if !m.timeline.AtBottom() {
+	m.viewport.GotoBottom()
+	if !m.viewport.AtBottom() {
 		t.Fatal("test setup did not reach bottom")
 	}
 
@@ -414,10 +414,10 @@ func TestToolOutputRerenderPreservesBottomPinning(t *testing.T) {
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "hi"})
 	m.syncViewport()
 
-	if !m.timeline.AtBottom() {
+	if !m.viewport.AtBottom() {
 		t.Fatal("tool output rerender should preserve bottom pinning")
 	}
-	if !strings.Contains(strings.Join(m.rendered, "\n\n"), "hi") {
+	if !strings.Contains(strings.Join(m.timeline.rendered, "\n\n"), "hi") {
 		t.Fatal("tool output rerender did not update timeline content")
 	}
 	assertCacheMatchesFullRender(t, &m, "after pinned tool output rerender")
@@ -436,7 +436,7 @@ func TestFinishRunRerendersOrphanedToolCalls(t *testing.T) {
 	if len(got.pendingCalls) != 0 {
 		t.Errorf("pendingCalls not drained: %v", got.pendingCalls)
 	}
-	if !strings.Contains(strings.Join(got.rendered, "\n\n"), "no output — task ended") {
+	if !strings.Contains(strings.Join(got.timeline.rendered, "\n\n"), "no output — task ended") {
 		t.Error("orphaned tool call not re-rendered with its terminal state")
 	}
 	assertCacheMatchesFullRender(t, &got, "after finishRun")
@@ -494,10 +494,10 @@ func TestClearResetsRenderCache(t *testing.T) {
 	// that here so the cleared payload is pushed to the viewport.
 	got.syncViewport()
 
-	if len(got.items) != 0 || len(got.rendered) != 0 {
-		t.Errorf("clear left items=%d rendered=%d", len(got.items), len(got.rendered))
+	if len(got.timeline.items) != 0 || len(got.timeline.rendered) != 0 {
+		t.Errorf("clear left items=%d rendered=%d", len(got.timeline.items), len(got.timeline.rendered))
 	}
-	if got.timelineDirty {
+	if got.timeline.dirty {
 		t.Errorf("clear left the viewport payload dirty")
 	}
 	if got.toolOutputMode != ui.ToolOutputHidden {
@@ -509,7 +509,7 @@ func TestClearResetsRenderCache(t *testing.T) {
 func TestClearReleasesRenderedBackingArray(t *testing.T) {
 	m := newLaidOutModel()
 	m.applyEvent(cake.Message{Role: "assistant", Content: strings.Repeat("hello ", 100)})
-	if cap(m.rendered) == 0 {
+	if cap(m.timeline.rendered) == 0 {
 		t.Fatal("setup: render cache has no backing array to release")
 	}
 
@@ -517,8 +517,8 @@ func TestClearReleasesRenderedBackingArray(t *testing.T) {
 	got := tm.(Model)
 	got.syncViewport()
 
-	if got.rendered != nil {
-		t.Errorf("clear kept the render cache backing array (len=%d cap=%d); old rendered strings stay pinned", len(got.rendered), cap(got.rendered))
+	if got.timeline.rendered != nil {
+		t.Errorf("clear kept the render cache backing array (len=%d cap=%d); old rendered strings stay pinned", len(got.timeline.rendered), cap(got.timeline.rendered))
 	}
 }
 
@@ -530,11 +530,11 @@ func TestNewSessionReleasesRenderedBackingArray(t *testing.T) {
 	got := tm.(Model)
 	got.syncViewport()
 
-	if len(got.rendered) != 1 || cap(got.rendered) != 1 {
-		t.Errorf("new session cache len=%d cap=%d, want 1/1 (fresh backing array, old strings released)", len(got.rendered), cap(got.rendered))
+	if len(got.timeline.rendered) != 1 || cap(got.timeline.rendered) != 1 {
+		t.Errorf("new session cache len=%d cap=%d, want 1/1 (fresh backing array, old strings released)", len(got.timeline.rendered), cap(got.timeline.rendered))
 	}
-	if len(got.items) != 1 || got.items[0].Kind != ui.KindInfo {
-		t.Errorf("new session items = %+v, want the info banner only", got.items)
+	if len(got.timeline.items) != 1 || got.timeline.items[0].Kind != ui.KindInfo {
+		t.Errorf("new session items = %+v, want the info banner only", got.timeline.items)
 	}
 }
 
@@ -543,7 +543,7 @@ func TestToolOutputRetentionCapAppliesAtIngest(t *testing.T) {
 	m.applyEvent(cake.FunctionCall{CallID: "c-1", Name: "bash", Arguments: `{"command":"cat big.bin"}`})
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x", 2<<20)})
 
-	tool := m.items[len(m.items)-1].Tool
+	tool := m.timeline.items[len(m.timeline.items)-1].Tool
 	if len(tool.Output) >= 2<<20 {
 		t.Fatalf("retained %d bytes of oversized output; want the ingest cap applied", len(tool.Output))
 	}
@@ -558,15 +558,15 @@ func TestToolOutputRetentionCapAppliesAtIngest(t *testing.T) {
 	// included), so Ctrl+O full mode is unchanged for realistic results. The
 	// orphan branch (unknown call id) applies the same cap.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-unknown", Output: "hello"})
-	if last := m.items[len(m.items)-1]; last.Tool.Output != "hello" {
+	if last := m.timeline.items[len(m.timeline.items)-1]; last.Tool.Output != "hello" {
 		t.Errorf("orphan normal output = %q, want verbatim 'hello'", last.Tool.Output)
 	}
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-unknown", Output: "hello\n"})
-	if last := m.items[len(m.items)-1]; last.Tool.Output != "hello\n" {
+	if last := m.timeline.items[len(m.timeline.items)-1]; last.Tool.Output != "hello\n" {
 		t.Errorf("orphan newline-terminated output = %q, want verbatim 'hello\\n'", last.Tool.Output)
 	}
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-unknown", Output: strings.Repeat("y", 2<<20)})
-	if last := m.items[len(m.items)-1]; len(last.Tool.Output) >= 2<<20 {
+	if last := m.timeline.items[len(m.timeline.items)-1]; len(last.Tool.Output) >= 2<<20 {
 		t.Errorf("orphan oversized output retained %d bytes; want the ingest cap applied", len(last.Tool.Output))
 	}
 }
@@ -580,14 +580,14 @@ func TestMaxTimelineItemsTrimReleasesTrimmedPayloads(t *testing.T) {
 		m.applyEvent(cake.FunctionCallOutput{CallID: fmt.Sprintf("c-%d", i), Output: strings.Repeat("x", (i+1)<<10)})
 	}
 
-	if len(m.items) != 3 || len(m.rendered) != 3 {
-		t.Fatalf("timeline after trim: items=%d rendered=%d, want 3/3", len(m.items), len(m.rendered))
+	if len(m.timeline.items) != 3 || len(m.timeline.rendered) != 3 {
+		t.Fatalf("timeline after trim: items=%d rendered=%d, want 3/3", len(m.timeline.items), len(m.timeline.rendered))
 	}
 	// trimFront copies survivors into a fresh exact-size slice; extra capacity
 	// would mean the old backing array (and the trimmed items' payloads) is
 	// still reachable.
-	if cap(m.items) != len(m.items) {
-		t.Errorf("items cap=%d > len=%d; trimmed item payloads stay pinned", cap(m.items), len(m.items))
+	if cap(m.timeline.items) != len(m.timeline.items) {
+		t.Errorf("items cap=%d > len=%d; trimmed item payloads stay pinned", cap(m.timeline.items), len(m.timeline.items))
 	}
 	assertCacheMatchesFullRender(t, &m, "after capped trim")
 }

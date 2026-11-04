@@ -309,8 +309,8 @@ func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) 
 // was still on the timeline. Ctrl+N, /clear, or the timeline cap can drop it
 // before the result is reaped, so the completion path cannot assume it is there.
 func (m *Model) removeCompactionStart() bool {
-	for i := len(m.items) - 1; i >= 0; i-- {
-		if m.items[i].Kind == ui.KindInfo && strings.HasPrefix(m.items[i].Text, compactionStartPrefix) {
+	for i := len(m.timeline.items) - 1; i >= 0; i-- {
+		if m.timeline.items[i].Kind == ui.KindInfo && strings.HasPrefix(m.timeline.items[i].Text, compactionStartPrefix) {
 			m.removeItemAt(i)
 			return true
 		}

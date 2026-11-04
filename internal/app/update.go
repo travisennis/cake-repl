@@ -425,7 +425,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Action == tea.MouseActionPress &&
 			(msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
 			var cmd tea.Cmd
-			m.timeline, cmd = m.timeline.Update(msg)
+			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
 		}
 
@@ -510,7 +510,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.PageUp), key.Matches(msg, m.keys.PageDown):
 		var cmd tea.Cmd
-		m.timeline, cmd = m.timeline.Update(msg)
+		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 
 	case key.Matches(msg, m.keys.TabComplete):
@@ -612,9 +612,8 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.session.Reset()
 	m.sawComplete = false
 	m.replayWarn = false
-	m.items = nil
+	m.timeline.clear()
 	m.pendingCalls = map[string]*ui.ToolBlock{}
-	m.rebuildTimeline()
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "New session"})
 	return m, nil
 }
@@ -856,12 +855,11 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.sessionInfo()})
 
 	case CmdClear:
-		m.items = nil
+		m.timeline.clear()
 		// Pending calls reference tool blocks directly; clear the map so a
 		// late output appends a standalone block instead of mutating one that
 		// is no longer on the timeline.
 		m.pendingCalls = map[string]*ui.ToolBlock{}
-		m.rebuildTimeline()
 	}
 	return m, nil
 }

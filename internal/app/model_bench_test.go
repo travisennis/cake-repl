@@ -148,8 +148,7 @@ func newBenchModel(w benchWorkload, n int) Model {
 	m.width, m.height = benchWidth, benchHeight
 	m.layout()
 	// Drop New's banner item so the timeline holds exactly n items.
-	m.items = nil
-	m.rebuildTimeline()
+	m.timeline.clear()
 	for i := range n {
 		m.appendItem(w.item(i))
 	}
@@ -180,26 +179,31 @@ func BenchmarkTimelineRenderItem(b *testing.B) {
 		it := w.newItem
 		b.ResetTimer()
 		for range b.N {
-			benchSink = ui.RenderItem(m.theme, it, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
+			benchSink = ui.RenderItem(m.theme, it, m.timeline.width, m.cfg.OutputLimit, m.toolOutputMode)
 		}
 	})
 }
 
 // BenchmarkTimelineAppendContent measures the append-path cache extension
-// (one entry added to the render slice, payload marked dirty), with no
-// viewport work. Restoring the base slice between iterations is O(1) — a
-// slice-header assignment — so the loop measures one append onto a timeline
-// of size n. Task 054 made this O(1): the old `timelineContent += rendered`
-// copied the whole accumulated string on every append.
+// (one item and one rendered row added, payload marked dirty), with no
+// viewport work. The render callback returns a pre-rendered string, so the
+// loop measures the owner's append and slice maintenance, not RenderItem.
+// Restoring both slice headers between iterations is O(1), so the loop
+// measures one append onto a timeline of size n. Task 054 made the payload
+// join lazy: the old `timelineContent += rendered` copied the whole
+// accumulated string on every append.
 func BenchmarkTimelineAppendContent(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, w benchWorkload, _ int) {
-		rendered := ui.RenderItem(m.theme, w.newItem, m.renderedWidth, m.cfg.OutputLimit, m.toolOutputMode)
-		base := m.rendered[:len(m.rendered)-1]
+		rendered := ui.RenderItem(m.theme, w.newItem, m.timeline.width, m.cfg.OutputLimit, m.toolOutputMode)
+		items := append(make([]ui.Item, 0, len(m.timeline.items)+1), m.timeline.items...)
+		rows := append(make([]string, 0, len(m.timeline.rendered)+1), m.timeline.rendered...)
+		preRendered := func(ui.Item, int) string { return rendered }
 		b.ResetTimer()
 		for range b.N {
-			m.rendered = base
-			m.timelineDirty = false
-			m.appendTimelineContent(rendered)
+			m.timeline.items = items
+			m.timeline.rendered = rows
+			m.timeline.dirty = false
+			m.timeline.append(w.newItem, 0, preRendered)
 		}
 	})
 }
@@ -212,7 +216,7 @@ func BenchmarkTimelineRebuildContent(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, _ benchWorkload, _ int) {
 		b.ResetTimer()
 		for range b.N {
-			m.rebuildTimelineContent()
+			m.timeline.content()
 		}
 	})
 }
@@ -223,10 +227,10 @@ func BenchmarkTimelineRebuildContent(b *testing.B) {
 // runs instead.
 func BenchmarkTimelineViewportSetContent(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, _ benchWorkload, _ int) {
-		content := m.rebuildTimelineContent()
+		content := m.timeline.content()
 		b.ResetTimer()
 		for range b.N {
-			m.timeline.SetContent(content)
+			m.viewport.SetContent(content)
 		}
 	})
 }
@@ -241,12 +245,12 @@ func BenchmarkTimelineAppendEndToEnd(b *testing.B) {
 		// Give both caches spare capacity so the reset-and-append loop measures
 		// the append path rather than one slice growth per iteration; in
 		// production that growth is amortized across many appends.
-		m.items = append(make([]ui.Item, 0, n+1), m.items...)
-		m.rendered = append(make([]string, 0, n+1), m.rendered...)
-		items, rendered := m.items, m.rendered
+		m.timeline.items = append(make([]ui.Item, 0, n+1), m.timeline.items...)
+		m.timeline.rendered = append(make([]string, 0, n+1), m.timeline.rendered...)
+		items, rendered := m.timeline.items, m.timeline.rendered
 		b.ResetTimer()
 		for range b.N {
-			m.items, m.rendered, m.timelineDirty = items, rendered, false
+			m.timeline.items, m.timeline.rendered, m.timeline.dirty = items, rendered, false
 			m.appendItem(it)
 			m.syncViewport()
 		}
@@ -280,12 +284,12 @@ func BenchmarkTimelineToolOutputEndToEnd(b *testing.B) {
 func BenchmarkTimelineBurstCoalesced(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, w benchWorkload, n int) {
 		it := w.newItem
-		m.items = append(make([]ui.Item, 0, n+maxEventsPerBatch), m.items...)
-		m.rendered = append(make([]string, 0, n+maxEventsPerBatch), m.rendered...)
-		items, rendered := m.items, m.rendered
+		m.timeline.items = append(make([]ui.Item, 0, n+maxEventsPerBatch), m.timeline.items...)
+		m.timeline.rendered = append(make([]string, 0, n+maxEventsPerBatch), m.timeline.rendered...)
+		items, rendered := m.timeline.items, m.timeline.rendered
 		b.ResetTimer()
 		for range b.N {
-			m.items, m.rendered, m.timelineDirty = items, rendered, false
+			m.timeline.items, m.timeline.rendered, m.timeline.dirty = items, rendered, false
 			for range maxEventsPerBatch {
 				m.appendItem(it)
 			}
@@ -302,12 +306,12 @@ func BenchmarkTimelineBurstCoalesced(b *testing.B) {
 func BenchmarkTimelineBurstPerEventSync(b *testing.B) {
 	runBenchCases(b, func(b *testing.B, m *Model, w benchWorkload, n int) {
 		it := w.newItem
-		m.items = append(make([]ui.Item, 0, n+maxEventsPerBatch), m.items...)
-		m.rendered = append(make([]string, 0, n+maxEventsPerBatch), m.rendered...)
-		items, rendered := m.items, m.rendered
+		m.timeline.items = append(make([]ui.Item, 0, n+maxEventsPerBatch), m.timeline.items...)
+		m.timeline.rendered = append(make([]string, 0, n+maxEventsPerBatch), m.timeline.rendered...)
+		items, rendered := m.timeline.items, m.timeline.rendered
 		b.ResetTimer()
 		for range b.N {
-			m.items, m.rendered, m.timelineDirty = items, rendered, false
+			m.timeline.items, m.timeline.rendered, m.timeline.dirty = items, rendered, false
 			for range maxEventsPerBatch {
 				m.appendItem(it)
 				m.syncViewport()
@@ -325,15 +329,15 @@ func BenchmarkTimelineBurstPerEventSync(b *testing.B) {
 // runs.
 func retainedPayloadBytes(m *Model) int64 {
 	var n int64
-	for i := range m.items {
-		it := &m.items[i]
+	for i := range m.timeline.items {
+		it := &m.timeline.items[i]
 		n += int64(len(it.Text))
 		if it.Tool != nil {
 			n += int64(len(it.Tool.Arguments) + len(it.Tool.Output))
 		}
 	}
-	for i := range m.rendered {
-		n += int64(len(m.rendered[i]))
+	for i := range m.timeline.rendered {
+		n += int64(len(m.timeline.rendered[i]))
 	}
 	return n
 }
@@ -349,11 +353,11 @@ func pinnedPayloadBytes(m *Model, input string) int64 {
 	if input == "" {
 		return n
 	}
-	for i := range m.items {
-		if m.items[i].Tool == nil {
+	for i := range m.timeline.items {
+		if m.timeline.items[i].Tool == nil {
 			continue
 		}
-		if o := m.items[i].Tool.Output; backingAliases(o, input) {
+		if o := m.timeline.items[i].Tool.Output; backingAliases(o, input) {
 			n += int64(len(input) - len(o))
 		}
 	}

@@ -22,10 +22,10 @@ import (
 // lastItem returns the most recently appended timeline item.
 func lastItem(t *testing.T, m Model) ui.Item {
 	t.Helper()
-	if len(m.items) == 0 {
+	if len(m.timeline.items) == 0 {
 		t.Fatal("timeline is empty")
 	}
-	return m.items[len(m.items)-1]
+	return m.timeline.items[len(m.timeline.items)-1]
 }
 
 // assertPendingToolAt checks that callID is pending and its stable tool block is
@@ -36,7 +36,7 @@ func assertPendingToolAt(t *testing.T, m Model, callID string, idx int) {
 	if !ok {
 		t.Fatalf("pendingCalls[%q] missing", callID)
 	}
-	if idx < 0 || idx >= len(m.items) || m.items[idx].Tool != tool {
+	if idx < 0 || idx >= len(m.timeline.items) || m.timeline.items[idx].Tool != tool {
 		t.Errorf("pendingCalls[%q] does not reference items[%d]", callID, idx)
 	}
 }
@@ -210,10 +210,10 @@ func TestToggleToolOutputCyclesGlobalMode(t *testing.T) {
 	if m.toolOutputMode != ui.ToolOutputHidden {
 		t.Fatalf("default mode = %v, want hidden", m.toolOutputMode)
 	}
-	if got := m.rendered[len(m.rendered)-1]; strings.Contains(got, "xxxx") || strings.Contains(got, "truncated") {
+	if got := m.timeline.rendered[len(m.timeline.rendered)-1]; strings.Contains(got, "xxxx") || strings.Contains(got, "truncated") {
 		t.Errorf("hidden default rendered tool output: %q", tailPreview(got))
 	}
-	if got := m.rendered[len(m.rendered)-1]; !strings.Contains(got, "make") {
+	if got := m.timeline.rendered[len(m.timeline.rendered)-1]; !strings.Contains(got, "make") {
 		t.Errorf("hidden default did not render the tool header: %q", tailPreview(got))
 	}
 
@@ -222,7 +222,7 @@ func TestToggleToolOutputCyclesGlobalMode(t *testing.T) {
 	if m.toolOutputMode != ui.ToolOutputTruncated {
 		t.Errorf("after first toggle: mode = %v, want truncated", m.toolOutputMode)
 	}
-	if got := m.rendered[len(m.rendered)-1]; !strings.Contains(got, "… truncated") {
+	if got := m.timeline.rendered[len(m.timeline.rendered)-1]; !strings.Contains(got, "… truncated") {
 		t.Errorf("first toggle did not render truncated output: %q", tailPreview(got))
 	}
 
@@ -231,7 +231,7 @@ func TestToggleToolOutputCyclesGlobalMode(t *testing.T) {
 	if m.toolOutputMode != ui.ToolOutputFull {
 		t.Errorf("after second toggle: mode = %v, want full", m.toolOutputMode)
 	}
-	if got := strings.Count(m.rendered[len(m.rendered)-1], "x"); got != len(output) {
+	if got := strings.Count(m.timeline.rendered[len(m.timeline.rendered)-1], "x"); got != len(output) {
 		t.Errorf("second toggle rendered %d output bytes, want %d", got, len(output))
 	}
 
@@ -254,17 +254,17 @@ func TestToggleToolOutputRerendersEveryToolAndReusesNonToolCache(t *testing.T) {
 
 	// A sentinel proves the cached non-tool rendering is reused rather than
 	// regenerated during the global tool-only pass.
-	m.rendered[0] = "cached non-tool sentinel"
+	m.timeline.rendered[0] = "cached non-tool sentinel"
 
 	tm, _ := m.toggleToolOutput()
 	m = tm.(Model)
 	tm, _ = m.toggleToolOutput()
 	m = tm.(Model)
-	if m.rendered[0] != "cached non-tool sentinel" {
+	if m.timeline.rendered[0] != "cached non-tool sentinel" {
 		t.Error("non-tool cached render was replaced")
 	}
-	firstRendered := m.rendered[len(m.rendered)-2]
-	secondRendered := m.rendered[len(m.rendered)-1]
+	firstRendered := m.timeline.rendered[len(m.timeline.rendered)-2]
+	secondRendered := m.timeline.rendered[len(m.timeline.rendered)-1]
 	if strings.Count(firstRendered, "x") != len(firstOutput) {
 		t.Error("older tool did not render its full output after global toggle")
 	}
@@ -287,7 +287,7 @@ func TestToggleToolOutputBeforeToolAppliesToFutureOutput(t *testing.T) {
 	}
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x", ui.DefaultOutputLimit+100)})
-	if strings.Contains(m.rendered[len(m.rendered)-1], "truncated") {
+	if strings.Contains(m.timeline.rendered[len(m.timeline.rendered)-1], "truncated") {
 		t.Error("tool output added after toggle did not use full mode")
 	}
 }
@@ -305,14 +305,14 @@ func TestToggleToolOutputPreservesViewportOffset(t *testing.T) {
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x\n", 100)})
 
 	// Scroll up away from the bottom.
-	m.timeline.GotoBottom()
-	m.timeline.SetYOffset(5)
-	wantOffset := m.timeline.YOffset
+	m.viewport.GotoBottom()
+	m.viewport.SetYOffset(5)
+	wantOffset := m.viewport.YOffset
 
 	tm, _ := m.toggleToolOutput()
 	m = tm.(Model)
-	if m.timeline.YOffset != wantOffset {
-		t.Errorf("viewport offset changed: got %d, want %d", m.timeline.YOffset, wantOffset)
+	if m.viewport.YOffset != wantOffset {
+		t.Errorf("viewport offset changed: got %d, want %d", m.viewport.YOffset, wantOffset)
 	}
 	assertCacheMatchesFullRender(t, &m, "after toggle with preserved offset")
 }
@@ -327,11 +327,11 @@ func TestToggleToolOutputPreservesBottomPinning(t *testing.T) {
 	}
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"make"}`})
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: strings.Repeat("x\n", 100)})
-	m.timeline.GotoBottom()
+	m.viewport.GotoBottom()
 
 	tm, _ := m.toggleToolOutput()
 	m = tm.(Model)
-	if !m.timeline.AtBottom() {
+	if !m.viewport.AtBottom() {
 		t.Fatal("global tool output toggle did not preserve bottom pinning")
 	}
 	assertCacheMatchesFullRender(t, &m, "after pinned global toggle")
@@ -984,7 +984,7 @@ func TestLiveCompactionMarkerDoesNotSeedContext(t *testing.T) {
 	})
 
 	var marker string
-	for _, item := range m.items {
+	for _, item := range m.timeline.items {
 		if item.Kind == ui.KindInfo {
 			marker = item.Text
 		}
@@ -1025,8 +1025,8 @@ func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.
 	if got.session.SessionID != "" || got.session.TaskID != "" || got.session.LastComplete != nil {
 		t.Errorf("old session state survived: %+v", got.session)
 	}
-	if len(got.items) != 1 || got.items[0].Kind != ui.KindInfo || got.items[0].Text != "New session" {
-		t.Fatalf("timeline = %#v, want one New session info item", got.items)
+	if len(got.timeline.items) != 1 || got.timeline.items[0].Kind != ui.KindInfo || got.timeline.items[0].Text != "New session" {
+		t.Fatalf("timeline = %#v, want one New session info item", got.timeline.items)
 	}
 	if len(got.pendingCalls) != 0 {
 		t.Errorf("pending calls survived: %#v", got.pendingCalls)
@@ -1062,8 +1062,8 @@ func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
 	// without adding it to the fresh timeline.
 	tm, _ = m.Update(eventsMsg{evs: []cake.Event{cake.Message{Role: "assistant", Content: "late old output"}}})
 	m = tm.(Model)
-	if len(m.items) != 1 || m.items[0].Text != "New session" {
-		t.Fatalf("late event crossed boundary: %#v", m.items)
+	if len(m.timeline.items) != 1 || m.timeline.items[0].Text != "New session" {
+		t.Fatalf("late event crossed boundary: %#v", m.timeline.items)
 	}
 
 	tm, cmd = m.finishRun(cake.Result{Canceled: true})
@@ -1075,8 +1075,8 @@ func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
 	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
 		t.Errorf("old cancellation re-pinned session: mode=%v id=%q", mode, id)
 	}
-	if len(m.items) != 1 || m.items[0].Text != "New session" {
-		t.Errorf("cancel result crossed boundary: %#v", m.items)
+	if len(m.timeline.items) != 1 || m.timeline.items[0].Text != "New session" {
+		t.Errorf("cancel result crossed boundary: %#v", m.timeline.items)
 	}
 }
 
@@ -1168,7 +1168,7 @@ func TestEventBatchAppliesAllEventsWithSingleSync(t *testing.T) {
 	m.running = true
 	m.run = &cake.Run{} // re-issued waitForRun is never executed here.
 
-	before := len(m.items)
+	before := len(m.timeline.items)
 	evs := make([]cake.Event, 0, 5)
 	for i := range 5 {
 		evs = append(evs, cake.Message{Role: "assistant", Content: fmt.Sprintf("msg %d", i)})
@@ -1179,15 +1179,15 @@ func TestEventBatchAppliesAllEventsWithSingleSync(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Update did not re-issue waitForRun")
 	}
-	if len(got.items) != before+5 {
-		t.Fatalf("items = %d, want %d", len(got.items), before+5)
+	if len(got.timeline.items) != before+5 {
+		t.Fatalf("items = %d, want %d", len(got.timeline.items), before+5)
 	}
 	// One sync pushed the whole batch: the viewport already shows every
 	// event, and nothing is left dirty for the next Update.
-	if !strings.Contains(got.timeline.View(), "msg 4") {
+	if !strings.Contains(got.viewport.View(), "msg 4") {
 		t.Fatal("viewport does not show the batch content after one Update")
 	}
-	if got.timelineDirty {
+	if got.timeline.dirty {
 		t.Error("sync left the viewport payload dirty")
 	}
 	assertCacheMatchesFullRender(t, &got, "after event batch")
@@ -1195,12 +1195,12 @@ func TestEventBatchAppliesAllEventsWithSingleSync(t *testing.T) {
 
 func TestSubmitEmptyInputIsNoop(t *testing.T) {
 	m := newLaidOutModel()
-	before := len(m.items)
+	before := len(m.timeline.items)
 	m.input.SetValue("   \n ")
 	tm, cmd := m.submit()
 	got := tm.(Model)
-	if len(got.items) != before {
-		t.Errorf("empty submit appended items: %d -> %d", before, len(got.items))
+	if len(got.timeline.items) != before {
+		t.Errorf("empty submit appended items: %d -> %d", before, len(got.timeline.items))
 	}
 	if cmd != nil {
 		t.Errorf("cmd = %v, want nil", cmd)
@@ -1708,11 +1708,11 @@ func TestHumanDuration(t *testing.T) {
 
 func TestApplyEventMessages(t *testing.T) {
 	m := newLaidOutModel()
-	base := len(m.items)
+	base := len(m.timeline.items)
 
 	m.applyEvent(cake.Message{Role: "assistant", Content: "an answer", ID: "msg-1", Status: "completed"})
-	if len(m.items) != base+1 {
-		t.Fatalf("assistant message appended %d items, want 1", len(m.items)-base)
+	if len(m.timeline.items) != base+1 {
+		t.Fatalf("assistant message appended %d items, want 1", len(m.timeline.items)-base)
 	}
 	it := lastItem(t, m)
 	if it.Kind != ui.KindAssistant || it.Text != "an answer" {
@@ -1720,24 +1720,24 @@ func TestApplyEventMessages(t *testing.T) {
 	}
 
 	m.applyEvent(cake.Message{Role: "assistant", Content: " \n\t"})
-	if len(m.items) != base+1 {
+	if len(m.timeline.items) != base+1 {
 		t.Error("whitespace-only assistant message should be skipped")
 	}
 
 	m.applyEvent(cake.Message{Role: "user", Content: "the prompt"})
-	if len(m.items) != base+1 {
+	if len(m.timeline.items) != base+1 {
 		t.Error("user message should be skipped — the prompt is already on the timeline")
 	}
 
 	m.applyEvent(cake.Message{Role: "developer", Content: "instructions"})
-	if len(m.items) != base+1 {
+	if len(m.timeline.items) != base+1 {
 		t.Error("other-role message should be skipped without a debug log")
 	}
 
 	var debug bytes.Buffer
 	m.cfg.DebugLog = &debug
 	m.applyEvent(cake.Message{Role: "developer", Content: "instructions"})
-	if len(m.items) != base+1 {
+	if len(m.timeline.items) != base+1 {
 		t.Error("other-role message should stay off the timeline even with a debug log")
 	}
 	if got := debug.String(); !strings.Contains(got, "developer message: instructions") {
@@ -1754,42 +1754,42 @@ func TestApplyEventReordersAssistantMessageBeforePendingTool(t *testing.T) {
 
 	// Step 1: function_call arrives first (wrong order from Chat Completions backend)
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"ls"}`})
-	if len(m.items) != 2 { // info + tool
-		t.Fatalf("after function_call: got %d items, want 2", len(m.items))
+	if len(m.timeline.items) != 2 { // info + tool
+		t.Fatalf("after function_call: got %d items, want 2", len(m.timeline.items))
 	}
-	if m.items[1].Kind != ui.KindTool {
-		t.Fatalf("item[1].Kind = %v, want KindTool", m.items[1].Kind)
+	if m.timeline.items[1].Kind != ui.KindTool {
+		t.Fatalf("item[1].Kind = %v, want KindTool", m.timeline.items[1].Kind)
 	}
 	assertCacheMatchesFullRender(t, &m, "after function_call")
 
 	// Step 2: assistant message arrives after the tool call
 	m.applyEvent(cake.Message{Role: "assistant", Content: "I'll search for the file."})
-	if len(m.items) != 3 { // info + assistant + tool
-		t.Fatalf("after message: got %d items, want 3", len(m.items))
+	if len(m.timeline.items) != 3 { // info + assistant + tool
+		t.Fatalf("after message: got %d items, want 3", len(m.timeline.items))
 	}
 	// Message should now be BEFORE the tool call
-	if m.items[1].Kind != ui.KindAssistant {
-		t.Errorf("item[1].Kind = %v, want KindAssistant (should be before tool)", m.items[1].Kind)
+	if m.timeline.items[1].Kind != ui.KindAssistant {
+		t.Errorf("item[1].Kind = %v, want KindAssistant (should be before tool)", m.timeline.items[1].Kind)
 	}
-	if m.items[1].Text != "I'll search for the file." {
-		t.Errorf("item[1].Text = %q, want assistant text", m.items[1].Text)
+	if m.timeline.items[1].Text != "I'll search for the file." {
+		t.Errorf("item[1].Text = %q, want assistant text", m.timeline.items[1].Text)
 	}
-	if m.items[2].Kind != ui.KindTool {
-		t.Errorf("item[2].Kind = %v, want KindTool (should be after message)", m.items[2].Kind)
+	if m.timeline.items[2].Kind != ui.KindTool {
+		t.Errorf("item[2].Kind = %v, want KindTool (should be after message)", m.timeline.items[2].Kind)
 	}
 	assertPendingToolAt(t, m, "c-1", 2)
 	assertCacheMatchesFullRender(t, &m, "after message before pending tool")
 
 	// Step 3: tool output still correctly updates the tool at its new position
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "file.txt"})
-	if m.items[2].Kind != ui.KindTool {
-		t.Fatalf("after output: item[2].Kind = %v, want KindTool", m.items[2].Kind)
+	if m.timeline.items[2].Kind != ui.KindTool {
+		t.Fatalf("after output: item[2].Kind = %v, want KindTool", m.timeline.items[2].Kind)
 	}
-	if !m.items[2].Tool.Done {
+	if !m.timeline.items[2].Tool.Done {
 		t.Error("tool should be done after receiving output")
 	}
-	if m.items[2].Tool.Output != "file.txt" {
-		t.Errorf("tool output = %q, want 'file.txt'", m.items[2].Tool.Output)
+	if m.timeline.items[2].Tool.Output != "file.txt" {
+		t.Errorf("tool output = %q, want 'file.txt'", m.timeline.items[2].Tool.Output)
 	}
 	assertCacheMatchesFullRender(t, &m, "after tool output")
 }
@@ -1798,11 +1798,11 @@ func TestApplyEventAppendsAssistantMessageWhenNoPendingTool(t *testing.T) {
 	// When there are no pending tool calls, the message should append normally.
 	m := newLaidOutModel()
 	m.applyEvent(cake.Message{Role: "assistant", Content: "hello"})
-	if len(m.items) != 2 { // info + assistant
-		t.Fatalf("got %d items, want 2", len(m.items))
+	if len(m.timeline.items) != 2 { // info + assistant
+		t.Fatalf("got %d items, want 2", len(m.timeline.items))
 	}
-	if m.items[1].Kind != ui.KindAssistant || m.items[1].Text != "hello" {
-		t.Errorf("item[1] = %+v, want assistant message", m.items[1])
+	if m.timeline.items[1].Kind != ui.KindAssistant || m.timeline.items[1].Text != "hello" {
+		t.Errorf("item[1] = %+v, want assistant message", m.timeline.items[1])
 	}
 	assertCacheMatchesFullRender(t, &m, "after assistant message")
 }
@@ -1817,15 +1817,15 @@ func TestApplyEventReordersAssistantBeforeMultiplePendingTools(t *testing.T) {
 	// At this point: info, tool(c-1), tool(c-2)
 
 	m.applyEvent(cake.Message{Role: "assistant", Content: "Let me check both files."})
-	if len(m.items) != 4 { // info + assistant + tool + tool
-		t.Fatalf("got %d items, want 4", len(m.items))
+	if len(m.timeline.items) != 4 { // info + assistant + tool + tool
+		t.Fatalf("got %d items, want 4", len(m.timeline.items))
 	}
 	// Message should be at index 1, before both tools
-	if m.items[1].Kind != ui.KindAssistant || m.items[1].Text != "Let me check both files." {
-		t.Errorf("item[1] = %+v, want assistant message before tools", m.items[1])
+	if m.timeline.items[1].Kind != ui.KindAssistant || m.timeline.items[1].Text != "Let me check both files." {
+		t.Errorf("item[1] = %+v, want assistant message before tools", m.timeline.items[1])
 	}
-	if m.items[2].Kind != ui.KindTool || m.items[3].Kind != ui.KindTool {
-		t.Errorf("items[2,3] should be tools, got kinds %v, %v", m.items[2].Kind, m.items[3].Kind)
+	if m.timeline.items[2].Kind != ui.KindTool || m.timeline.items[3].Kind != ui.KindTool {
+		t.Errorf("items[2,3] should be tools, got kinds %v, %v", m.timeline.items[2].Kind, m.timeline.items[3].Kind)
 	}
 	// Both pending calls should still reference their tools at the shifted positions.
 	assertPendingToolAt(t, m, "c-1", 2)
@@ -1834,10 +1834,10 @@ func TestApplyEventReordersAssistantBeforeMultiplePendingTools(t *testing.T) {
 	// Outputs arriving in reverse order must still land on the right blocks.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-2", Output: "second"})
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "first"})
-	if got := m.items[2].Tool.Output; got != "first" {
+	if got := m.timeline.items[2].Tool.Output; got != "first" {
 		t.Errorf("item[2] output = %q, want first", got)
 	}
-	if got := m.items[3].Tool.Output; got != "second" {
+	if got := m.timeline.items[3].Tool.Output; got != "second" {
 		t.Errorf("item[3] output = %q, want second", got)
 	}
 	if len(m.pendingCalls) != 0 {
@@ -1854,14 +1854,14 @@ func TestApplyEventPreservesOrderWhenMessageBeforeTool(t *testing.T) {
 	m.applyEvent(cake.Message{Role: "assistant", Content: "I'll search for it."})
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"find ."}`})
 
-	if len(m.items) != 3 { // info + assistant + tool
-		t.Fatalf("got %d items, want 3", len(m.items))
+	if len(m.timeline.items) != 3 { // info + assistant + tool
+		t.Fatalf("got %d items, want 3", len(m.timeline.items))
 	}
-	if m.items[1].Kind != ui.KindAssistant || m.items[1].Text != "I'll search for it." {
-		t.Errorf("item[1] = %+v, want assistant message", m.items[1])
+	if m.timeline.items[1].Kind != ui.KindAssistant || m.timeline.items[1].Text != "I'll search for it." {
+		t.Errorf("item[1] = %+v, want assistant message", m.timeline.items[1])
 	}
-	if m.items[2].Kind != ui.KindTool {
-		t.Errorf("item[2].Kind = %v, want KindTool", m.items[2].Kind)
+	if m.timeline.items[2].Kind != ui.KindTool {
+		t.Errorf("item[2].Kind = %v, want KindTool", m.timeline.items[2].Kind)
 	}
 	assertPendingToolAt(t, m, "c-1", 2)
 	assertCacheMatchesFullRender(t, &m, "after correct-order events")
@@ -1872,8 +1872,8 @@ func TestInsertItemAtDoesNotPanicOnEmptyTimeline(t *testing.T) {
 	m.pendingCalls = map[string]*ui.ToolBlock{}
 	// insertItemAt on an empty model must not panic.
 	m.insertItemAt(0, ui.Item{Kind: ui.KindAssistant, Text: "hello"})
-	if len(m.items) != 1 || m.items[0].Text != "hello" {
-		t.Errorf("insert into empty: got %+v", m.items)
+	if len(m.timeline.items) != 1 || m.timeline.items[0].Text != "hello" {
+		t.Errorf("insert into empty: got %+v", m.timeline.items)
 	}
 }
 
@@ -1906,15 +1906,15 @@ func TestInsertItemAtRespectsMaxTimelineItems(t *testing.T) {
 	// Fill the timeline to the cap: info + assistant + tool
 	m.applyEvent(cake.Message{Role: "assistant", Content: "first"})
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{"command":"ls"}`})
-	if len(m.items) != 3 {
-		t.Fatalf("before insert: got %d items, want 3", len(m.items))
+	if len(m.timeline.items) != 3 {
+		t.Fatalf("before insert: got %d items, want 3", len(m.timeline.items))
 	}
 
 	// Now insert a second assistant message before the pending tool.
 	// This would push items to 4, triggering the trim to 3.
 	m.applyEvent(cake.Message{Role: "assistant", Content: "Let me check."})
-	if len(m.items) != m.cfg.MaxTimelineItems {
-		t.Errorf("after insert: got %d items, want %d", len(m.items), m.cfg.MaxTimelineItems)
+	if len(m.timeline.items) != m.cfg.MaxTimelineItems {
+		t.Errorf("after insert: got %d items, want %d", len(m.timeline.items), m.cfg.MaxTimelineItems)
 	}
 
 	// The initial info message should have been trimmed.
@@ -1926,14 +1926,14 @@ func TestInsertItemAtRespectsMaxTimelineItems(t *testing.T) {
 	//   insert at 2 → [info, a1, a2, tool]
 	//   then trim front by 1 → [a1, a2, tool]
 	// So surviving: assistant "first", assistant "Let me check.", tool
-	if m.items[0].Kind != ui.KindAssistant || m.items[0].Text != "first" {
-		t.Errorf("item[0] = %+v, want assistant 'first'", m.items[0])
+	if m.timeline.items[0].Kind != ui.KindAssistant || m.timeline.items[0].Text != "first" {
+		t.Errorf("item[0] = %+v, want assistant 'first'", m.timeline.items[0])
 	}
-	if m.items[1].Kind != ui.KindAssistant || m.items[1].Text != "Let me check." {
-		t.Errorf("item[1] = %+v, want assistant 'Let me check.'", m.items[1])
+	if m.timeline.items[1].Kind != ui.KindAssistant || m.timeline.items[1].Text != "Let me check." {
+		t.Errorf("item[1] = %+v, want assistant 'Let me check.'", m.timeline.items[1])
 	}
-	if m.items[2].Kind != ui.KindTool {
-		t.Errorf("item[2].Kind = %v, want KindTool", m.items[2].Kind)
+	if m.timeline.items[2].Kind != ui.KindTool {
+		t.Errorf("item[2].Kind = %v, want KindTool", m.timeline.items[2].Kind)
 	}
 
 	// Pending call should still reference the tool at its new position.
@@ -1941,8 +1941,8 @@ func TestInsertItemAtRespectsMaxTimelineItems(t *testing.T) {
 
 	// Tool output should still update correctly.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "files"})
-	if !m.items[2].Tool.Done || m.items[2].Tool.Output != "files" {
-		t.Errorf("tool after output: done=%v output=%q", m.items[2].Tool.Done, m.items[2].Tool.Output)
+	if !m.timeline.items[2].Tool.Done || m.timeline.items[2].Tool.Output != "files" {
+		t.Errorf("tool after output: done=%v output=%q", m.timeline.items[2].Tool.Done, m.timeline.items[2].Tool.Output)
 	}
 
 	assertCacheMatchesFullRender(t, &m, "after cap-enforced insert and tool output")
@@ -1956,8 +1956,8 @@ func TestInsertItemAtCapPreservesInsertedMessage(t *testing.T) {
 
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
 	m.applyEvent(cake.FunctionCall{ID: "fc-2", CallID: "c-2", Name: "bash", Arguments: `{}`})
-	if len(m.items) != 2 {
-		t.Fatalf("at cap: got %d items, want 2", len(m.items))
+	if len(m.timeline.items) != 2 {
+		t.Fatalf("at cap: got %d items, want 2", len(m.timeline.items))
 	}
 	if idx := m.firstPendingToolIdx(); idx != 0 {
 		t.Fatalf("firstPendingToolIdx = %d, want 0", idx)
@@ -1965,14 +1965,14 @@ func TestInsertItemAtCapPreservesInsertedMessage(t *testing.T) {
 
 	m.applyEvent(cake.Message{Role: "assistant", Content: "checking"})
 
-	if len(m.items) != 2 {
-		t.Fatalf("after insert+trim: got %d items, want 2", len(m.items))
+	if len(m.timeline.items) != 2 {
+		t.Fatalf("after insert+trim: got %d items, want 2", len(m.timeline.items))
 	}
-	if m.items[0].Kind != ui.KindAssistant || m.items[0].Text != "checking" {
-		t.Errorf("item[0] = %+v, want the inserted assistant message", m.items[0])
+	if m.timeline.items[0].Kind != ui.KindAssistant || m.timeline.items[0].Text != "checking" {
+		t.Errorf("item[0] = %+v, want the inserted assistant message", m.timeline.items[0])
 	}
-	if m.items[1].Tool == nil {
-		t.Fatalf("item[1] = %+v, want the surviving pending tool", m.items[1])
+	if m.timeline.items[1].Tool == nil {
+		t.Fatalf("item[1] = %+v, want the surviving pending tool", m.timeline.items[1])
 	}
 	if _, ok := m.pendingCalls["c-1"]; ok {
 		t.Error("pendingCalls still contains trimmed-away call c-1")
@@ -1980,8 +1980,8 @@ func TestInsertItemAtCapPreservesInsertedMessage(t *testing.T) {
 	assertPendingToolAt(t, m, "c-2", 1)
 
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-2", Output: "ok"})
-	if !m.items[1].Tool.Done || m.items[1].Tool.Output != "ok" {
-		t.Errorf("surviving tool after output: done=%v output=%q", m.items[1].Tool.Done, m.items[1].Tool.Output)
+	if !m.timeline.items[1].Tool.Done || m.timeline.items[1].Tool.Output != "ok" {
+		t.Errorf("surviving tool after output: done=%v output=%q", m.timeline.items[1].Tool.Done, m.timeline.items[1].Tool.Output)
 	}
 
 	assertCacheMatchesFullRender(t, &m, "after capped insertion at index zero")
@@ -1995,8 +1995,8 @@ func TestInsertItemAtTrimsPendingCallsInFrontRange(t *testing.T) {
 
 	// Fill to cap: info + tool(c-1) = 2 items, at cap.
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
-	if len(m.items) != 2 {
-		t.Fatalf("at cap: got %d items, want 2", len(m.items))
+	if len(m.timeline.items) != 2 {
+		t.Fatalf("at cap: got %d items, want 2", len(m.timeline.items))
 	}
 	if _, ok := m.pendingCalls["c-1"]; !ok {
 		t.Fatal("pendingCalls missing c-1 after append")
@@ -2005,8 +2005,8 @@ func TestInsertItemAtTrimsPendingCallsInFrontRange(t *testing.T) {
 	// Inserting a message before the tool pushes items to 3, triggers trim
 	// of the oldest (info at index 0), then items are [message, tool] at cap.
 	m.applyEvent(cake.Message{Role: "assistant", Content: "checking"})
-	if len(m.items) != m.cfg.MaxTimelineItems {
-		t.Fatalf("after insert+trim: got %d items, want %d", len(m.items), m.cfg.MaxTimelineItems)
+	if len(m.timeline.items) != m.cfg.MaxTimelineItems {
+		t.Fatalf("after insert+trim: got %d items, want %d", len(m.timeline.items), m.cfg.MaxTimelineItems)
 	}
 
 	// c-1 should still be in pendingCalls and reference the tool.
@@ -2018,14 +2018,14 @@ func TestInsertItemAtTrimsPendingCallsInFrontRange(t *testing.T) {
 func TestRemoveItemAtDropsPendingCallAndLateOutputAppendsStandalone(t *testing.T) {
 	m := newLaidOutModel()
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
-	if len(m.items) != 2 {
-		t.Fatalf("before remove: got %d items, want 2", len(m.items))
+	if len(m.timeline.items) != 2 {
+		t.Fatalf("before remove: got %d items, want 2", len(m.timeline.items))
 	}
-	removed := m.items[1].Tool
+	removed := m.timeline.items[1].Tool
 
 	m.removeItemAt(1)
-	if len(m.items) != 1 {
-		t.Fatalf("after remove: got %d items, want 1", len(m.items))
+	if len(m.timeline.items) != 1 {
+		t.Fatalf("after remove: got %d items, want 1", len(m.timeline.items))
 	}
 	if _, ok := m.pendingCalls["c-1"]; ok {
 		t.Error("pendingCalls still contains the removed call")
@@ -2047,14 +2047,14 @@ func TestRemoveItemAtKeepsSurvivingPendingCallAttached(t *testing.T) {
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
 	// items: [welcome, tool]
 	m.removeItemAt(0)
-	if len(m.items) != 1 {
-		t.Fatalf("after remove: got %d items, want 1", len(m.items))
+	if len(m.timeline.items) != 1 {
+		t.Fatalf("after remove: got %d items, want 1", len(m.timeline.items))
 	}
 	assertPendingToolAt(t, m, "c-1", 0)
 
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "ok"})
-	if !m.items[0].Tool.Done || m.items[0].Tool.Output != "ok" {
-		t.Errorf("surviving tool after output: done=%v output=%q", m.items[0].Tool.Done, m.items[0].Tool.Output)
+	if !m.timeline.items[0].Tool.Done || m.timeline.items[0].Tool.Output != "ok" {
+		t.Errorf("surviving tool after output: done=%v output=%q", m.timeline.items[0].Tool.Done, m.timeline.items[0].Tool.Output)
 	}
 	assertCacheMatchesFullRender(t, &m, "after removing an item before a pending tool")
 }
@@ -2062,12 +2062,12 @@ func TestRemoveItemAtKeepsSurvivingPendingCallAttached(t *testing.T) {
 func TestClearDropsPendingCallsAndLateOutputAppendsStandalone(t *testing.T) {
 	m := newLaidOutModel()
 	m.applyEvent(cake.FunctionCall{ID: "fc-1", CallID: "c-1", Name: "bash", Arguments: `{}`})
-	removed := m.items[1].Tool
+	removed := m.timeline.items[1].Tool
 
 	tm, _ := m.execCommand(Command{Kind: CmdClear})
 	m = tm.(Model)
-	if len(m.items) != 0 || len(m.pendingCalls) != 0 {
-		t.Fatalf("after clear: items=%d pendingCalls=%d, want 0/0", len(m.items), len(m.pendingCalls))
+	if len(m.timeline.items) != 0 || len(m.pendingCalls) != 0 {
+		t.Fatalf("after clear: items=%d pendingCalls=%d, want 0/0", len(m.timeline.items), len(m.pendingCalls))
 	}
 
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-1", Output: "late"})
@@ -2103,11 +2103,11 @@ func TestAppendItemKeepsPendingCallsAttachedOnTrim(t *testing.T) {
 
 	// Output for A must go to tool A's block, not B's.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"})
-	if !m.items[0].Tool.Done || m.items[0].Tool.Output != "OUTPUT-A" {
-		t.Errorf("tool A after output: done=%v output=%q", m.items[0].Tool.Done, m.items[0].Tool.Output)
+	if !m.timeline.items[0].Tool.Done || m.timeline.items[0].Tool.Output != "OUTPUT-A" {
+		t.Errorf("tool A after output: done=%v output=%q", m.timeline.items[0].Tool.Done, m.timeline.items[0].Tool.Output)
 	}
 	// B must still be pending.
-	if m.items[1].Tool.Done {
+	if m.timeline.items[1].Tool.Done {
 		t.Error("tool B should still be pending")
 	}
 
@@ -2118,8 +2118,8 @@ func TestAppendItemKeepsPendingCallsAttachedOnTrim(t *testing.T) {
 
 	// B's output must still land on B's block after the trim and A's output.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "B", Output: "OUTPUT-B"})
-	if !m.items[1].Tool.Done || m.items[1].Tool.Output != "OUTPUT-B" {
-		t.Errorf("tool B after output: done=%v output=%q", m.items[1].Tool.Done, m.items[1].Tool.Output)
+	if !m.timeline.items[1].Tool.Done || m.timeline.items[1].Tool.Output != "OUTPUT-B" {
+		t.Errorf("tool B after output: done=%v output=%q", m.timeline.items[1].Tool.Done, m.timeline.items[1].Tool.Output)
 	}
 	if len(m.pendingCalls) != 0 {
 		t.Errorf("pendingCalls not drained: %#v", m.pendingCalls)
@@ -2140,7 +2140,7 @@ func TestReasoningShowsOneCoalescedMarkerPerBurst(t *testing.T) {
 	if got := lastItem(t, m); got.Kind != ui.KindReasoning || got.Text != "(thinking)" {
 		t.Fatalf("after burst: last item = %+v, want single (thinking) marker", got)
 	}
-	if n := len(m.items); n != 2 { // welcome + marker
+	if n := len(m.timeline.items); n != 2 { // welcome + marker
 		t.Errorf("items after burst = %d, want 2 (welcome + one marker)", n)
 	}
 
@@ -2153,7 +2153,7 @@ func TestReasoningShowsOneCoalescedMarkerPerBurst(t *testing.T) {
 		t.Fatalf("after tool + reasoning: last item = %+v, want fresh (thinking) marker", it)
 	}
 	markers := 0
-	for _, item := range m.items {
+	for _, item := range m.timeline.items {
 		if item.Kind == ui.KindReasoning {
 			markers++
 		}
@@ -2192,12 +2192,12 @@ func TestAppendItemRemovesPendingCallWhenToolTrimmedAway(t *testing.T) {
 	// Late output for A must append a standalone block. The append may
 	// trigger another front-trim that removes B's item, which is expected.
 	m.applyEvent(cake.FunctionCallOutput{CallID: "A", Output: "LATE-A"})
-	if len(m.items) != m.cfg.MaxTimelineItems {
-		t.Errorf("items len = %d, want %d (after trim to cap)", len(m.items), m.cfg.MaxTimelineItems)
+	if len(m.timeline.items) != m.cfg.MaxTimelineItems {
+		t.Errorf("items len = %d, want %d (after trim to cap)", len(m.timeline.items), m.cfg.MaxTimelineItems)
 	}
 	// The last item is the newest (standalone tool output survived the
 	// front-trim).
-	last := m.items[len(m.items)-1]
+	last := m.timeline.items[len(m.timeline.items)-1]
 	if last.Kind != ui.KindTool || last.Tool.Name != "(tool output)" || last.Tool.Output != "LATE-A" {
 		t.Errorf("last item: got %+v, want standalone '(tool output)' block", last)
 	}
@@ -2210,7 +2210,7 @@ func TestPreReadyTrimDoesNotPanic(t *testing.T) {
 	// WindowSizeMsg (when !m.ready) must not panic on the empty render
 	// cache. Drive through Update, not by calling appendItem directly.
 	m := New(Config{MaxTimelineItems: 3})
-	// m.items starts with the welcome message (1 item at index 0).
+	// m.timeline.items starts with the welcome message (1 item at index 0).
 	// Sending events through Update before any layout exercises the
 	// pre-ready path.
 	for _, msg := range []tea.Msg{
@@ -2224,18 +2224,18 @@ func TestPreReadyTrimDoesNotPanic(t *testing.T) {
 	}
 
 	// Render cache must be empty before first layout.
-	if len(m.rendered) != 0 {
-		t.Errorf("before layout: rendered = %d, want 0", len(m.rendered))
+	if len(m.timeline.rendered) != 0 {
+		t.Errorf("before layout: rendered = %d, want 0", len(m.timeline.rendered))
 	}
 
 	// After layout the cache must reflect the trimmed items.
 	m.width, m.height = 80, 24
 	m.layout()
-	if len(m.rendered) != len(m.items) {
-		t.Errorf("after layout: rendered=%d items=%d, want equal", len(m.rendered), len(m.items))
+	if len(m.timeline.rendered) != len(m.timeline.items) {
+		t.Errorf("after layout: rendered=%d items=%d, want equal", len(m.timeline.rendered), len(m.timeline.items))
 	}
-	if len(m.items) > 3 {
-		t.Errorf("after layout with max=3: items=%d, want ≤3", len(m.items))
+	if len(m.timeline.items) > 3 {
+		t.Errorf("after layout with max=3: items=%d, want ≤3", len(m.timeline.items))
 	}
 	assertCacheMatchesFullRender(t, &m, "after pre-ready trim then layout")
 }
@@ -2262,8 +2262,8 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 	// Late output for A must find the right item.
 	tm2, _ := m.Update(eventsMsg{evs: []cake.Event{cake.FunctionCallOutput{CallID: "A", Output: "OUTPUT-A"}}})
 	m = tm2.(Model)
-	if !m.items[0].Tool.Done || m.items[0].Tool.Output != "OUTPUT-A" {
-		t.Errorf("tool A after output: done=%v output=%q", m.items[0].Tool.Done, m.items[0].Tool.Output)
+	if !m.timeline.items[0].Tool.Done || m.timeline.items[0].Tool.Output != "OUTPUT-A" {
+		t.Errorf("tool A after output: done=%v output=%q", m.timeline.items[0].Tool.Done, m.timeline.items[0].Tool.Output)
 	}
 
 	// Layout and verify full render consistency.
@@ -2404,7 +2404,7 @@ func TestToolOutputIngestDoesNotPinOversizedResult(t *testing.T) {
 	m.applyEvent(cake.FunctionCall{CallID: "c-nl", Name: "bash", Arguments: `{}`})
 	m.applyEvent(cake.FunctionCallOutput{CallID: "c-nl", Output: original})
 
-	tool := m.items[len(m.items)-1].Tool
+	tool := m.timeline.items[len(m.timeline.items)-1].Tool
 	if backingAliases(tool.Output, original) {
 		t.Fatalf("timeline retained a substring of the %d-byte original", len(original))
 	}
@@ -2542,22 +2542,22 @@ func TestRepaintMessageOnlyRewritesTheFrame(t *testing.T) {
 	}
 	m.syncViewport()
 
-	m.rendered[0] = "sentinel"
-	beforeOffset := m.timeline.YOffset
-	beforeItems := len(m.items)
+	m.timeline.rendered[0] = "sentinel"
+	beforeOffset := m.viewport.YOffset
+	beforeItems := len(m.timeline.items)
 	tm, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = tm.(Model)
 	if cmd != nil {
 		t.Errorf("the repaint message returned a command: %v", cmd)
 	}
-	if m.rendered[0] != "sentinel" {
+	if m.timeline.rendered[0] != "sentinel" {
 		t.Error("the repaint message re-rendered the timeline cache")
 	}
-	if len(m.items) != beforeItems {
-		t.Errorf("the repaint message added timeline items: %d -> %d", beforeItems, len(m.items))
+	if len(m.timeline.items) != beforeItems {
+		t.Errorf("the repaint message added timeline items: %d -> %d", beforeItems, len(m.timeline.items))
 	}
-	if m.timeline.YOffset != beforeOffset {
-		t.Errorf("the repaint message moved the viewport: %d -> %d", beforeOffset, m.timeline.YOffset)
+	if m.viewport.YOffset != beforeOffset {
+		t.Errorf("the repaint message moved the viewport: %d -> %d", beforeOffset, m.viewport.YOffset)
 	}
 	if m.width != 80 || m.height != 24 {
 		t.Errorf("repaint size = %dx%d, want 80x24", m.width, m.height)

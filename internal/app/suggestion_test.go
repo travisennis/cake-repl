@@ -102,7 +102,7 @@ func TestCanSuggest(t *testing.T) {
 
 func TestFinishSuggestionAppliesDocument(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
-	before := len(m.items)
+	before := len(m.timeline.items)
 	m = finishSuggestionForTest(t, m, suggest.Result{
 		ExitCode: 0,
 		Document: suggestionDocument("Add a test for the new path."),
@@ -120,8 +120,8 @@ func TestFinishSuggestionAppliesDocument(t *testing.T) {
 	if m.suggesting || m.suggestionReq != 0 || m.suggestionCancel != nil || m.suggestionDone != nil {
 		t.Fatalf("request state not settled: suggesting=%v req=%d cancel=%v done=%v", m.suggesting, m.suggestionReq, m.suggestionCancel != nil, m.suggestionDone != nil)
 	}
-	if len(m.items) != before {
-		t.Fatalf("suggestion added %d timeline items, want none", len(m.items)-before)
+	if len(m.timeline.items) != before {
+		t.Fatalf("suggestion added %d timeline items, want none", len(m.timeline.items)-before)
 	}
 	if got := m.composerHint(); got != "Ctrl+S use suggestion · type to dismiss" {
 		t.Fatalf("composerHint = %q", got)
@@ -305,7 +305,7 @@ func TestSubmitUsesSuggestionAsPrompt(t *testing.T) {
 	if cmd == nil || !m.running {
 		t.Fatalf("submit did not start a run: running=%v cmd nil=%v", m.running, cmd == nil)
 	}
-	if got := m.items[len(m.items)-1]; got.Kind != ui.KindUser || got.Text != "/exit" {
+	if got := m.timeline.items[len(m.timeline.items)-1]; got.Kind != ui.KindUser || got.Text != "/exit" {
 		t.Fatalf("last item = %+v, want the suggestion as an ordinary user prompt", got)
 	}
 	if m.suggestionActive() || m.input.Placeholder != defaultInputPlaceholder {
@@ -370,7 +370,7 @@ func TestSuggestionFailureWarnsOnce(t *testing.T) {
 		m = finishSuggestionForTest(t, m, res)
 	}
 	warnings := 0
-	for _, it := range m.items {
+	for _, it := range m.timeline.items {
 		if it.Kind == ui.KindWarning && strings.Contains(it.Text, "prompt suggestion unavailable") {
 			warnings++
 		}
@@ -390,10 +390,10 @@ func TestSuggestionNoOpAndCancellationSilent(t *testing.T) {
 		{Canceled: true},
 	} {
 		m = startSuggestionForTest(t, m)
-		before := len(m.items)
+		before := len(m.timeline.items)
 		m = finishSuggestionForTest(t, m, res)
-		if len(m.items) != before {
-			t.Fatalf("result %+v added %d timeline items, want none", res, len(m.items)-before)
+		if len(m.timeline.items) != before {
+			t.Fatalf("result %+v added %d timeline items, want none", res, len(m.timeline.items)-before)
 		}
 		if m.suggestionActive() || m.suggestionWarned {
 			t.Fatalf("result %+v changed composer or warned", res)
@@ -457,7 +457,7 @@ func TestFinishRunErroredCompletionSkipsSuggestion(t *testing.T) {
 
 func TestSuggestionMissingSuggestedWarns(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
-	before := len(m.items)
+	before := len(m.timeline.items)
 	m = finishSuggestionForTest(t, m, suggest.Result{
 		ExitCode: 0,
 		Document: &suggest.Document{
@@ -471,10 +471,10 @@ func TestSuggestionMissingSuggestedWarns(t *testing.T) {
 	if !m.suggestionWarned {
 		t.Fatal("malformed document did not set suggestionWarned")
 	}
-	if len(m.items) != before+1 {
-		t.Fatalf("timeline items = %d, want one warning", len(m.items)-before)
+	if len(m.timeline.items) != before+1 {
+		t.Fatalf("timeline items = %d, want one warning", len(m.timeline.items)-before)
 	}
-	if got := m.items[len(m.items)-1]; got.Kind != ui.KindWarning || got.Text != suggestionMalformedText {
+	if got := m.timeline.items[len(m.timeline.items)-1]; got.Kind != ui.KindWarning || got.Text != suggestionMalformedText {
 		t.Fatalf("warning = %+v, want %q", got, suggestionMalformedText)
 	}
 }
@@ -505,7 +505,7 @@ func TestQuitDrainsSuggestion(t *testing.T) {
 			m.suggesting, m.suggestionReq, m.suggestionCancel != nil)
 	}
 	found := false
-	for _, it := range m.items {
+	for _, it := range m.timeline.items {
 		if it.Kind == ui.KindWarning && strings.Contains(it.Text, "canceling prompt suggestion") {
 			found = true
 		}

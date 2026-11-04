@@ -120,7 +120,7 @@ fi
 	}
 
 	var sawPreviousUser, sawPreviousAssistant, sawTool, sawCompletion bool
-	for _, item := range m.items {
+	for _, item := range m.timeline.items {
 		switch {
 		case item.Kind == ui.KindUser && item.Text == "previous prompt":
 			sawPreviousUser = true
@@ -133,7 +133,7 @@ fi
 		}
 	}
 	if !sawPreviousUser || !sawPreviousAssistant || !sawTool || !sawCompletion {
-		t.Fatalf("replayed timeline missing expected items: %+v", m.items)
+		t.Fatalf("replayed timeline missing expected items: %+v", m.timeline.items)
 	}
 
 	m.input.SetValue("next prompt")
@@ -229,16 +229,16 @@ fi
 	m = hydrateTestModel(t, m)
 
 	var markerIdx []int
-	for i, item := range m.items {
+	for i, item := range m.timeline.items {
 		if item.Kind == ui.KindInfo && strings.HasPrefix(item.Text, "context compacted") {
 			markerIdx = append(markerIdx, i)
 		}
 	}
 	if len(markerIdx) != 1 {
-		t.Fatalf("compaction markers = %d, want exactly one: %+v", len(markerIdx), m.items)
+		t.Fatalf("compaction markers = %d, want exactly one: %+v", len(markerIdx), m.timeline.items)
 	}
 	const wantMarker = "context compacted 118k -> 24k, 4 records retained"
-	if got := m.items[markerIdx[0]].Text; got != wantMarker {
+	if got := m.timeline.items[markerIdx[0]].Text; got != wantMarker {
 		t.Errorf("marker = %q, want %q", got, wantMarker)
 	}
 
@@ -246,7 +246,7 @@ fi
 	// task that produced the checkpoint and before the next task's answer.
 	preTool, postAnswer := -1, -1
 	var completions []int
-	for i, item := range m.items {
+	for i, item := range m.timeline.items {
 		switch {
 		case item.Kind == ui.KindTool && item.Tool != nil && item.Tool.Output == "/tmp/project\n":
 			preTool = i
@@ -258,7 +258,7 @@ fi
 	}
 	if preTool < 0 || postAnswer < 0 || len(completions) != 2 {
 		t.Fatalf("surrounding items missing: preTool=%d postAnswer=%d completions=%v items=%+v",
-			preTool, postAnswer, completions, m.items)
+			preTool, postAnswer, completions, m.timeline.items)
 	}
 	preComplete, postComplete := completions[0], completions[1]
 	ordered := preTool < preComplete && preComplete < markerIdx[0] &&
@@ -271,7 +271,7 @@ fi
 	// The retained tail is count-only: its messages and tool call must never
 	// appear as extra timeline items.
 	tools := 0
-	for _, item := range m.items {
+	for _, item := range m.timeline.items {
 		if item.Kind == ui.KindTool {
 			tools++
 			if item.Tool != nil && (strings.Contains(item.Tool.Output, "RETAINED-") || strings.Contains(item.Tool.Arguments, "RETAINED-")) {
@@ -331,13 +331,13 @@ fi
 	m = hydrateTestModel(t, m)
 
 	markers := 0
-	for _, item := range m.items {
+	for _, item := range m.timeline.items {
 		if item.Kind == ui.KindInfo && strings.HasPrefix(item.Text, "context compacted") {
 			markers++
 		}
 	}
 	if markers != 1 {
-		t.Fatalf("compaction markers = %d, want exactly one: %+v", markers, m.items)
+		t.Fatalf("compaction markers = %d, want exactly one: %+v", markers, m.timeline.items)
 	}
 
 	context := m.session.Context
@@ -375,13 +375,13 @@ exit 0
 		t.Fatalf("failed replay left model unavailable: hydrating=%v running=%v", m.hydrating, m.running)
 	}
 	var sawWarning bool
-	for _, item := range m.items {
+	for _, item := range m.timeline.items {
 		if item.Kind == ui.KindWarning && strings.Contains(item.Text, "session replay failed") {
 			sawWarning = true
 		}
 	}
 	if !sawWarning {
-		t.Fatalf("replay failure warning missing from timeline: %+v", m.items)
+		t.Fatalf("replay failure warning missing from timeline: %+v", m.timeline.items)
 	}
 	mode, id := m.session.RunOptions()
 	if mode != cake.RunResume || id != replayTestSessionID {
@@ -525,7 +525,7 @@ printf '%s\n' '{"type":"function_call","id":"fc-1","call_id":"call-1","name":"ba
 	m = hydrateTestModel(t, m)
 
 	var dangling *ui.ToolBlock
-	for _, item := range m.items {
+	for _, item := range m.timeline.items {
 		if item.Kind == ui.KindTool && item.Tool != nil {
 			dangling = item.Tool
 		}
