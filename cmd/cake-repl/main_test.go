@@ -9,9 +9,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/travisennis/cake-repl/internal/app"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/childproc"
 )
 
 func TestValidateFlagsVersionShortCircuits(t *testing.T) {
@@ -181,6 +183,62 @@ func TestResumeUUIDIsSessionID(t *testing.T) {
 	}
 	if app.IsSessionID("not-a-uuid") {
 		t.Error("IsSessionID accepted invalid input")
+	}
+}
+
+func TestShutdownAfterProgramReapsChildWhenNoModelReturned(t *testing.T) {
+	started := filepath.Join(t.TempDir(), "started")
+	t.Setenv("STARTED_FILE", started)
+	bin := filepath.Join(t.TempDir(), "fake-cake")
+	if err := os.WriteFile(bin, []byte(`#!/bin/sh
+ touch "$STARTED_FILE"
+ trap 'exit 0' TERM
+ while :; do sleep 0.05; done
+ `), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := cake.Start(cake.Options{Bin: bin, Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(run.Cancel)
+	waitForFile(t, started)
+
+	children := childproc.NewRegistry()
+	children.Register("run", run.Cancel, run.Done)
+
+	// Bubble Tea returns no model after an Update or View panic. The
+	// process-level registry is the only remaining handle to the child.
+	_, ok, err := shutdownAfterProgram(nil, children)
+	if ok {
+		t.Fatal("shutdownAfterProgram reported a model for a nil program result")
+	}
+	if err != nil {
+		t.Fatalf("shutdownAfterProgram: %v", err)
+	}
+	select {
+	case <-run.Done:
+	default:
+		t.Fatal("shutdownAfterProgram returned before the child was reaped")
+	}
+	if res := <-run.Result; !res.Canceled {
+		t.Fatalf("child result = %+v, want Canceled", res)
+	}
+}
+
+// waitForFile blocks until a fake child has created path.
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fake child never started: %s", path)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

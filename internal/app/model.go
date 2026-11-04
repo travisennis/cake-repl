@@ -22,6 +22,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/childproc"
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
@@ -52,7 +53,12 @@ type Config struct {
 	DebugLog      io.Writer
 	// Runs tracks live and replay engine subprocesses so the suspend cycle can
 	// stop and continue their process groups. Nil leaves them untracked.
-	Runs             *cake.Registry
+	Runs *cake.Registry
+	// Children is the process-level registry main owns for unobserved-exit
+	// teardown. Every child operation registers here when it starts, so main can
+	// cancel and reap it even when Bubble Tea returns no model after an Update or
+	// View panic. Nil falls back to Model.CancelRunning's model-owned handles.
+	Children         *childproc.Registry
 	HistoryFile      string
 	OutputLimit      int
 	MaxTimelineItems int
@@ -321,6 +327,7 @@ func New(cfg Config) Model {
 			ResumeID: cfg.ResumeID,
 		},
 	}
+	m.trackChild("replay", replayCancel, replayDone)
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "cake-repl — /help for commands"})
 
 	if cfg.StartupPicker {
@@ -453,13 +460,17 @@ func encodeHistoryEntry(text string) string {
 	return jsonlPrefix + string(j) + "\n"
 }
 
-// CancelRunning cancels every active model-owned child and waits for it to be
-// reaped, up to childTeardownTimeout. It is safe to call when nothing is
-// running. The returned error names operations that did not finish within the
-// bound; main reports it because the Update loop that would normally surface a
-// failure is already gone.
+// CancelRunning cancels every active child and waits for it to be reaped, up to
+// ChildTeardownTimeout. When main wired the process-level registry, it owns the
+// child handles and this delegates to it; otherwise the model-owned handles are
+// used. It is safe to call when nothing is running. The returned error names
+// operations that did not finish within the bound; main reports it because the
+// Update loop that would normally surface a failure is already gone.
 func (m Model) CancelRunning() error {
-	return m.cancelRunning(childTeardownTimeout)
+	if m.cfg.Children != nil {
+		return m.cfg.Children.Shutdown(ChildTeardownTimeout)
+	}
+	return m.cancelRunning(ChildTeardownTimeout)
 }
 
 // cancelReplay stops the startup replay whether it is still starting or already

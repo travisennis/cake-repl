@@ -161,6 +161,7 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	m.trackChild("compaction", cancel, done)
 	m.compactionSeq++
 	m.compactionReq = m.compactionSeq
 	m.compactionCancel = cancel

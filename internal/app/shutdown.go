@@ -2,16 +2,25 @@ package app
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/travisennis/cake-repl/internal/childproc"
 )
 
-// childTeardownTimeout bounds the whole unobserved-exit shutdown. The longest
+// ChildTeardownTimeout bounds the whole unobserved-exit shutdown. The longest
 // child path is a live run: SIGTERM, a three-second grace before the group
 // SIGKILL, and a one-second-later PID-only WaitDelay fallback. Five seconds
 // leaves scheduling room without letting a wedged child hold the REPL open.
-const childTeardownTimeout = 5 * time.Second
+const ChildTeardownTimeout = 5 * time.Second
+
+// trackChild registers one child operation with the process-level registry main
+// owns. Without a registry, the model-owned handles remain the shutdown path.
+func (m Model) trackChild(name string, cancel func(), done <-chan struct{}) {
+	if m.cfg.Children != nil {
+		m.cfg.Children.Register(name, cancel, done)
+	}
+}
 
 // cancelRunning cancels every child operation and waits for all of them to be
 // reaped by one shared deadline. It waits on reaping channels rather than result
@@ -28,96 +37,31 @@ func (m Model) cancelRunning(timeout time.Duration) error {
 	m.cancelSuggestion()
 	m.cancelSessionList()
 
-	ops := make(map[string]<-chan struct{})
+	ops := make([]childproc.Operation, 0, 5+len(m.sessionListDone))
 	if m.run != nil {
-		ops["run"] = m.run.Done
+		ops = append(ops, childproc.Operation{Name: "run", Done: m.run.Done})
 	}
 	if m.replayRun != nil {
-		ops["replay"] = m.replayRun.Done
+		ops = append(ops, childproc.Operation{Name: "replay", Done: m.replayRun.Done})
 	} else if m.replayDone != nil {
 		// The startup command owns the child until replayStartedMsg reaches
 		// Update. Its done channel is the only handle to a replay that is
 		// still starting.
-		ops["replay"] = m.replayDone
+		ops = append(ops, childproc.Operation{Name: "replay", Done: m.replayDone})
 	}
 	if m.compactionDone != nil {
-		ops["compaction"] = m.compactionDone
+		ops = append(ops, childproc.Operation{Name: "compaction", Done: m.compactionDone})
 	}
 	if m.suggestionDone != nil {
-		ops["suggestion"] = m.suggestionDone
+		ops = append(ops, childproc.Operation{Name: "suggestion", Done: m.suggestionDone})
 	}
 	for req, done := range m.sessionListDone {
-		ops[fmt.Sprintf("session listing %d", req)] = done
+		ops = append(ops, childproc.Operation{Name: fmt.Sprintf("session listing %d", req), Done: done})
 	}
 
-	timedOut := waitForReap(ops, timeout)
+	timedOut := childproc.WaitForReap(ops, timeout)
 	if len(timedOut) == 0 {
 		return nil
 	}
-	err := fmt.Errorf("shutdown timed out waiting for %s", strings.Join(timedOut, ", "))
-	if m.cfg.DebugLog != nil {
-		fmt.Fprintf(m.cfg.DebugLog, "repl: %v\n", err)
-	}
-	return err
-}
-
-// waitForReap waits until every done channel closes or timeout expires. It
-// returns the sorted names still pending at the deadline. A nil channel counts
-// as already reaped so a zero-value test model cannot turn shutdown into an
-// unbounded wait.
-func waitForReap(ops map[string]<-chan struct{}, timeout time.Duration) []string {
-	if len(ops) == 0 {
-		return nil
-	}
-
-	finished := make(chan string, len(ops))
-	stop := make(chan struct{})
-	pending := make(map[string]struct{}, len(ops))
-	for name, done := range ops {
-		pending[name] = struct{}{}
-		if done == nil {
-			finished <- name
-			continue
-		}
-		go func(name string, done <-chan struct{}) {
-			select {
-			case <-done:
-				finished <- name
-			case <-stop:
-			}
-		}(name, done)
-	}
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	for len(pending) > 0 {
-		select {
-		case name := <-finished:
-			delete(pending, name)
-		case <-timer.C:
-			close(stop)
-			// A child can be reaped as the timer fires. Sweep once so a
-			// completed channel is not reported as timed out.
-			for name := range pending {
-				done := ops[name]
-				if done == nil {
-					delete(pending, name)
-					continue
-				}
-				select {
-				case <-done:
-					delete(pending, name)
-				default:
-				}
-			}
-			names := make([]string, 0, len(pending))
-			for name := range pending {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			return names
-		}
-	}
-	close(stop)
-	return nil
+	return fmt.Errorf("shutdown timed out waiting for %s", strings.Join(timedOut, ", "))
 }

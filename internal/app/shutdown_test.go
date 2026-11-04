@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/childproc"
 )
 
 // TestCancelRunningWaitsForReplayStart covers the replay command before its
@@ -26,6 +27,7 @@ while :; do sleep 0.05; done
 		CakeBin:  bin,
 		Cwd:      t.TempDir(),
 		ResumeID: replayTestSessionID,
+		Children: childproc.NewRegistry(),
 	})
 	start := replayStartMessage(t, m)
 	if start.err != nil || start.run == nil {
@@ -58,6 +60,7 @@ while :; do sleep 0.05; done
 `)
 
 	m := compactionModel(t, bin)
+	m.cfg.Children = childproc.NewRegistry()
 	m, cmd := m.startCompaction()
 	if cmd == nil || m.compactionDone == nil {
 		t.Fatal("startCompaction did not leave a bounded child")
@@ -76,6 +79,47 @@ while :; do sleep 0.05; done
 	}
 	if msg := <-result; msg == nil {
 		t.Fatal("compactor command returned nil")
+	}
+}
+
+// TestCancelRunningWaitsForLiveRunTeardown covers the live child the process-
+// level registry must reap when Bubble Tea returns no model. The fake cake is a
+// real child; no real cake binary is needed.
+func TestCancelRunningWaitsForLiveRunTeardown(t *testing.T) {
+	started := filepath.Join(t.TempDir(), "started")
+	t.Setenv("STARTED_FILE", started)
+	bin := writeFakeCake(t, `
+ touch "$STARTED_FILE"
+ trap 'exit 0' TERM
+ while :; do sleep 0.05; done
+ `)
+
+	children := childproc.NewRegistry()
+	m := laidOut(80, 24)
+	m.cfg.CakeBin = bin
+	m.cfg.Cwd = t.TempDir()
+	m.cfg.Children = children
+	tm, _ := m.startRun("hi")
+	m = tm.(Model)
+	if m.run == nil {
+		t.Fatal("startRun did not leave a live run")
+	}
+	t.Cleanup(m.run.Cancel)
+	waitForFile(t, started)
+	if got := children.Len(); got != 1 {
+		t.Fatalf("registry tracks %d children, want the live run", got)
+	}
+
+	if err := m.CancelRunning(); err != nil {
+		t.Fatalf("CancelRunning: %v", err)
+	}
+	select {
+	case <-m.run.Done:
+	default:
+		t.Fatal("CancelRunning returned before the live run was reaped")
+	}
+	if res := <-m.run.Result; !res.Canceled {
+		t.Fatalf("live run result = %+v, want Canceled", res)
 	}
 }
 

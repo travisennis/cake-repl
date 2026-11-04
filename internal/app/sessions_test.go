@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/childproc"
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
@@ -810,7 +811,9 @@ func TestSessionsExitCancelsInFlightListing(t *testing.T) {
 // startup picker makes reachable, since its listing is in flight before the
 // first frame. A listing whose helper is never stopped would outlive the REPL.
 func TestCancelRunningCancelsInFlightListing(t *testing.T) {
-	m, done := blockingListing(t, newLaidOutModel())
+	m := newLaidOutModel()
+	m.cfg.Children = childproc.NewRegistry()
+	m, done := blockingListing(t, m)
 	doneCh := m.sessionListDone[m.sessionListReq]
 
 	if err := m.CancelRunning(); err != nil {

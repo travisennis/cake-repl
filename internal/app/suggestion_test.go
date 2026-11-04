@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/childproc"
 	"github.com/travisennis/cake-repl/internal/compact"
 	"github.com/travisennis/cake-repl/internal/suggest"
 	"github.com/travisennis/cake-repl/internal/ui"
@@ -556,7 +557,9 @@ func TestQuitDrainsCanceledSuggestion(t *testing.T) {
 }
 
 func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
-	m := startSuggestionForTest(t, suggestionReady(t))
+	ready := suggestionReady(t)
+	ready.cfg.Children = childproc.NewRegistry()
+	m := startSuggestionForTest(t, ready)
 	done := m.suggestionDone
 	if done == nil {
 		t.Fatal("suggestion has no drain channel")
@@ -581,7 +584,7 @@ func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
 	close(release)
 	select {
 	case <-returned:
-	case <-time.After(childTeardownTimeout):
+	case <-time.After(ChildTeardownTimeout):
 		t.Fatal("CancelRunning did not return after the child was reaped")
 	}
 }

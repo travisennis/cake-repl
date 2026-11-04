@@ -18,6 +18,7 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/travisennis/cake-repl/internal/app"
 	"github.com/travisennis/cake-repl/internal/cake"
+	"github.com/travisennis/cake-repl/internal/childproc"
 	"github.com/travisennis/cake-repl/internal/config"
 	"github.com/travisennis/cake-repl/internal/version"
 )
@@ -395,6 +396,11 @@ func run() (err error) {
 	logf := suspendLogf(cfg.DebugLog)
 	runs := cake.NewRegistry(logf)
 	cfg.Runs = runs
+	// Children is the process-level shutdown registry. main owns it so a panic
+	// in Update or View, which makes Bubble Tea return no model, still has a
+	// handle to every child the app started.
+	children := childproc.NewRegistry()
+	cfg.Children = children
 
 	// Inline mode renders in the normal buffer so recent terminal history stays
 	// visible above the REPL; the alternate screen restores the terminal on exit
@@ -413,19 +419,18 @@ func run() (err error) {
 		defer stopSuspend()
 	}
 	m, err := p.Run()
-	mod, ok := m.(app.Model)
-	if ok {
-		// CancelRunning is a no-op unless a child was still in flight, which is
-		// exactly the case for a quit that never reached the model. A child
-		// that misses its bounded teardown is reported here because the Update
-		// loop that would normally surface it is gone.
-		if shutdownErr := mod.CancelRunning(); shutdownErr != nil {
-			if err == nil {
-				err = shutdownErr
-			} else {
-				fmt.Fprintln(os.Stderr, "cake-repl: shutdown:", shutdownErr)
-			}
+	mod, ok, shutdownErr := shutdownAfterProgram(m, children)
+	if shutdownErr != nil {
+		if cfg.DebugLog != nil {
+			fmt.Fprintf(cfg.DebugLog, "repl: %v\n", shutdownErr)
 		}
+		if err == nil {
+			err = shutdownErr
+		} else {
+			fmt.Fprintln(os.Stderr, "cake-repl: shutdown:", shutdownErr)
+		}
+	}
+	if ok {
 		if *f.inline {
 			// Inline mode leaves the timeline on the terminal; drop the composer
 			// rows so the shell prompt is not preceded by a stale input box.
@@ -445,6 +450,18 @@ func run() (err error) {
 		}
 	}
 	return nil
+}
+
+// shutdownAfterProgram cancels and reaps every child after Bubble Tea returns.
+// A panic in Update or View returns no model, so the process-level registry is
+// the only handle to the children; a returned model uses its CancelRunning path,
+// which delegates to the same registry when one is configured.
+func shutdownAfterProgram(m tea.Model, children *childproc.Registry) (app.Model, bool, error) {
+	mod, ok := m.(app.Model)
+	if ok {
+		return mod, true, mod.CancelRunning()
+	}
+	return app.Model{}, false, children.Shutdown(app.ChildTeardownTimeout)
 }
 
 // terminalProgram is the slice of *tea.Program the suspend watcher drives. It is

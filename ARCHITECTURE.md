@@ -65,7 +65,7 @@ scope unless the cake contract itself has changed. See
 cmd/cake-repl/main.go    Entry point: flag parsing, validation, Bubble Tea program startup.
 cmd/cake-repl/suspend.go Terminal release/restore around an external SIGTSTP (POSIX).
 internal/config/         TOML config-file loading for REPL startup defaults.
-internal/childproc/      POSIX session boundary shared by every external child (ADR 027).
+internal/childproc/      POSIX session boundary and process-level child shutdown registry (ADR 027, ADR 034).
 internal/cake/           cake-as-engine: subprocess lifecycle + stream-json decoding.
   events.go              Typed live and replay event structs and the Event interface (the wire schema).
   parser.go              ParseLine: one NDJSON line -> typed Event (forward-compatible).
@@ -94,9 +94,10 @@ internal/version/        Binary version plus embedded revision and commit time.
 ```
 
 Dependency direction is one-way: `app` depends on `cake`, `compact`,
-`suggest`, and `ui`; `cake`, `compact`, `suggest`, and `ui` depend on neither
-`app` nor each other. `cake`, `compact`, and `suggest` also use the leaf
-`internal/childproc` package for the shared session boundary. Keep it that way.
+`suggest`, `childproc`, and `ui`; `cake`, `compact`, `suggest`, and `ui` depend
+on neither `app` nor each other. `cake`, `compact`, and `suggest` also use the
+leaf `internal/childproc` package for the shared session boundary. Keep it that
+way.
 
 ## Architectural invariants
 
@@ -242,10 +243,12 @@ Dependency direction is one-way: `app` depends on `cake`, `compact`,
   whether the process was signal-terminated—not from `ctx.Err()`—so a late
   Ctrl+C cannot relabel a finished run.
 - **Unobserved-exit teardown.** `Run.Done` closes when the child is reaped,
-  independently of whether its result was delivered. `Model.CancelRunning`
-  cancels every model-owned child and waits on those reaping signals under one
-  deadline, so an exit Bubble Tea never delivered to Update still reaps its
-  children; a missed deadline is reported and exits non-zero. See
+  independently of whether its result was delivered. `main` owns a
+  process-level `childproc.Registry` and the app registers every child operation
+  in it, so `Model.CancelRunning` and the panic path both cancel and wait on the
+  same reaping signals under one deadline. A panic in `Update` or `View` returns
+  no model, but `main` still shuts the registry down before exiting; a missed
+  deadline is reported and exits non-zero. See
   [ADR 034](docs/adr/034-bound-unobserved-exit-child-teardown.md).
 - **The terminal is handed back before the process stops.** A catchable external
   SIGTSTP is handled in `cmd/cake-repl`: the terminal is released, each tracked

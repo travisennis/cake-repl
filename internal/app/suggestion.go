@@ -80,6 +80,7 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), suggestionTimeout)
 	done := make(chan struct{})
+	m.trackChild("suggestion", cancel, done)
 	m.suggestionSeq++
 	req := m.suggestionSeq
 	m.suggestionReq = req

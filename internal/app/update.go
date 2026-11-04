@@ -130,6 +130,7 @@ func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 	done := make(chan struct{})
 	req := m.sessionListReq
 	m.sessionListDone[req] = done
+	m.trackChild(fmt.Sprintf("session listing %d", req), cancel, done)
 	cfg := m.cfg
 	return m, func() tea.Msg {
 		sessions, err := cake.ListSessions(ctx, cake.SessionsOptions{
@@ -932,6 +933,7 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
 		return m, nil
 	}
+	m.trackChild("run", run.Cancel, run.Done)
 
 	m.run = run
 	m.running = true

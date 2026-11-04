@@ -89,6 +89,19 @@ child teardown without competing with result delivery and bounds the whole exit.
 - Neutral: no CLI flag, config shape, stream-json schema, or normal-quit
   behavior changes.
 
+## Amendment (2026-11-03)
+
+Task 149 closes the nil-model gap recorded above. `cmd/cake-repl` now creates a
+process-level `childproc.Registry` before starting the Bubble Tea program and
+passes it through `app.Config.Children`. The app registers every child operation
+as it starts: the live run, startup replay, compaction, suggestion, and each
+session listing. After `p.Run` returns, `main` performs the same bounded
+shutdown whether or not Bubble Tea returned a model; `Model.CancelRunning`
+delegates to the registry when one is wired. The five-second deadline, the wait
+on reaping signals, and the non-zero exit on a missed deadline are unchanged.
+Registrations after shutdown begins are canceled rather than admitted. A panic
+in `Update` or `View` can no longer leave a child running.
+
 ## More Information
 
 - [ADR 027](027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md)
@@ -96,4 +109,5 @@ child teardown without competing with result delivery and bounds the whole exit.
   `WaitDelay`.
 - [ADR 019](019-cancel-and-bound-the-read-only-session-listing.md) owns the
   read-only listing's cancellation and bounded teardown.
-- Task 134 implements this decision. Task 149 covers the nil-model panic path.
+- Task 134 implements this decision. Task 149 closes the nil-model gap with the
+  process-level registry described in the 2026-11-03 amendment.
