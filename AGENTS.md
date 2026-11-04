@@ -14,8 +14,11 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 - **cake contract**: run cake only in stream-json output mode with the
   documented live session, fork, no-session, model, profile, tools, no-tools,
   add-dir, toolbox, sandbox, no-skills, skills, and system-prompt flags, or the
-  supported read-only `replay <uuid>` and `sessions list --json` commands; never
-  read cake session files, parse its human text, or import its internals.
+  supported read-only `replay <uuid>`, `sessions list --json`, and
+  `trust --status --json` commands; never read cake session files, parse its
+  human text, or import its internals. The startup trust probe is advisory: it
+  decodes only cake's versioned diagnostic document, never writes a trust
+  record, and is silent on any failure (ADR 035).
 - **compaction contract**: the opt-in between-turn compactor is run only through
   `internal/compact` as `cake-compact compact -json -threshold … <session-id>`,
   with exactly one threshold mode: `-threshold-tokens` for the absolute

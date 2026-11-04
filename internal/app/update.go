@@ -290,6 +290,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, nil
 
+	case trustStatusMsg:
+		m.handleTrustStatus(msg)
+		m.syncViewport()
+		return m, nil
+
 	case spinner.TickMsg:
 		if !m.running && !m.compacting {
 			return m, nil

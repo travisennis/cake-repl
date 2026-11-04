@@ -60,6 +60,20 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   cancellable, `WaitDelay`-bounded operation as a `/sessions` listing (ADR 019),
   and a failed listing is a non-fatal warning that leaves the prompt usable. See
   [ADR 021](../adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
+- **Project trust preflight is read-only and advisory.** During startup, one
+  `cake trust --status --json` probe inspects the configured `-cwd`. When it
+  returns, an `untrusted`, `changed`, `invalid`, or unrecognized state appends
+  one warning naming the authority-bearing files or changes, canonical project
+  root, and the `cake trust` command; `trusted` and `not_required` are silent.
+  The probe never writes a trust record, never runs `cake trust`, and never
+  gates input, so it normally warns before the first prompt but an immediate
+  submission can arrive first. Any probe failure is debug-log-only, so an older
+  cake binary or malformed output cannot break startup. It is skipped when
+  `CAKE_TRUST_PROJECT=1` or `CAKE_PROJECT_CONFIG=off` makes live prompts
+  independent of the project's persistent trust record. The command uses the
+  shared child boundary, a 10-second
+  context deadline, group cancellation, and the process-level registry. See
+  [ADR 035](../adr/035-warn-about-untrusted-project-configuration-at-startup.md).
 - **Between-turn compaction is an opt-in external operation.** The `[compaction]`
   table (disabled by default) enables `cake-compact compact -json -threshold`
   after a successfully completed turn whose newest complete `turn_usage` figure
@@ -148,16 +162,17 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   [ADR 032](../adr/032-let-prompt-suggestions-select-reasoning-effort.md).
 - **Unobserved-exit shutdown.** `main` owns a process-level
   `childproc.Registry`; the app registers the live run, a startup replay that may
-  still be starting, the compactor, the suggester, and every session-listing
-  helper as they start. `Model.CancelRunning` delegates to that registry when it
-  is wired, and `main` shuts it down after `p.Run` returns even when Bubble Tea
-  returned no model after an Update or View panic. It cancels every child, then
-  waits for each to be reaped under one five-second deadline. It waits on
-  reaping channels rather than result messages, so a dead Update loop cannot
-  strand a child; a run whose event buffer is full stops delivering events and
-  keeps draining stdout so cancellation can still reach `Wait`. A child that
-  misses the deadline is named on stderr and makes the process exit non-zero.
-  Normal quit paths continue to drain their own results. See
+  still be starting, the project-trust probe, the compactor, the suggester, and
+  every session-listing helper as they start. `Model.CancelRunning` delegates to
+  that registry when it is wired, and `main` shuts it down after `p.Run` returns
+  even when Bubble Tea returned no model after an Update or View panic. It
+  cancels every child, then waits for each to be reaped under one five-second
+  deadline. It waits on reaping channels rather than result messages, so a dead
+  Update loop cannot strand a child; a run whose event buffer is full stops
+  delivering events and keeps draining stdout so cancellation can still reach
+  `Wait`. A child that misses the deadline is named on stderr and makes the
+  process exit non-zero. Normal quit paths continue to drain their own results.
+  See
   [ADR 034](../adr/034-bound-unobserved-exit-child-teardown.md).
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
@@ -227,24 +242,30 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   and
   [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
 - **Child terminal boundary (POSIX).** Every live prompt, replay, session
-  listing, opt-in compaction, and prompt suggestion starts in its own session
-  with no controlling terminal (`SysProcAttr{Setsid: true}` in
-  `internal/childproc`), so a child that opens `/dev/tty` gets `ENXIO` instead
-  of prompting over or changing the REPL. One helper serves every spawn site; `Replay` inherits it through
-  `Start`. Windows is a no-op and claims no equivalent boundary. Start failure
-  is fail-closed: do not add a pty fallback or an opt-out. See
+  listing, project-trust probe, opt-in compaction, and prompt suggestion starts
+  in its own session with no controlling terminal (`SysProcAttr{Setsid: true}`
+  in `internal/childproc`), so a child that opens `/dev/tty` gets `ENXIO`
+  instead of prompting over or changing the REPL. One helper serves every spawn
+  site; `Replay` inherits it through `Start`. Windows is a no-op and claims no
+  equivalent boundary. Start failure is fail-closed: do not add a pty fallback
+  or an opt-out. See
   [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
-- **Process lifecycle.** One cake process at a time, including while replay
-  hydration is active. Cancel sends SIGTERM to the leader; a REPL-owned timer
-  sends SIGKILL to the detached process group at the grace deadline if
-  `cmd.Wait` has not reaped it, and `cmd.WaitDelay` is one second later as a
-  PID-only fallback (kill outright on Windows). stderr is retained as a bounded
-  tail for error display. The read-only session listing is model-owned too: it
-  is canceled when the browser closes, when it is replaced, on quit, and by
-  `main`'s teardown for an exit the Update loop never observed. `ListSessions`
+- **Process lifecycle.** One mutating cake run at a time, including while replay
+  hydration is active. The read-only project-trust probe and session listing are
+  separate bounded diagnostics; neither mutates a session or reads session
+  files. Cancel sends SIGTERM to the leader; a
+  REPL-owned timer sends SIGKILL to the detached process group at the grace
+  deadline if `cmd.Wait` has not reaped it, and `cmd.WaitDelay` is one second
+  later as a PID-only fallback (kill outright on Windows). stderr is retained as
+  a bounded tail for error display. The read-only session listing is model-owned
+  too: it is canceled when the browser closes, when it is replaced, on quit, and
+  by `main`'s teardown for an exit the Update loop never observed. `ListSessions`
   cancels by killing the listing's group outright and bounds teardown with
   `WaitDelay` (a hard kill — the listing has no state to flush), so a stuck
   helper, or a descendant holding the inherited stdout pipe, cannot hang the REPL.
+  The startup project-trust probe follows the same read-only pattern: it is
+  registered with the process-level registry, kills its group on cancellation,
+  has a 10-second context deadline, and bounds teardown with `WaitDelay`.
   The external compactor follows the same model-owned lifecycle as a cake run:
   SIGTERM then `WaitDelay`, a 1 MiB stdout cap, and a bounded stderr tail. The
   prompt suggester uses the same lifecycle with a 64 KiB stdout cap and an
@@ -272,9 +293,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   are written while the renderer is still stopped, then the terminal is
   re-acquired. A release that fails abandons the cycle before either stop and
   leaves the REPL running rather than stopping with raw mode still enabled. The
-  short-lived read-only listing is not tracked; it cannot touch the terminal but
-  can continue through a suspend. Inline mode parks the suspension on the
-  alternate screen so the shell's own output cannot land in the live region.
+  short-lived read-only listing and project-trust probe are not tracked; they
+  cannot touch the terminal but can continue through a suspend. Inline mode
+  parks the suspension on the alternate screen so the shell's own output cannot
+  land in the live region.
   Uncatchable SIGSTOP and a REPL killed while stopped are best-effort and
   documented, never implied. See
   [ADR 018](../adr/018-recover-terminal-ownership-around-an-external-suspend.md)

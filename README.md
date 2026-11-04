@@ -33,8 +33,9 @@ session, whether that run succeeded, failed, or was canceled.
 
 It never links to cake internals, parses human text output, or reads cake's
 session files. The only contract is cake's stream-json NDJSON output, the
-supported `replay <uuid>` and `sessions list --json` commands, and its
-documented session, model, profile, tools, and add-dir flags.
+supported `replay <uuid>`, `sessions list --json`, and
+`trust --status --json` commands, and its documented session, model, profile,
+tools, and add-dir flags.
 
 When `[suggestions]` is enabled, a completed turn also runs the external
 `cake-suggest` binary and offers its suggested next prompt as dim ghost text in
@@ -45,7 +46,9 @@ the composer. `Ctrl+S` accepts the suggestion; any typing dismisses it.
 - Go 1.27.3 or newer to build.
 - `cake` installed and on `PATH`, or point at a binary with `-cake-bin`.
   Startup `-resume <uuid>` history hydration requires cake 0.1.0 or a newer build
-  that supports `cake --output-format stream-json replay <uuid>`.
+  that supports `cake --output-format stream-json replay <uuid>`. The startup
+  project-trust check requires a build that supports
+  `cake trust --status --json`; older builds skip it silently.
 - `cake-suggest` installed and on `PATH` (or named by
   `suggestions.cake-suggest-bin`) when prompt suggestions are enabled.
 
@@ -256,6 +259,20 @@ down. The status line and timeline only show it shortened.
   are done with it, and a prompt typed after closing is submitted normally. A
   missing or older cake binary, or malformed output, shows a non-fatal warning.
   Like `/new` and `/resume`, it requires an idle REPL.
+- At startup cake-repl starts the read-only `cake trust --status --json` command
+  once. When it returns, an untrusted, changed, or invalid `.cake/` snapshot, or
+  an unrecognized trust state, adds a warning to the timeline naming the state,
+  the authority-bearing files (or changes), the canonical project root, and the
+  `cake trust` command that resolves it. Trusted projects and projects with no
+  authority-bearing configuration are silent. The probe never writes a trust
+  record and never gates input, so the warning normally appears before the first
+  prompt but an immediate submission can arrive first. It does not run when
+  `CAKE_TRUST_PROJECT=1` or `CAKE_PROJECT_CONFIG=off` makes live prompts
+  independent of the project's persistent trust record. An older cake without
+  the command, a non-zero exit, malformed output, or a timeout is silent apart
+  from the debug log. Each worktree or canonical project root has its own
+  record, so run `cake trust` in the root the warning names. See
+  [ADR 035](docs/adr/035-warn-about-untrusted-project-configuration-at-startup.md).
 - A bare `-resume` opens that same picker at startup, before the first prompt and
   with no hydration: nothing is replayed and no session is pinned until you pick
   a row. `Enter` pins the next prompt to the highlighted session exactly like
@@ -644,7 +661,9 @@ validation is available with `just release-check`.
   still lets you continue the session. The session picker — `/sessions`, and a
   bare `-resume` at startup — needs a cake binary that supports
   `sessions list --json`; without it the picker shows a non-fatal warning and
-  the prompt stays available.
+  the prompt stays available. The startup project-trust warning needs
+  `trust --status --json`; with an older cake the preflight is silent and the
+  first prompt still reports cake's exit-3 trust error as a generic run failure.
 - Tool output is hidden by default: each tool call shows its header and argument
   summary only, so a failed tool is quiet until you reveal its output with
   `Ctrl+O`. The key cycles the session-wide mode through truncated, full, and
@@ -703,22 +722,24 @@ validation is available with `just release-check`.
   The raw bytes are still recorded when `-debug-log` is set.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
-- One cake process at a time; submitting while a task runs is rejected.
-- On macOS and Linux, every live prompt, replay, session listing, and context
-  compaction runs in its own session with no controlling terminal, so a tool
-  that opens `/dev/tty` fails with a device error instead of changing the REPL's
-  terminal modes. Tools that require a terminal — `sudo`, an SSH passphrase
-  prompt, `gh auth login`, or an editor that opens `/dev/tty` — therefore fail.
-  Windows has no equivalent boundary and claims no isolation. Startup is
-  fail-closed: if the child cannot be started detached, the run fails rather
-  than falling back to an unisolated child. See
+- One prompt run at a time; submitting while a task runs is rejected. The
+  read-only project-trust probe is a separate cake invocation and may overlap a
+  replay or prompt; it never mutates a session or reads session files.
+- On macOS and Linux, every live prompt, replay, project-trust probe, session
+  listing, and context compaction runs in its own session with no controlling
+  terminal, so a tool that opens `/dev/tty` fails with a device error instead of
+  changing the REPL's terminal modes. Tools that require a terminal — `sudo`, an
+  SSH passphrase prompt, `gh auth login`, or an editor that opens `/dev/tty` —
+  therefore fail. Windows has no equivalent boundary and claims no isolation.
+  Startup is fail-closed: if the child cannot be started detached, the run
+  fails rather than falling back to an unisolated child. See
   [ADR 027](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - A terminal hangup or an abrupt REPL death can leave a detached cake or
   compactor process running until it finishes; normal quit, Ctrl+C, and SIGTERM
   still cancel it, and an in-flight prompt suggester is canceled and reaped
   before the REPL returns. A suspend pauses tracked live and replay runs; the
-  short-lived read-only session listing and the compactor are not tracked and can
-  continue through the stop.
+  short-lived read-only session listing, project-trust probe, and the compactor
+  are not tracked and can continue through the stop.
 - Context compaction is best-effort and between turns only. The trigger is a
   target, not an in-invocation cap: task 130 measured median +40,375, p99
   +311,592, and max 556,317 tokens of growth per invocation, and up to 38.8

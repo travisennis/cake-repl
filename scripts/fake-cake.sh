@@ -7,7 +7,9 @@
 #   bin/cake-repl -cake-bin "$PWD/scripts/fake-cake.sh" ...
 #
 # It ignores the CLI flags it is given and replays one checked-in stream-json
-# fixture from internal/cake/testdata/fixtures/ instead. It is hermetic by
+# fixture from internal/cake/testdata/fixtures/ instead. `sessions list --json`
+# and `trust --status --json` get their own envelope shapes so the session
+# browser and startup trust warning can be driven too. It is hermetic by
 # construction: the only input is a file in this repository.
 #
 # The Go runner tests keep their own inline fake shell scripts
@@ -19,6 +21,9 @@
 #   FAKE_CAKE_REPLAY_FIXTURE  fixture for `replay <uuid>` (default: replay-path)
 #   FAKE_CAKE_SESSIONS        response for `sessions list --json`: `valid`
 #                             (default), `empty`, or `error`
+#   FAKE_CAKE_TRUST           response for `trust --status --json`: `not-required`
+#                             (default), `trusted`, `untrusted`, `changed`,
+#                             `invalid`, `malformed`, or `error`
 #   FAKE_CAKE_DELAY           seconds to wait after each line (default: 0), so a
 #                             running state or a loading listing is observable
 #   FAKE_CAKE_ARGS_FILE       when set, append the argv of every invocation
@@ -64,6 +69,46 @@ if [ "${1:-}" = "sessions" ]; then
             ;;
         *)
             printf 'fake-cake: unknown FAKE_CAKE_SESSIONS: %s\n' "$FAKE_CAKE_SESSIONS" >&2
+            exit 2
+            ;;
+    esac
+fi
+
+# `cake trust --status --json` is a third shape: one project-trust diagnostic
+# document. A driven session can exercise the startup warning without a real
+# cake binary or a trust record.
+if [ "${1:-}" = "trust" ]; then
+    case "${FAKE_CAKE_TRUST:-not-required}" in
+        not-required)
+            printf '%s\n' '{"schema_version":1,"command":"trust status","status":"ok","summary":{"state":"not_required","authority":0,"changes":0},"checks":[],"data":{"state":"not_required","project_root":"'"$PWD"'","authority":[],"changes":[]}}'
+            exit 0
+            ;;
+        trusted)
+            printf '%s\n' '{"schema_version":1,"command":"trust status","status":"ok","summary":{"state":"trusted","authority":1,"changes":0},"checks":[],"data":{"state":"trusted","project_root":"'"$PWD"'","authority":[{"path":".cake/settings.toml","kind":"settings","keys":["system_prompt"]}],"changes":[]}}'
+            exit 0
+            ;;
+        untrusted)
+            printf '%s\n' '{"schema_version":1,"command":"trust status","status":"ok","summary":{"state":"untrusted","authority":1,"changes":0},"checks":[],"data":{"state":"untrusted","project_root":"'"$PWD"'","authority":[{"path":".cake/settings.toml","kind":"settings","keys":["system_prompt"]}],"changes":[]}}'
+            exit 0
+            ;;
+        changed)
+            printf '%s\n' '{"schema_version":1,"command":"trust status","status":"ok","summary":{"state":"changed","authority":1,"changes":1},"checks":[],"data":{"state":"changed","project_root":"'"$PWD"'","authority":[{"path":".cake/settings.toml","kind":"settings","keys":["system_prompt"]}],"changes":[{"path":".cake/settings.toml","change":"modified"}]}}'
+            exit 0
+            ;;
+        invalid)
+            printf '%s\n' '{"schema_version":1,"command":"trust status","status":"ok","summary":{"state":"invalid","authority":1,"changes":0},"checks":[],"data":{"state":"invalid","project_root":"'"$PWD"'","invalid_reason":"the trust record is a symlink","authority":[{"path":".cake/settings.toml","kind":"settings","keys":["system_prompt"]}],"changes":[]}}'
+            exit 0
+            ;;
+        malformed)
+            printf '%s\n' 'not a trust document'
+            exit 0
+            ;;
+        error)
+            printf 'fake-cake: trust status unavailable\n' >&2
+            exit 1
+            ;;
+        *)
+            printf 'fake-cake: unknown FAKE_CAKE_TRUST: %s\n' "$FAKE_CAKE_TRUST" >&2
             exit 2
             ;;
     esac

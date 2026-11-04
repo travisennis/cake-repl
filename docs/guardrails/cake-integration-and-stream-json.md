@@ -15,10 +15,11 @@ consumes cake events. This is the project's core external contract.
   may additionally use `--fork [<uuid>]`; once cake reports the forked session
   ID, later prompts use only its pinned `--resume <uuid>`. Read-only startup
   resume hydration runs the separate `cake --output-format stream-json replay
-  <uuid>` command with no prompt. The other permitted invocation is the
+  <uuid>` command with no prompt. The other permitted invocations are the
   read-only, informational `cake sessions list --json`, run with the same
-  working directory as a live prompt to list that directory's sessions. `--`
-  must stay so a prompt beginning with `-` is never parsed as a flag.
+  working directory as a live prompt to list that directory's sessions, and the
+  read-only `cake trust --status --json` startup preflight described below.
+  `--` must stay so a prompt beginning with `-` is never parsed as a flag.
 - **stream-json schema.** The typed events in `events.go` (`task_start`,
   `session_meta`, `prompt_context`, `message`, `reasoning`, `function_call`,
   `function_call_output`, `hook_event`, `skill_activated`, `task_complete` +
@@ -134,11 +135,12 @@ consumes cake events. This is the project's core external contract.
   [ADR 032](../adr/032-let-prompt-suggestions-select-reasoning-effort.md).
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
-  and the versioned `sessions list --json` envelope) is the only contract; it is
-  invoked only from `internal/cake`. Replay failures are structured
-  `replay_error` records and non-zero exits: input errors use exit 3; corrupt,
-  unsupported-format, and permission errors use exit 1. Older cake binaries that
-  do not support replay must degrade to a non-fatal warning.
+  and the versioned `sessions list --json` and `trust --status --json`
+  envelopes) is the only contract; it is invoked only from `internal/cake`.
+  Replay failures are structured `replay_error` records and non-zero exits:
+  input errors use exit 3; corrupt, unsupported-format, and permission errors
+  use exit 1. Older cake binaries that do not support replay must degrade to a
+  non-fatal warning.
 - **Read-only session listing.** `cake sessions list --json` returns the
   envelope `{schema_version, command, status, summary, data.sessions[]}` where
   each session carries `session_id`, `first_prompt`, and `timestamp` (cake 0.1.0,
@@ -153,6 +155,29 @@ consumes cake events. This is the project's core external contract.
   [ADR 016](../adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)
   and
   [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md).
+- **Project trust preflight.** The startup probe is one read-only
+  `cake trust --status --json` invocation through `internal/cake`, with the
+  configured `-cake-bin`, the same `-cwd` and environment as a live prompt, a
+  1 MiB stdout cap, an 8 KiB stderr tail, group cancellation, a 3-second
+  `WaitDelay`, and a 10-second context deadline. It never writes a trust record
+  and never runs `cake trust`. Decode the diagnostic document's `data.state`,
+  `project_root`, `authority[].path`, `authority[].keys`, `changes[]`, and
+  `invalid_reason`; ignore unknown fields and a newer `schema_version`. A
+  missing or empty `state` is malformed output. `trusted` and `not_required`
+  are silent; `untrusted`, `changed`, `invalid`, and any unrecognized state
+  append one advisory timeline warning when the probe returns, normally during
+  startup before the first prompt. It names the
+  state, authority or changes, canonical project root, and the `cake trust`
+  command. The warning never gates input, so an immediate submission can arrive
+  first. Any probe failure — non-zero exit,
+  older cake without the subcommand, malformed JSON, or timeout — is
+  debug-log-only and never a timeline item or startup failure. Skip the probe
+  when `CAKE_TRUST_PROJECT=1` or `CAKE_PROJECT_CONFIG=off` is set because the
+  live prompt does not depend on the project's persistent trust record;
+  `trust --status` always inspects the project regardless of those variables.
+  Each canonical project root,
+  including a linked worktree, has its own record. See
+  [ADR 035](../adr/035-warn-about-untrusted-project-configuration-at-startup.md).
 
 ## Required checks / test focus
 
@@ -170,6 +195,15 @@ consumes cake events. This is the project's core external contract.
   `schema_version`; none may be fatal. Also cover cancellation, the bounded
   teardown when a descendant holds stdout (short `waitDelay`, finite fake helper
   with cleanup), and the 8 MiB stdout cap.
+- For the project trust preflight, add fake-cake cases for an untrusted,
+  changed, invalid, trusted, and not-required document, an unknown
+  `schema_version`, a missing `data.state`, malformed JSON, a non-zero exit, the
+  exact `trust --status --json` argument contract, cwd, the 1 MiB stdout cap,
+  cancellation, and the bounded teardown when a descendant holds stdout. The app
+  tests must prove the warning appears at startup for an untrusted document and
+  that every probe failure is silent. Cover suppression by
+  `CAKE_TRUST_PROJECT=1` and `CAKE_PROJECT_CONFIG=off`, and registration with
+  the process-level child registry. None may require a real cake.
 - For the external compactor, add fake `cake-compact` scripts for a success
   document, a `compacted:false` no-op, a non-zero exit with stderr, malformed
   output, a missing binary, cancellation, and the `WaitDelay` teardown when a
@@ -202,6 +236,10 @@ consumes cake events. This is the project's core external contract.
 - **Mislabeling cancellation.** Cancellation is derived from the `cmd.Cancel`
   flag plus signal-terminated process status on POSIX, not from `ctx.Err()`, so
   a late Ctrl+C cannot relabel a finished run. Preserve that ordering.
+- **Making the trust preflight authoritative or fatal.** A probe failure, an
+  older cake without `trust`, or malformed output must never block startup or
+  prompt submission, and the probe must never write a trust record. Only a
+  successful document with an attention state may add a warning.
 - **Unbounded memory.** stderr is kept as a bounded tail (`tailBuffer`); tool
   output is truncated for display and retained with the existing per-result
   ceiling. Replay uses the same limits; don't accumulate full streams in memory.

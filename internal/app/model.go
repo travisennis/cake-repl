@@ -522,6 +522,9 @@ func (m Model) Init() tea.Cmd {
 		settleSweepAtStartupCmd(),
 		m.titleCmd(),
 	}
+	if cmd := startTrustProbeCmd(m.cfg); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	if m.startupCmd != nil {
 		cmds = append(cmds, m.startupCmd)
 	}

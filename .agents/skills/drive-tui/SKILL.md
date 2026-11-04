@@ -36,6 +36,7 @@ not read.
 | `FAKE_CAKE_FIXTURE` | `happy-path` | fixture for a live prompt: `happy-path`, `error-task`, `minimal`, `turn-usage`, `compaction` (forward-compat; current cake emits this record only on replay), `unknown-type`, `malformed-midstream`, `wide-emoji-row` |
 | `FAKE_CAKE_REPLAY_FIXTURE` | `replay-path` | fixture for `replay <uuid>`, used when the REPL starts with `-resume`; `compaction` shows the checkpoint marker and estimated context, and `compaction-continued` shows a newer replayed `turn_usage` replacing the estimate |
 | `FAKE_CAKE_SESSIONS` | `valid` | response for `sessions list --json`: `valid` (two sessions), `empty`, or `error` |
+| `FAKE_CAKE_TRUST` | `not-required` | response for `trust --status --json`: `not-required`, `trusted`, `untrusted`, `changed`, `invalid`, `malformed`, or `error` |
 | `FAKE_CAKE_DELAY` | `0` | seconds between lines, so the running state or a loading listing is observable (`FAKE_CAKE_DELAY=0.4`) |
 | `FAKE_CAKE_ARGS_FILE` | unset | append each invocation's argv, to check which flags the REPL passed through |
 | `FAKE_CAKE_DEBUG` | unset | print the argv to stderr |
@@ -157,7 +158,10 @@ The fake answers `cake sessions list --json` with a two-session listing, so the
 `FAKE_CAKE_DELAY` to keep the loading state on screen long enough to close or
 reopen the browser mid-load. A listing is canceled when the browser closes or is
 replaced, so a capture of that cycle is the evidence for session-listing
-lifecycle changes.
+lifecycle changes. The fake also answers `cake trust --status --json`; set
+`FAKE_CAKE_TRUST=untrusted`, `changed`, or `invalid` to capture the startup
+project-trust warning, and `malformed` or `error` to exercise its silent-failure
+path.
 
 ### 5. Resize
 

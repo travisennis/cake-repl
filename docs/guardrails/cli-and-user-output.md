@@ -113,6 +113,21 @@ in plain text like every other surface.
   defaults a value (`-sandbox ""`, `-model ""`, `-profile ""`, or `-cake-bin
   cake`) is re-emitted — for example `-sandbox ''` — so reloading the config on
   resume cannot reintroduce a value the original run suppressed.
+- **Startup project-trust check.** During startup, one read-only
+  `cake trust --status --json` probe inspects the configured `-cwd`. When it
+  returns, an `untrusted`, `changed`, `invalid`, or unrecognized state adds one
+  warning naming the state, authority-bearing files or changes, canonical
+  project root, and the `cake trust` command that resolves it. `trusted` and
+  `not_required` are silent. The warning is advisory and never gates input, so
+  it normally appears before the first prompt but an immediate submission can
+  arrive first. A non-zero exit, an older cake without the command, malformed
+  output, or a timeout is debug-log-only. The probe is skipped when
+  `CAKE_TRUST_PROJECT=1` or `CAKE_PROJECT_CONFIG=off` is set, because live
+  prompts do not depend on the project's persistent trust record. The probe
+  never writes the trust
+  record or runs `cake trust`. See
+  [cake-integration-and-stream-json.md](cake-integration-and-stream-json.md) and
+  [ADR 035](../adr/035-warn-about-untrusted-project-configuration-at-startup.md).
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
   labeled conversation sections; user content retains a slim gutter at normal
