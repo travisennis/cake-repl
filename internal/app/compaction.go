@@ -61,7 +61,7 @@ type compactionDoneMsg struct {
 // completion record and exited cleanly: a canceled or failed run keeps whatever
 // context it had, and the next successful turn re-evaluates.
 func (m Model) shouldCompactAfter(res cake.Result) bool {
-	if !m.cfg.Compaction.Enabled || m.cfg.NoSession || m.compacting || m.exitAfter {
+	if !m.cfg.Compaction.Enabled || m.cfg.NoSession || m.compactionBusy() || m.exitAfter {
 		return false
 	}
 	if res.Canceled || res.Err != nil || res.ExitCode != 0 || !m.sawComplete {
@@ -146,7 +146,7 @@ func (m Model) compactionTriggerPercent() int {
 // also starts a suggestion uses one title command for both.
 func (m Model) startCompaction() (Model, tea.Cmd) {
 	mode, sessionID := m.session.RunOptions()
-	if mode != cake.RunResume || sessionID == "" {
+	if mode != cake.RunResume || sessionID == "" || m.compactionBusy() {
 		return m, nil
 	}
 
@@ -163,13 +163,11 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	done := make(chan struct{})
 	m.trackChild("compaction", cancel, done)
 	m.compactionSeq++
-	m.compactionReq = m.compactionSeq
-	m.compactionCancel = cancel
-	m.compactionDone = done
-	m.compacting = true
+	key := operationKey{request: m.compactionSeq}
+	m.compaction.begin(key, cancel, done)
 	m.compactionStart = time.Now()
 	m.compactionElapsed = 0
-	req := m.compactionReq
+	req := key.request
 	opts := compact.Options{
 		Bin:                       m.cfg.Compaction.Bin,
 		Cwd:                       m.cfg.Cwd,
@@ -212,7 +210,7 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 // start notice with an explicit skip notice; a failure, cancellation, or
 // non-in-place result keeps the session and status figure and warns.
 func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
-	if msg.req != m.compactionReq {
+	if !m.compaction.settle(operationKey{request: msg.req}) {
 		// A result for a superseded request cannot settle the current gate. Drop
 		// any suggestion held for that old compaction so it cannot leak into the
 		// next one; a live request keeps its own held result.
@@ -220,9 +218,6 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 		m.pendingSuggestionSession = ""
 		return m, nil
 	}
-	m.compacting = false
-	m.compactionCancel = nil
-	m.compactionDone = nil
 	m.compactionStart = time.Time{}
 	m.compactionElapsed = 0
 
@@ -349,12 +344,19 @@ func compactionSkippedText(reason string, outputLimit int) string {
 	return text
 }
 
+// compactionBusy reports whether a compactor is active or draining. The
+// pending operation owns the mechanism; this caller-side answer is the gate and
+// presentation policy: compaction remains busy until its result is reaped.
+func (m Model) compactionBusy() bool {
+	return m.compaction.active() || m.compaction.draining()
+}
+
 // refreshCompactionElapsed records the whole-second age of the running
 // compactor. The spinner tick is the clock the REPL already runs while a task or
 // compaction is in flight, so this adds no second timer and stops with the
 // spinner chain when the REPL goes idle.
 func (m *Model) refreshCompactionElapsed(now time.Time) {
-	if !m.compacting || m.compactionStart.IsZero() {
+	if !m.compactionBusy() || m.compactionStart.IsZero() {
 		return
 	}
 	elapsed := now.Sub(m.compactionStart)

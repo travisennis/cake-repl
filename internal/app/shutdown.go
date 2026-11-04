@@ -49,11 +49,11 @@ func (m Model) cancelRunning(timeout time.Duration) error {
 		// still starting.
 		ops = append(ops, childproc.Operation{Name: "replay", Done: m.replayDone})
 	}
-	if m.compactionDone != nil {
-		ops = append(ops, childproc.Operation{Name: "compaction", Done: m.compactionDone})
+	if done := m.compaction.doneChannel(); done != nil {
+		ops = append(ops, childproc.Operation{Name: "compaction", Done: done})
 	}
-	if m.suggestionDone != nil {
-		ops = append(ops, childproc.Operation{Name: "suggestion", Done: m.suggestionDone})
+	if done := m.suggestion.doneChannel(); done != nil {
+		ops = append(ops, childproc.Operation{Name: "suggestion", Done: done})
 	}
 	for req, done := range m.sessionListDone {
 		ops = append(ops, childproc.Operation{Name: fmt.Sprintf("session listing %d", req), Done: done})

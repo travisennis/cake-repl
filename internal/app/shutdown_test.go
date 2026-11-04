@@ -62,7 +62,8 @@ while :; do sleep 0.05; done
 	m := compactionModel(t, bin)
 	m.cfg.Children = childproc.NewRegistry()
 	m, cmd := m.startCompaction()
-	if cmd == nil || m.compactionDone == nil {
+	done := m.compaction.doneChannel()
+	if cmd == nil || done == nil {
 		t.Fatal("startCompaction did not leave a bounded child")
 	}
 	result := make(chan tea.Msg, 1)
@@ -73,7 +74,7 @@ while :; do sleep 0.05; done
 		t.Fatalf("CancelRunning: %v", err)
 	}
 	select {
-	case <-m.compactionDone:
+	case <-done:
 	default:
 		t.Fatal("CancelRunning returned before the compactor was reaped")
 	}
@@ -131,8 +132,8 @@ func TestCancelRunningDeadlineReportsTimedOutChildren(t *testing.T) {
 	m := Model{
 		run:             &cake.Run{Done: never},
 		replayDone:      never,
-		compactionDone:  never,
-		suggestionDone:  never,
+		compaction:      pendingOperation{phase: phaseDraining, done: never},
+		suggestion:      pendingOperation{phase: phaseDraining, done: never},
 		sessionListDone: map[uint64]chan struct{}{7: never},
 	}
 

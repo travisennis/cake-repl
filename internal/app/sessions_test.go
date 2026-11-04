@@ -834,6 +834,54 @@ func TestCancelRunningCancelsInFlightListing(t *testing.T) {
 	}
 }
 
+// TestListingDrainDoesNotGatePrompt: closing the browser cancels the listing,
+// and its still-running child must not block a new prompt.
+func TestListingDrainDoesNotGatePrompt(t *testing.T) {
+	m, done := blockingListing(t, newLaidOutModel())
+	m.input.SetValue("hello while the listing drains")
+
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m = tm.(Model)
+	if len(m.sessionListDone) != 1 {
+		t.Fatalf("listing drain count = %d, want the canceled child still tracked", len(m.sessionListDone))
+	}
+
+	m.cfg.CakeBin = writeFakeCake(t, `
+cat <<'EOF'
+{"type":"task_complete","session_id":"`+browserID1+`","task_id":"t-1"}
+EOF
+`)
+	tm, cmd := m.submit()
+	m = tm.(Model)
+	if cmd == nil || !m.running {
+		t.Fatal("a draining session listing blocked prompt submission")
+	}
+	_ = cmd
+	drainRun(t, m.run)
+
+	updated, _ := m.Update(awaitListing(t, done))
+	m = updated.(Model)
+	if m.browserOpen || m.browserErr != "" || len(m.sessionList.Items()) != 0 {
+		t.Fatalf("late listing result touched the closed browser: open=%v err=%q items=%d",
+			m.browserOpen, m.browserErr, len(m.sessionList.Items()))
+	}
+}
+
+// TestListingDrainDoesNotGateNewSession: the canceled listing child is tracked
+// for teardown, but it is not a session-retarget gate.
+func TestListingDrainDoesNotGateNewSession(t *testing.T) {
+	m, done := blockingListing(t, newLaidOutModel())
+
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m = tm.(Model)
+	tm, _ = m.execCommand(Command{Kind: CmdNew})
+	m = tm.(Model)
+	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Fatalf("new session was gated by a listing drain: %v %q", mode, id)
+	}
+	awaitListing(t, done)
+}
+
 // TestPromptUsableAfterClosingBrowser: a draft survives closing the browser and
 // the next submit starts a run instead of being swallowed by browser state.
 func TestPromptUsableAfterClosingBrowser(t *testing.T) {

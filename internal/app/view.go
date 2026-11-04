@@ -73,7 +73,7 @@ func (m Model) activityState() string {
 	switch {
 	case m.running:
 		return "running"
-	case m.compacting:
+	case m.compactionBusy():
 		return m.compactionStateLabel()
 	default:
 		return "ready"
@@ -90,7 +90,7 @@ func (m Model) compactionStateLabel() string {
 // the compactor runs the prompt gate is closed, so the footer advertises the two
 // keys that do something instead of the submit hint that would be refused.
 func (m Model) composerHint() string {
-	if m.compacting {
+	if m.compactionBusy() {
 		return "Ctrl+C cancel · Ctrl+N new session"
 	}
 	if m.suggestionActive() && m.input.Value() == "" {
@@ -109,7 +109,7 @@ func (m Model) statusLine() string {
 	switch {
 	case m.running:
 		state = m.spin.View() + " running"
-	case m.compacting:
+	case m.compactionBusy():
 		state = m.spin.View() + " " + m.compactionStateLabel()
 	}
 

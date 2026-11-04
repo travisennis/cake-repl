@@ -298,7 +298,7 @@ JSON
 
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = tm.(Model)
-	if !m.compacting {
+	if !m.compactionBusy() {
 		t.Fatal("finishRun did not start a compaction")
 	}
 	if m.running {
@@ -343,7 +343,7 @@ JSON
 	tm, _ = m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
 
-	if m.compacting {
+	if m.compactionBusy() {
 		t.Fatal("compaction state survived the result")
 	}
 	if idx := compactionStartIndex(m); idx >= 0 {
@@ -477,7 +477,7 @@ JSON
 
 			tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 			m = tm.(Model)
-			if !m.compacting {
+			if !m.compactionBusy() {
 				t.Fatal("finishRun did not start an absolute compaction")
 			}
 			tm, _ = m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
@@ -548,7 +548,7 @@ func TestCompactionFailureKeepsSessionAndWarns(t *testing.T) {
 	tm, _ = m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
 	m = tm.(Model)
 
-	if m.compacting {
+	if m.compactionBusy() {
 		t.Fatal("failure left the gate closed")
 	}
 	if mode, id := m.session.RunOptions(); mode != cake.RunResume || id != compactionSessionID {
@@ -615,17 +615,22 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 	if idx := compactionStartIndex(m); idx < 0 {
 		t.Fatal("ctrl+c removed the pending start notice before the child was reaped")
 	}
-	if !m.compacting {
+	if !m.compactionBusy() {
 		t.Fatal("cancel reopened the gate before the child was reaped")
 	}
 	m.input.SetValue("next")
 	if _, cmd := m.submit(); cmd != nil {
 		t.Fatal("prompt submitted while the canceled child was draining")
 	}
+	tm, _ = m.execCommand(Command{Kind: CmdNew})
+	m = tm.(Model)
+	if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "wait for context compaction") {
+		t.Fatalf("/new while the canceled compactor drained = %+v", it)
+	}
 
 	tm, _ = m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
-	if m.compacting {
+	if m.compactionBusy() {
 		t.Fatal("reaped compaction left the gate closed")
 	}
 	if it := lastItem(t, m); it.Kind != ui.KindWarning || it.Text != "context compaction canceled" {
@@ -636,6 +641,12 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 	}
 	if m.session.Context == nil || m.session.Context.Tokens != 170_000 {
 		t.Fatalf("context changed on cancellation: %+v", m.session.Context)
+	}
+
+	tm, _ = m.execCommand(Command{Kind: CmdNew})
+	m = tm.(Model)
+	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Fatalf("compaction gate stayed closed after the child was reaped: %v %q", mode, id)
 	}
 }
 
@@ -652,8 +663,8 @@ func TestExitWhileCompactingCancelsThenQuits(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("/exit returned %v, want no command before the child is reaped", cmd)
 	}
-	if !m.exitAfter || !m.compacting {
-		t.Fatalf("/exit state = exitAfter:%v compacting:%v", m.exitAfter, m.compacting)
+	if !m.exitAfter || !m.compactionBusy() {
+		t.Fatalf("/exit state = exitAfter:%v compacting:%v", m.exitAfter, m.compactionBusy())
 	}
 	if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "canceling context compaction, then exiting") {
 		t.Fatalf("/exit notice = %+v", it)
@@ -661,7 +672,7 @@ func TestExitWhileCompactingCancelsThenQuits(t *testing.T) {
 
 	tm, quitCmd := m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
-	if m.compacting {
+	if m.compactionBusy() {
 		t.Fatal("reaped cancellation left the gate closed")
 	}
 	if quitCmd == nil {
@@ -691,8 +702,8 @@ func TestCtrlNWhileCompactingResetsWithoutApplyingResult(t *testing.T) {
 
 	tm, _ = m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
-	if m.compacting || m.newSessionPending {
-		t.Fatalf("drained compaction state = compacting:%v pending:%v", m.compacting, m.newSessionPending)
+	if m.compactionBusy() || m.newSessionPending {
+		t.Fatalf("drained compaction state = compacting:%v pending:%v", m.compactionBusy(), m.newSessionPending)
 	}
 	if m.session.Context != nil {
 		t.Fatalf("stale compaction result seeded the new session: %+v", m.session.Context)
@@ -711,7 +722,7 @@ func TestCompactionSkippedForNoSession(t *testing.T) {
 
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = tm.(Model)
-	if m.compacting {
+	if m.compactionBusy() {
 		t.Fatal("compaction started with -no-session")
 	}
 	if cmd == nil {

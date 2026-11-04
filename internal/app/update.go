@@ -296,12 +296,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if !m.running && !m.compacting {
+		if !m.running && !m.compactionBusy() {
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
-		if m.compacting {
+		if m.compactionBusy() {
 			// The spinner tick is already flowing while a task or compaction is
 			// in flight, so it also refreshes the elapsed-seconds display without
 			// starting a second timer chain. Use the tick's own time when present
@@ -461,7 +461,7 @@ func (m Model) quit() (Model, tea.Cmd) {
 	m.cancelCompaction()
 	m.cancelSessionList()
 	m.cancelSuggestion()
-	if m.suggestionDone != nil {
+	if m.suggestion.doneChannel() != nil {
 		if !m.exitAfter {
 			m.exitAfter = true
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling prompt suggestion, then exiting…"})
@@ -487,7 +487,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.run.Cancel()
 			return m, nil
 		}
-		if m.compacting {
+		if m.compactionBusy() {
 			// Keep the compaction gate closed until the child exits and the
 			// result is reaped, so the next prompt cannot race its session lock.
 			// The reaped result supplies the one "canceled" notice, matching a
@@ -605,7 +605,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 		m.newSessionPending = true
 		m.run.Cancel()
 	}
-	if m.compacting {
+	if m.compactionBusy() {
 		m.newSessionPending = true
 		m.cancelCompaction()
 	}
@@ -785,7 +785,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.compacting {
+	if m.compactionBusy() {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "context compaction is running — wait for it or press Ctrl+C to cancel"})
 		return m, nil
 	}
@@ -813,7 +813,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "finish or cancel the running task first"})
 		return m, nil
 	}
-	if m.compacting && needsIdle(cmd.Kind) {
+	if m.compactionBusy() && needsIdle(cmd.Kind) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "wait for context compaction to finish (Ctrl+C cancels it)"})
 		return m, nil
 	}
@@ -823,7 +823,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: HelpText})
 
 	case CmdExit:
-		if m.compacting {
+		if m.compactionBusy() {
 			m.exitAfter = true
 			m.cancelCompaction()
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "canceling context compaction, then exiting…"})

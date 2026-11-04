@@ -168,29 +168,23 @@ type Model struct {
 	replayWarn   bool
 	sawComplete  bool
 	exitAfter    bool
-	// compacting is true while the external compactor runs. It gates prompt
-	// submission and session-target changes so the next cake process cannot
-	// race the compactor's session lock, and it marks the status line/title as
-	// busy. compactionCancel stops the child; the result stays in flight until
-	// a compactionDoneMsg reaps it, even after a cancel.
-	compacting       bool
-	compactionCancel context.CancelFunc
-	// compactionDone closes when the compactor child has exited and been
-	// reaped. It stays set until the result is handled, so an unobserved exit
-	// can wait for teardown without consuming the result message.
-	compactionDone chan struct{}
+	// compaction is the pending between-turn compactor. It owns the request
+	// identity, cancellation, and reaping channel. A caller decides how its
+	// active and draining phases gate input; compaction blocks prompt submission
+	// and session-target changes so the next cake process cannot race its session
+	// lock, and it marks the status line/title as busy.
+	compaction pendingOperation
 	// compactionStart is when the current compactor was launched and
 	// compactionElapsed is its whole-second age, refreshed from the spinner tick
 	// the REPL already runs while busy. Both are zero when no compaction is
 	// pending, so the status line and composer omit the age. See ADR 026.
 	compactionStart   time.Time
 	compactionElapsed time.Duration
-	// compactionSeq allocates a request identity for one compaction and
-	// compactionReq is the identity whose result may still be applied. A
+	// compactionSeq allocates a request identity that never repeats. The
+	// pending operation owns the identity whose result may still be applied, so a
 	// canceled or superseded run cannot touch the status line or context of a
 	// later one.
 	compactionSeq uint64
-	compactionReq uint64
 	// newSessionPending is true while an old run canceled by Ctrl+N is being
 	// drained. Its remaining events and cancellation result belong before the
 	// new-session boundary and must not affect the fresh state. It also covers
@@ -199,20 +193,13 @@ type Model struct {
 
 	// Suggestion state (ADR 028). At most one read-only suggestion request is in
 	// flight; suggestionSeq allocates a request identity that never repeats, and
-	// suggestionReq is the identity whose result may still be applied. A draft,
-	// a new turn, or a session change invalidates the identity so a late result
+	// suggestion owns the identity whose result may still be applied. A draft, a
+	// new turn, or a session change invalidates the identity so a late result
 	// cannot overwrite the composer. suggestionText is the currently shown ghost
 	// suggestion; empty means none. suggestionWarned keeps a broken suggester to
 	// one visible warning per REPL process.
-	suggesting       bool
+	suggestion       pendingOperation
 	suggestionSeq    uint64
-	suggestionReq    uint64
-	suggestionCancel context.CancelFunc
-	// suggestionDone closes when the suggester child has exited and been reaped.
-	// It stays set after cancelSuggestion invalidates the request, so quit and
-	// main's unobserved-exit teardown can wait for the child instead of letting
-	// it outlive the REPL.
-	suggestionDone   chan struct{}
 	suggestionText   string
 	suggestionWarned bool
 	// pendingSuggestion holds a usable result that arrived while compaction
@@ -486,14 +473,11 @@ func (m *Model) cancelReplay() {
 	}
 }
 
-// cancelCompaction stops an in-flight compactor. The process keeps the same
-// result identity until its compactionDoneMsg arrives, so the gate stays closed
-// until the child has actually exited and been reaped.
+// cancelCompaction stops an in-flight compactor. The pending operation keeps
+// the same result identity until its compactionDoneMsg arrives, so the gate
+// stays closed until the child has actually exited and been reaped.
 func (m *Model) cancelCompaction() {
-	if m.compactionCancel != nil {
-		m.compactionCancel()
-		m.compactionCancel = nil
-	}
+	m.compaction.cancel()
 }
 
 // SessionData returns the id of the session the REPL is continuing and the
@@ -558,7 +542,7 @@ func windowTitle(cwd string, running, compacting bool) string {
 // (a run starting or ending, a compaction starting or ending) so the title never
 // describes a state the REPL has left.
 func (m Model) titleCmd() tea.Cmd {
-	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.running, m.compacting))
+	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.running, m.compactionBusy()))
 }
 
 // IdleTitleSequence returns the escape sequence that restores the idle terminal

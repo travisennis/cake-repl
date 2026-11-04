@@ -48,7 +48,9 @@ deferred; 144 stays independent.
 - [x] (2026-11-04T19:32Z) Added the durable lifecycle invariant to
   `ARCHITECTURE.md`.
 - [x] (2026-11-04T19:32Z) Ran the docs-only checks recorded under Validation.
-- [ ] 147: extract the request identity and drain helper.
+- [x] (2026-11-04T20:00Z) 147: extracted `pendingOperation`
+  (`internal/app/lifecycle.go`), adopted it for compaction and suggestion, and
+  test-covered the caller gate policy for compaction, listing, and suggestion.
 - [ ] 138: type run and exit, add the generation boundary and the shared gates.
 - [ ] 140: type compaction on the helper and its generation.
 - [ ] 141: type suggestion, keep ghost text as presentation, fold task 146's

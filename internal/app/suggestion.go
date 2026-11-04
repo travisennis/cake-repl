@@ -58,7 +58,7 @@ func (m Model) canSuggest() bool {
 		m.browserOpen || m.exitAfter || m.newSessionPending {
 		return false
 	}
-	if m.suggesting || m.suggestionDone != nil || m.suggestionText != "" ||
+	if m.suggestion.active() || m.suggestion.draining() || m.suggestionText != "" ||
 		m.pendingSuggestion != "" || m.input.Value() != "" {
 		return false
 	}
@@ -82,11 +82,9 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 	done := make(chan struct{})
 	m.trackChild("suggestion", cancel, done)
 	m.suggestionSeq++
-	req := m.suggestionSeq
-	m.suggestionReq = req
-	m.suggestionCancel = cancel
-	m.suggestionDone = done
-	m.suggesting = true
+	key := operationKey{request: m.suggestionSeq}
+	m.suggestion.begin(key, cancel, done)
+	req := key.request
 	opts := suggest.Options{
 		Bin:             m.cfg.Suggestions.Bin,
 		Cwd:             m.cfg.Cwd,
@@ -114,16 +112,10 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 	// The child is reaped by the time any result arrives, including a result for
 	// a request that typing or a session change already invalidated. Settle the
-	// drain state before deciding whether the document may be used.
-	m.suggestionDone = nil
-	if msg.req == 0 || msg.req != m.suggestionReq {
+	// drain state before deciding whether the document may be used; an
+	// invalidated request only closes its drain and never applies.
+	if !m.suggestion.settle(operationKey{request: msg.req}) {
 		return m
-	}
-	m.suggesting = false
-	m.suggestionReq = 0
-	if m.suggestionCancel != nil {
-		m.suggestionCancel()
-		m.suggestionCancel = nil
 	}
 
 	if msg.res.Canceled {
@@ -170,7 +162,7 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 		m.logDebug("suggestion: session pin changed")
 		return m
 	}
-	if m.compacting {
+	if m.compactionBusy() {
 		// The composer is gated until the compactor is reaped. Hold the usable
 		// result so it can appear the moment the gate opens instead of starting
 		// a second metered request afterward. See ADR 031.
@@ -244,12 +236,7 @@ func (m *Model) clearSuggestion() {
 // channel stays set until that result arrives so an exit cannot race the child;
 // canSuggest refuses to start another request until it is reaped.
 func (m *Model) cancelSuggestion() {
-	if m.suggestionCancel != nil {
-		m.suggestionCancel()
-		m.suggestionCancel = nil
-	}
-	m.suggesting = false
-	m.suggestionReq = 0
+	m.suggestion.invalidate()
 }
 
 // suggestionActive reports whether a ghost suggestion is currently shown.
