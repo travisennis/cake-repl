@@ -17,14 +17,34 @@ import (
 )
 
 // compactionStartIndex returns the live start notice's index, or -1 when the
-// timeline carries none.
+// model holds no attached notice. It follows the stable handle, so an unrelated
+// info row with the same text cannot stand in for the live row.
 func compactionStartIndex(m Model) int {
+	return noticeItemIndex(m, m.compactionNotice)
+}
+
+// noticeItemIndex returns the row carrying id, or -1 when it is no longer
+// attached. Zero never identifies a row.
+func noticeItemIndex(m Model, id noticeID) int {
+	if id == 0 {
+		return -1
+	}
 	for i := len(m.timeline.items) - 1; i >= 0; i-- {
-		if m.timeline.items[i].Kind == ui.KindInfo && strings.HasPrefix(m.timeline.items[i].Text, compactionStartPrefix) {
+		if noticeID(m.timeline.items[i].ID) == id {
 			return i
 		}
 	}
 	return -1
+}
+
+// assertCompactionIdle checks that one settled result left no phase, request,
+// or notice handle behind.
+func assertCompactionIdle(t *testing.T, m Model) {
+	t.Helper()
+	if m.compaction.active() || m.compaction.draining() || m.compaction.key.request != 0 || m.compactionNotice != 0 {
+		t.Fatalf("compaction not idle: active=%v draining=%v request=%d notice=%d",
+			m.compaction.active(), m.compaction.draining(), m.compaction.key.request, m.compactionNotice)
+	}
 }
 
 const compactionSessionID = "11111111-2222-3333-4444-555555555555"
@@ -298,8 +318,8 @@ JSON
 
 	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = tm.(Model)
-	if !m.compactionBusy() {
-		t.Fatal("finishRun did not start a compaction")
+	if !m.compactionBusy() || !m.compaction.active() || m.compaction.draining() {
+		t.Fatalf("compaction phase = active:%v draining:%v, want in-flight", m.compaction.active(), m.compaction.draining())
 	}
 	if m.running {
 		t.Fatal("run state survived finishRun")
@@ -343,8 +363,11 @@ JSON
 	tm, _ = m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
 
-	if m.compactionBusy() {
-		t.Fatal("compaction state survived the result")
+	if m.compactionBusy() || m.compaction.active() || m.compaction.draining() {
+		t.Fatalf("compaction phase after result = active:%v draining:%v, want idle", m.compaction.active(), m.compaction.draining())
+	}
+	if m.compaction.key.request != 0 || m.compactionNotice != 0 {
+		t.Fatalf("compaction identity survived the result: request=%d notice=%d", m.compaction.key.request, m.compactionNotice)
 	}
 	if idx := compactionStartIndex(m); idx >= 0 {
 		t.Fatalf("start notice survived the result: %+v", m.timeline.items[idx])
@@ -403,6 +426,103 @@ JSON
 	if strings.Contains(string(raw), "-force") {
 		t.Fatalf("compactor was asked to force: %s", raw)
 	}
+}
+
+// TestCompactionStartNoticeUsesStableIdentity proves the completion path tracks
+// the live row by its assigned identity. An unrelated info row with the same
+// text arrives after the start notice; a last-prefix lookup would resolve that
+// row and leave the live notice reading as pending.
+func TestCompactionStartNoticeUsesStableIdentity(t *testing.T) {
+	bin := writeFakeCompactor(t, `
+cat <<'JSON'
+{"compacted":true,"source_session_id":"11111111-2222-3333-4444-555555555555","session_id":"11111111-2222-3333-4444-555555555555","in_place":true,"checkpoint_id":"c-1","boundary":4,"before_tokens":170000,"after_tokens":24000,"window":200000,"retained_count":4}
+JSON
+`)
+	m := compactionModel(t, bin)
+
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
+	live := m.compactionNotice
+	if live == 0 || compactionStartIndex(m) < 0 {
+		t.Fatal("finishRun did not attach a live start notice")
+	}
+
+	// Shift the live row and then add a historical row with the same text after
+	// it. Only the stable identity distinguishes the two.
+	m.insertItemAt(0, ui.Item{Kind: ui.KindInfo, Text: "earlier history"})
+	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: compactionStartText})
+
+	tm, _ = m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
+	m = tm.(Model)
+
+	if noticeItemIndex(m, live) >= 0 {
+		t.Fatal("live start notice survived the result")
+	}
+	if m.compactionNotice != 0 {
+		t.Fatalf("compaction notice handle = %d after resolution, want 0", m.compactionNotice)
+	}
+	starts := 0
+	for _, it := range m.timeline.items {
+		if it.Text == compactionStartText {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Fatalf("timeline has %d rows with the start text, want the one unrelated row: %+v", starts, m.timeline.items)
+	}
+	if it := lastItem(t, m); it.Text != "context compacted 170k -> 24k, 4 records retained" {
+		t.Fatalf("outcome notice = %+v", it)
+	}
+}
+
+// TestCompactionDuplicateResultCannotApplyTwice covers a replayed terminal
+// message after the real result has settled the request. The cleared request
+// identity must make the second result a no-op instead of appending another
+// marker or changing the context estimate.
+func TestCompactionDuplicateResultCannotApplyTwice(t *testing.T) {
+	bin := writeFakeCompactor(t, `
+cat <<'JSON'
+{"compacted":true,"source_session_id":"11111111-2222-3333-4444-555555555555","session_id":"11111111-2222-3333-4444-555555555555","in_place":true,"checkpoint_id":"c-1","boundary":4,"before_tokens":170000,"after_tokens":24000,"window":200000,"retained_count":4}
+JSON
+`)
+	m := compactionModel(t, bin)
+
+	tm, cmd := m.finishRun(cake.Result{ExitCode: 0})
+	m = tm.(Model)
+	msg := waitForCompaction(t, runCompactionCmd(cmd))
+	tm, firstCmd := m.Update(msg)
+	m = tm.(Model)
+	if firstCmd == nil || m.compactionBusy() {
+		t.Fatalf("first result did not settle: busy=%v cmd nil=%v", m.compactionBusy(), firstCmd == nil)
+	}
+	before := *m.session.Context
+	items := len(m.timeline.items)
+	markers := compactionMarkerCount(m)
+
+	tm, duplicateCmd := m.Update(msg)
+	m = tm.(Model)
+	if duplicateCmd != nil {
+		t.Fatalf("duplicate result returned a command: %v", duplicateCmd)
+	}
+	if len(m.timeline.items) != items {
+		t.Fatalf("duplicate result changed the timeline: %d -> %d items", items, len(m.timeline.items))
+	}
+	if got := *m.session.Context; got != before {
+		t.Fatalf("duplicate result changed the context: %+v -> %+v", before, got)
+	}
+	if got := compactionMarkerCount(m); got != markers {
+		t.Fatalf("duplicate result changed the marker count: %d -> %d", markers, got)
+	}
+}
+
+func compactionMarkerCount(m Model) int {
+	markers := 0
+	for _, it := range m.timeline.items {
+		if it.Kind == ui.KindInfo && strings.HasPrefix(it.Text, "context compacted") {
+			markers++
+		}
+	}
+	return markers
 }
 
 // TestFinishRunUsesCompactionSummarizerSelection proves the compaction table's
@@ -523,6 +643,7 @@ JSON
 	tm, _ = m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
 	m = tm.(Model)
 
+	assertCompactionIdle(t, m)
 	if m.session.Context == nil || *m.session.Context != before {
 		t.Fatalf("context = %+v, want unchanged %+v", m.session.Context, before)
 	}
@@ -548,9 +669,7 @@ func TestCompactionFailureKeepsSessionAndWarns(t *testing.T) {
 	tm, _ = m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
 	m = tm.(Model)
 
-	if m.compactionBusy() {
-		t.Fatal("failure left the gate closed")
-	}
+	assertCompactionIdle(t, m)
 	if mode, id := m.session.RunOptions(); mode != cake.RunResume || id != compactionSessionID {
 		t.Fatalf("session changed after failure: %v %q", mode, id)
 	}
@@ -581,6 +700,7 @@ JSON
 	tm, _ = m.Update(waitForCompaction(t, runCompactionCmd(cmd)))
 	m = tm.(Model)
 
+	assertCompactionIdle(t, m)
 	if mode, id := m.session.RunOptions(); mode != cake.RunResume || id != compactionSessionID {
 		t.Fatalf("non-in-place result retargeted the session: %v %q", mode, id)
 	}
@@ -615,23 +735,49 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 	if idx := compactionStartIndex(m); idx < 0 {
 		t.Fatal("ctrl+c removed the pending start notice before the child was reaped")
 	}
-	if !m.compactionBusy() {
-		t.Fatal("cancel reopened the gate before the child was reaped")
+	if !m.compactionBusy() || !m.compaction.draining() || m.compaction.active() {
+		t.Fatalf("cancel phase = active:%v draining:%v, want draining", m.compaction.active(), m.compaction.draining())
 	}
 	m.input.SetValue("next")
-	if _, cmd := m.submit(); cmd != nil {
+	tm, submitCmd := m.submit()
+	m = tm.(Model)
+	if submitCmd != nil {
 		t.Fatal("prompt submitted while the canceled child was draining")
 	}
-	tm, _ = m.execCommand(Command{Kind: CmdNew})
-	m = tm.(Model)
-	if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "wait for context compaction") {
-		t.Fatalf("/new while the canceled compactor drained = %+v", it)
+	if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "context compaction") {
+		t.Fatalf("submit while the canceled compactor drained = %+v", it)
+	}
+	for _, tt := range []struct {
+		name string
+		cmd  Command
+	}{
+		{"/new", Command{Kind: CmdNew}},
+		{"/resume", Command{Kind: CmdResume, Arg: "99999999-2222-3333-4444-555555555555"}},
+		{"/sessions", Command{Kind: CmdSessions}},
+	} {
+		next, retargetCmd := m.execCommand(tt.cmd)
+		m = next.(Model)
+		if retargetCmd != nil {
+			t.Fatalf("%s returned a command while the canceled compactor drained: %v", tt.name, retargetCmd)
+		}
+		if it := lastItem(t, m); it.Kind != ui.KindWarning || !strings.Contains(it.Text, "wait for context compaction") {
+			t.Fatalf("%s while the canceled compactor drained = %+v", tt.name, it)
+		}
+	}
+	if m.browserOpen {
+		t.Fatal("/sessions opened the browser while the canceled compactor drained")
+	}
+	if mode, id := m.session.RunOptions(); mode != cake.RunResume || id != compactionSessionID {
+		t.Fatalf("refused retarget changed the session: %v %q", mode, id)
 	}
 
 	tm, _ = m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
-	if m.compactionBusy() {
-		t.Fatal("reaped compaction left the gate closed")
+	if m.compactionBusy() || m.compaction.active() || m.compaction.draining() {
+		t.Fatalf("reaped compaction phase = active:%v draining:%v, want idle", m.compaction.active(), m.compaction.draining())
+	}
+	if m.compaction.key.request != 0 || m.compactionNotice != 0 {
+		t.Fatalf("compaction identity survived cancellation: request=%d notice=%d", m.compaction.key.request, m.compactionNotice)
 	}
 	if it := lastItem(t, m); it.Kind != ui.KindWarning || it.Text != "context compaction canceled" {
 		t.Fatalf("canceled notice = %+v", it)
@@ -702,8 +848,9 @@ func TestCtrlNWhileCompactingResetsWithoutApplyingResult(t *testing.T) {
 
 	tm, _ = m.Update(waitForCompaction(t, done))
 	m = tm.(Model)
-	if m.compactionBusy() || m.newSessionPending {
-		t.Fatalf("drained compaction state = compacting:%v pending:%v", m.compactionBusy(), m.newSessionPending)
+	assertCompactionIdle(t, m)
+	if m.newSessionPending {
+		t.Fatal("new-session boundary survived the reaped compaction")
 	}
 	if m.session.Context != nil {
 		t.Fatalf("stale compaction result seeded the new session: %+v", m.session.Context)

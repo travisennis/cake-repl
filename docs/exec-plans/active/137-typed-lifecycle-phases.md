@@ -52,7 +52,10 @@ deferred; 144 stays independent.
   (`internal/app/lifecycle.go`), adopted it for compaction and suggestion, and
   test-covered the caller gate policy for compaction, listing, and suggestion.
 - [ ] 138: type run and exit, add the generation boundary and the shared gates.
-- [ ] 140: type compaction on the helper and its generation.
+- [x] (2026-11-04T20:10Z) 140: tracked the compaction start notice by a
+  stable timeline identity instead of a text prefix; covered duplicate results
+  as no-ops and prompt, `/new`, `/resume`, and `/sessions` refusal through a
+  canceled compaction's drain.
 - [ ] 141: type suggestion, keep ghost text as presentation, fold task 146's
   completed-turn answer.
 - [ ] 139: type replay hydration and its post-boundary drain.

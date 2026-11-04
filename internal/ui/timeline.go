@@ -27,6 +27,10 @@ const (
 // Item is one structured timeline entry. Items are stored as data, not
 // pre-rendered strings, so the timeline can reflow on resize.
 type Item struct {
+	// ID is an optional stable identity assigned by the owner. It is never
+	// rendered; zero means unassigned. A row index or text prefix is not an
+	// identity because insertion, trimming, and /clear can move or remove it.
+	ID   uint64
 	Kind Kind
 	Text string
 	Tool *ToolBlock

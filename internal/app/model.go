@@ -149,10 +149,11 @@ type Model struct {
 	height int
 	ready  bool
 
-	input    textarea.Model
-	viewport viewport.Model
-	timeline timeline
-	spin     spinner.Model
+	input     textarea.Model
+	viewport  viewport.Model
+	timeline  timeline
+	noticeSeq uint64
+	spin      spinner.Model
 
 	running       bool
 	run           *cake.Run
@@ -180,6 +181,10 @@ type Model struct {
 	// pending, so the status line and composer omit the age. See ADR 026.
 	compactionStart   time.Time
 	compactionElapsed time.Duration
+	// compactionNotice identifies the live start notice by its stable timeline
+	// identity, not by row position or text. It is zero when no notice is
+	// attached or the notice was resolved.
+	compactionNotice noticeID
 	// compactionSeq allocates a request identity that never repeats. The
 	// pending operation owns the identity whose result may still be applied, so a
 	// canceled or superseded run cannot touch the status line or context of a

@@ -10,6 +10,38 @@ import (
 // timeline passes its own width, so callers cannot render at a stale size.
 type timelineRenderer func(ui.Item, int) string
 
+// noticeID identifies one timeline notice independently of its row index or
+// text. Insertions and trimming move an index, and replayed or historical text
+// can share a prefix with a live notice, so neither is an identity. Zero means
+// no notice.
+type noticeID uint64
+
+// appendNotice appends one item and returns the stable identity assigned by the
+// owner. Notice identities are never reused, even after /clear or a new
+// session, so a stale handle cannot remove a later row.
+func (m *Model) appendNotice(it ui.Item) noticeID {
+	m.noticeSeq++
+	it.ID = m.noticeSeq
+	m.appendItem(it)
+	return noticeID(it.ID)
+}
+
+// removeNotice removes the item carrying id and reports whether it was still
+// attached. A notice trimmed by the timeline cap or removed by /clear is
+// already gone, and that is not an error for its owner.
+func (m *Model) removeNotice(id noticeID) bool {
+	if id == 0 {
+		return false
+	}
+	for i := len(m.timeline.items) - 1; i >= 0; i-- {
+		if noticeID(m.timeline.items[i].ID) == id {
+			m.removeItemAt(i)
+			return true
+		}
+	}
+	return false
+}
+
 // timeline owns the structured items and their cached rendered rows. Every
 // mutation goes through this type, so the slices cannot drift apart:
 // whenever width is non-zero, len(rendered) == len(items). Before the first

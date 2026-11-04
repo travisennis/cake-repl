@@ -28,16 +28,12 @@ const compactionTriggerHeadroomPercent = 5
 // sit above the window.
 const compactionWindowFallbackPercent = 75
 
-// compactionStartPrefix marks the live compaction start notice in the timeline.
-// The completion path finds that row and resolves it into the outcome, so a
-// started row never keeps reading as pending; completed and replayed markers use
-// different wording and never carry it. See ADR 026.
-const compactionStartPrefix = "context compaction started"
-
 // compactionStartText is the one timeline notice shown before the compactor is
-// launched. The Ctrl+C hint is repeated in the composer footer so it stays
-// visible after the timeline scrolls.
-const compactionStartText = compactionStartPrefix + " · Ctrl+C cancels"
+// launched. The completion path holds the notice's stable identity and resolves
+// that row, so a started row never keeps reading as pending; completed and
+// replayed markers use different wording. The Ctrl+C hint is repeated in the
+// composer footer so it stays visible after the timeline scrolls. See ADR 026.
+const compactionStartText = "context compaction started · Ctrl+C cancels"
 
 // compactionTrigger is one resolved trigger line: either an absolute token
 // count (absolute mode) or a window percentage (the legacy fallback).
@@ -196,7 +192,7 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	// pushes a viewport payload. Without this sync a long compaction would show
 	// a busy status line and composer but no timeline start until the result
 	// lands. See ADR 026.
-	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: compactionStartText})
+	m.compactionNotice = m.appendNotice(ui.Item{Kind: ui.KindInfo, Text: compactionStartText})
 	m.syncViewport()
 	// The title picks up the compacting marker in the caller's batch. The
 	// spinner needs no new tick: finishRun runs while the finished turn's tick
@@ -226,6 +222,7 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	// the old one.
 	if m.newSessionPending {
 		m.newSessionPending = false
+		m.compactionNotice = 0
 		m.pendingSuggestion = ""
 		m.pendingSuggestionSession = ""
 		if m.exitAfter {
@@ -301,17 +298,15 @@ func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) 
 	})
 }
 
-// removeCompactionStart removes the live start notice and reports whether one
-// was still on the timeline. Ctrl+N, /clear, or the timeline cap can drop it
-// before the result is reaped, so the completion path cannot assume it is there.
+// removeCompactionStart resolves the live start notice by its stable identity
+// and reports whether it was still on the timeline. Ctrl+N, /clear, or the
+// timeline cap can drop it before the result is reaped, so the completion path
+// cannot assume it is there. The handle is cleared either way, so a later result
+// cannot remove a row that has taken its place.
 func (m *Model) removeCompactionStart() bool {
-	for i := len(m.timeline.items) - 1; i >= 0; i-- {
-		if m.timeline.items[i].Kind == ui.KindInfo && strings.HasPrefix(m.timeline.items[i].Text, compactionStartPrefix) {
-			m.removeItemAt(i)
-			return true
-		}
-	}
-	return false
+	id := m.compactionNotice
+	m.compactionNotice = 0
+	return m.removeNotice(id)
 }
 
 // finishCompactionNotice resolves the live start notice into one outcome row.
