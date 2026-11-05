@@ -403,9 +403,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   (or replacing it with `ansi.Strip`, which leaves bare C0 bytes) reopens the
   hole.
 - **Cancellation races.** Treating a finished run as canceled because Ctrl+C
-  arrived late — classify from the `cmd.Cancel` flag plus signal-terminated
-  process status on POSIX, not the context. See `runner.go` for how the atomic
-  flag preserves ordering.
+  arrived late — classify with the shared `childproc.Classify` from the
+  `cmd.Cancel` flag plus signal-terminated process status on POSIX, not the
+  context. `runner.go` shows how the atomic phase preserves ordering.
 - **Zombie / runaway processes.** Removing the group-kill timer or the later
   `WaitDelay` fallback, or allowing more than one concurrent run. For the
   read-only session listing, the same applies to its group cancellation,

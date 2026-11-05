@@ -7,7 +7,6 @@
 package suggest
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,11 +14,9 @@ import (
 	"io"
 	"os/exec"
 	"runtime"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/travisennis/cake-repl/internal/childproc"
 )
@@ -137,38 +134,31 @@ func Suggest(ctx context.Context, opts Options) Result {
 		cmd.WaitDelay = waitDelay
 	}
 
-	stdout := &capWriter{limit: outputLimit}
-	stderr := &tailBuffer{limit: stderrLimit}
+	stdout := childproc.NewCapWriter(outputLimit)
+	stderr := childproc.NewTailBuffer(stderrLimit)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	res := Result{ExitCode: -1}
 	err := cmd.Run()
-	res.Stderr = stderr.String()
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil:
-		res.ExitCode = 0
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+	// Classify a non-zero exit from the cancel flag and signal status, not
+	// from ctx.Err(), so a late cancel cannot relabel a natural failure and a
+	// canceled child that exits non-zero is still silent.
+	outcome := childproc.Classify(cmd, err, ctx.Err(), cancelRequested.Load(), stderr)
+	res := Result{
+		ExitCode: outcome.ExitCode,
+		Stderr:   outcome.Stderr,
+		Canceled: outcome.Canceled,
+		Err:      outcome.Err,
+	}
+	if outcome.TimedOut {
 		// The fixed timeout fired: a hung suggester is a failure, not a user
 		// cancellation, and the caller reports it once.
-		res.ExitCode = exitCode(cmd)
-		res.Err = fmt.Errorf("suggester timed out: %w", ctx.Err())
-	case errors.As(err, &exitErr):
-		// Classify a non-zero exit from the cancel flag and signal status, not
-		// from ctx.Err(), so a late cancel cannot relabel a natural failure and a
-		// canceled child that exits non-zero is still silent.
-		res.ExitCode = exitCode(cmd)
-		res.Canceled = canceledExit(exitErr, cancelRequested.Load())
-	case errors.Is(err, context.Canceled):
-		// The context canceled before the child produced an exit status. This is
-		// an expected dismissal, never a user-visible failure.
-		res.ExitCode = exitCode(cmd)
-		res.Canceled = true
-	default:
-		// The process could not be started (a missing or non-executable binary)
-		// or teardown failed in another way.
-		res.Err = err
+		cause := ctx.Err()
+		if cause == nil {
+			cause = err
+		}
+		res.Canceled = false
+		res.Err = fmt.Errorf("suggester timed out: %w", cause)
 	}
 	if opts.DebugLog != nil {
 		// Metadata only: stderr may contain session content and is already
@@ -180,95 +170,15 @@ func Suggest(ctx context.Context, opts Options) Result {
 	if res.ExitCode != 0 || res.Err != nil {
 		return res
 	}
-	if stdout.overflow {
+	if stdout.Overflowed() {
 		res.Err = fmt.Errorf("suggester output exceeded %d bytes", outputLimit)
 		return res
 	}
 	var doc Document
-	if err := json.Unmarshal(stdout.buf.Bytes(), &doc); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
 		res.Err = fmt.Errorf("decoding suggester output: %w", err)
 		return res
 	}
 	res.Document = &doc
 	return res
-}
-
-func exitCode(cmd *exec.Cmd) int {
-	if cmd.ProcessState == nil {
-		return -1
-	}
-	return cmd.ProcessState.ExitCode()
-}
-
-// canceledExit reports whether a non-zero exit is a cancellation rather than a
-// natural failure. On POSIX, signaling an exited-but-unreaped process can
-// succeed, so both the cancel callback and a signal-terminated status are
-// required; Windows has no signal status, so a successful cancel is enough.
-func canceledExit(exitErr *exec.ExitError, cancelRequested bool) bool {
-	if !cancelRequested {
-		return false
-	}
-	return runtime.GOOS == "windows" || !exitErr.Exited()
-}
-
-// capWriter keeps at most limit bytes and records whether more arrived. It
-// keeps the head because the document is one JSON object parsed from byte zero.
-type capWriter struct {
-	limit    int
-	buf      bytes.Buffer
-	overflow bool
-}
-
-func (w *capWriter) Write(p []byte) (int, error) {
-	room := w.limit - w.buf.Len()
-	if room <= 0 {
-		w.overflow = true
-		return len(p), nil
-	}
-	if len(p) > room {
-		w.buf.Write(p[:room])
-		w.overflow = true
-		return len(p), nil
-	}
-	w.buf.Write(p)
-	return len(p), nil
-}
-
-// tailBuffer retains the last limit bytes of stderr, which is enough to show a
-// diagnostic without letting a chatty or wrong binary grow memory.
-type tailBuffer struct {
-	limit     int
-	buf       []byte
-	truncated bool
-}
-
-func (b *tailBuffer) Write(p []byte) (int, error) {
-	n := len(p)
-	if n > b.limit {
-		b.truncated = true
-		p = p[n-b.limit:]
-	}
-	b.buf = append(b.buf, p...)
-	if overflow := len(b.buf) - b.limit; overflow > 0 {
-		b.truncated = true
-		copy(b.buf, b.buf[overflow:])
-		b.buf = b.buf[:b.limit]
-	}
-	return n, nil
-}
-
-// String returns the retained tail, trimmed, with an ellipsis marking any
-// dropped output and a cut kept on a rune boundary.
-func (b *tailBuffer) String() string {
-	buf := b.buf
-	if b.truncated {
-		for len(buf) > 0 && !utf8.RuneStart(buf[0]) {
-			buf = buf[1:]
-		}
-	}
-	s := strings.TrimSpace(string(buf))
-	if b.truncated {
-		return "…" + s
-	}
-	return s
 }

@@ -132,8 +132,8 @@ func ReadTrustStatus(ctx context.Context, opts TrustOptions) (TrustStatus, error
 	if cmd.WaitDelay <= 0 {
 		cmd.WaitDelay = trustWaitDelay
 	}
-	stdout := &capWriter{limit: trustOutputLimit}
-	stderr := &tailBuffer{limit: stderrLimit}
+	stdout := childproc.NewCapWriter(trustOutputLimit)
+	stderr := childproc.NewTailBuffer(stderrLimit)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
@@ -143,10 +143,10 @@ func ReadTrustStatus(ctx context.Context, opts TrustOptions) (TrustStatus, error
 		}
 		return TrustStatus{}, errors.New(msg)
 	}
-	if stdout.overflow {
+	if stdout.Overflowed() {
 		return TrustStatus{}, fmt.Errorf("%s trust status output exceeded %d bytes", opts.Bin, trustOutputLimit)
 	}
-	raw := stdout.buf.Bytes()
+	raw := stdout.Bytes()
 	if opts.DebugLog != nil {
 		fmt.Fprintf(opts.DebugLog, "trust status: %s\n", raw)
 	}

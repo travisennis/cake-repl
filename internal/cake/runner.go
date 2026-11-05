@@ -349,46 +349,6 @@ func (r *Run) armGroupKill(delay time.Duration, logf io.Writer) {
 // without bound.
 const stderrLimit = 8 * 1024
 
-// tailBuffer is an io.Writer that keeps only the last limit bytes written.
-type tailBuffer struct {
-	limit     int
-	buf       []byte
-	truncated bool
-}
-
-func (b *tailBuffer) Write(p []byte) (int, error) {
-	n := len(p)
-	if n > b.limit {
-		b.truncated = true
-		p = p[n-b.limit:]
-	}
-	b.buf = append(b.buf, p...)
-	if overflow := len(b.buf) - b.limit; overflow > 0 {
-		b.truncated = true
-		copy(b.buf, b.buf[overflow:])
-		b.buf = b.buf[:b.limit]
-	}
-	return n, nil
-}
-
-// String returns the retained tail, trimmed, with an ellipsis marking any
-// dropped output.
-func (b *tailBuffer) String() string {
-	buf := b.buf
-	if b.truncated {
-		// The byte cut can land mid-rune; drop continuation bytes so the
-		// kept tail starts on a rune boundary.
-		for len(buf) > 0 && !utf8.RuneStart(buf[0]) {
-			buf = buf[1:]
-		}
-	}
-	s := strings.TrimSpace(string(buf))
-	if b.truncated {
-		return "…" + s
-	}
-	return s
-}
-
 // Start launches one cake process for the given options. It returns an error
 // only when the process cannot be started at all (for example, the binary is
 // missing); everything after a successful start is reported through Events
@@ -455,7 +415,7 @@ func start(parent context.Context, opts Options) (*Run, error) {
 		cancel()
 		return nil, fmt.Errorf("opening stdout pipe: %w", err)
 	}
-	stderr := &tailBuffer{limit: stderrLimit}
+	stderr := childproc.NewTailBuffer(stderrLimit)
 	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
@@ -542,22 +502,12 @@ func start(parent context.Context, opts Options) (*Run, error) {
 		// the process while Wait was active, not from ctx directly: a Ctrl+C
 		// landing after Wait has returned must not relabel a finished run as
 		// canceled. The phase is terminal now, so the pre-reap answer is kept.
-		res := Result{Stderr: stderr.String()}
-		var exitErr *exec.ExitError
-		switch {
-		case waitErr == nil:
-			res.ExitCode = 0
-		case errors.Is(waitErr, context.Canceled):
-			// The cancel interrupted the command and it then exited cleanly
-			// (cake handled SIGTERM); exec reports ctx.Err() in that case.
-			res.Canceled = true
-			res.ExitCode = cmd.ProcessState.ExitCode()
-		case errors.As(waitErr, &exitErr):
-			res.ExitCode = exitErr.ExitCode()
-			res.Canceled = canceledExit(exitErr, cancelRequested)
-		default:
-			res.ExitCode = -1
-			res.Err = waitErr
+		outcome := childproc.Classify(cmd, waitErr, ctx.Err(), cancelRequested, stderr)
+		res := Result{
+			ExitCode: outcome.ExitCode,
+			Stderr:   outcome.Stderr,
+			Canceled: outcome.Canceled,
+			Err:      outcome.Err,
 		}
 		if opts.DebugLog != nil {
 			fmt.Fprintf(opts.DebugLog, "exit: code=%d canceled=%v err=%v\n", res.ExitCode, res.Canceled, res.Err)
@@ -566,16 +516,6 @@ func start(parent context.Context, opts Options) (*Run, error) {
 	}()
 
 	return run, nil
-}
-
-func canceledExit(exitErr *exec.ExitError, cancelRequested bool) bool {
-	if !cancelRequested {
-		return false
-	}
-	// On POSIX, signaling an exited-but-unreaped process can succeed. Require
-	// signal termination as well as the cmd.Cancel flag so that natural
-	// non-zero exits stay failures. Windows Kill does not expose that state.
-	return runtime.GOOS == "windows" || !exitErr.Exited()
 }
 
 // snippet returns at most n bytes of s with newlines flattened, never

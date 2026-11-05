@@ -6,7 +6,6 @@
 package compact
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,11 +14,9 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/travisennis/cake-repl/internal/childproc"
 )
@@ -170,33 +167,20 @@ func Compact(ctx context.Context, opts Options) Result {
 		cmd.WaitDelay = waitDelay
 	}
 
-	stdout := &capWriter{limit: outputLimit}
-	stderr := &tailBuffer{limit: stderrLimit}
+	stdout := childproc.NewCapWriter(outputLimit)
+	stderr := childproc.NewTailBuffer(stderrLimit)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	res := Result{ExitCode: -1}
 	err := cmd.Run()
-	res.Stderr = stderr.String()
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil:
-		// A process that exited cleanly is not a cancellation, even if a late
-		// Ctrl+C also flipped the context; a completed document wins.
-		res.ExitCode = 0
-	case errors.Is(err, context.Canceled):
-		// The context canceled before a clean exit. A document that was still
-		// produced is applied as success by the caller; without one the run is
-		// a cancellation.
-		res.ExitCode = exitCode(cmd)
-		res.Canceled = true
-	case errors.As(err, &exitErr):
-		res.ExitCode = exitCode(cmd)
-		res.Canceled = canceledExit(exitErr, cancelRequested.Load())
-	default:
-		// The process could not be started (a missing or non-executable
-		// binary) or teardown failed in another way.
-		res.Err = err
+	// A process that exited cleanly is not a cancellation, even if a late
+	// Ctrl+C also flipped the context; a completed document wins.
+	outcome := childproc.Classify(cmd, err, ctx.Err(), cancelRequested.Load(), stderr)
+	res := Result{
+		ExitCode: outcome.ExitCode,
+		Stderr:   outcome.Stderr,
+		Canceled: outcome.Canceled,
+		Err:      outcome.Err,
 	}
 	if opts.DebugLog != nil {
 		// Metadata only: the compactor's stderr may contain session content and
@@ -208,96 +192,15 @@ func Compact(ctx context.Context, opts Options) Result {
 	if res.ExitCode != 0 || res.Err != nil {
 		return res
 	}
-	if stdout.overflow {
+	if stdout.Overflowed() {
 		res.Err = fmt.Errorf("compactor output exceeded %d bytes", outputLimit)
 		return res
 	}
 	var doc Document
-	if err := json.Unmarshal(stdout.buf.Bytes(), &doc); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
 		res.Err = fmt.Errorf("decoding compactor output: %w", err)
 		return res
 	}
 	res.Document = &doc
 	return res
-}
-
-func exitCode(cmd *exec.Cmd) int {
-	if cmd.ProcessState == nil {
-		return -1
-	}
-	return cmd.ProcessState.ExitCode()
-}
-
-// canceledExit reports whether a non-zero exit is a cancellation rather than a
-// natural failure. On POSIX, signaling an exited-but-unreaped process can
-// succeed, so both the cancel callback and a signal-terminated status are
-// required; Windows has no signal status, so a successful cancel is enough.
-// This mirrors the live-run classification.
-func canceledExit(exitErr *exec.ExitError, cancelRequested bool) bool {
-	if !cancelRequested {
-		return false
-	}
-	return runtime.GOOS == "windows" || !exitErr.Exited()
-}
-
-// capWriter keeps at most limit bytes and records whether more arrived. It
-// keeps the head because the document is one JSON object parsed from byte zero.
-type capWriter struct {
-	limit    int
-	buf      bytes.Buffer
-	overflow bool
-}
-
-func (w *capWriter) Write(p []byte) (int, error) {
-	room := w.limit - w.buf.Len()
-	if room <= 0 {
-		w.overflow = true
-		return len(p), nil
-	}
-	if len(p) > room {
-		w.buf.Write(p[:room])
-		w.overflow = true
-		return len(p), nil
-	}
-	w.buf.Write(p)
-	return len(p), nil
-}
-
-// tailBuffer retains the last limit bytes of stderr, which is enough to show a
-// diagnostic without letting a chatty or wrong binary grow memory.
-type tailBuffer struct {
-	limit     int
-	buf       []byte
-	truncated bool
-}
-
-func (b *tailBuffer) Write(p []byte) (int, error) {
-	n := len(p)
-	if n > b.limit {
-		b.truncated = true
-		p = p[n-b.limit:]
-	}
-	b.buf = append(b.buf, p...)
-	if overflow := len(b.buf) - b.limit; overflow > 0 {
-		b.truncated = true
-		copy(b.buf, b.buf[overflow:])
-		b.buf = b.buf[:b.limit]
-	}
-	return n, nil
-}
-
-// String returns the retained tail, trimmed, with an ellipsis marking any
-// dropped output and a cut kept on a rune boundary.
-func (b *tailBuffer) String() string {
-	buf := b.buf
-	if b.truncated {
-		for len(buf) > 0 && !utf8.RuneStart(buf[0]) {
-			buf = buf[1:]
-		}
-	}
-	s := strings.TrimSpace(string(buf))
-	if b.truncated {
-		return "…" + s
-	}
-	return s
 }

@@ -1,7 +1,6 @@
 package cake
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -92,8 +91,8 @@ func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, 
 	if cmd.WaitDelay <= 0 {
 		cmd.WaitDelay = sessionsWaitDelay
 	}
-	stdout := &capWriter{limit: sessionsOutputLimit}
-	stderr := &tailBuffer{limit: stderrLimit}
+	stdout := childproc.NewCapWriter(sessionsOutputLimit)
+	stderr := childproc.NewTailBuffer(stderrLimit)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
@@ -103,10 +102,10 @@ func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, 
 		}
 		return nil, errors.New(msg)
 	}
-	if stdout.overflow {
+	if stdout.Overflowed() {
 		return nil, fmt.Errorf("%s sessions list output exceeded %d bytes", opts.Bin, sessionsOutputLimit)
 	}
-	raw := stdout.buf.Bytes()
+	raw := stdout.Bytes()
 	if opts.DebugLog != nil {
 		fmt.Fprintf(opts.DebugLog, "sessions list: %s\n", raw)
 	}
@@ -138,28 +137,4 @@ func decodeSessions(raw []byte) ([]SessionSummary, error) {
 		out = append(out, s)
 	}
 	return out, nil
-}
-
-// capWriter is an io.Writer that keeps at most limit bytes and records whether
-// more arrived. Unlike tailBuffer it keeps the head, because the listing is a
-// single JSON object that must be parsed from its first byte.
-type capWriter struct {
-	limit    int
-	buf      bytes.Buffer
-	overflow bool
-}
-
-func (w *capWriter) Write(p []byte) (int, error) {
-	room := w.limit - w.buf.Len()
-	if room <= 0 {
-		w.overflow = true
-		return len(p), nil
-	}
-	if len(p) > room {
-		w.buf.Write(p[:room])
-		w.overflow = true
-		return len(p), nil
-	}
-	w.buf.Write(p)
-	return len(p), nil
 }

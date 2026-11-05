@@ -233,16 +233,18 @@ consumes cake events. This is the project's core external contract.
 - **Dropping malformed lines silently.** Invalid JSON lines become synthetic
   `ParseError` events; the reader keeps going. Don't abort the stream on one bad
   line, and don't use `bufio.Scanner` (long tool-output lines overflow it).
-- **Mislabeling cancellation.** Cancellation is derived from whether
-  `cmd.Cancel` successfully signaled the process (the run's cancel-requested
-  phase) plus signal-terminated process status on POSIX, not from `ctx.Err()`,
+- **Mislabeling cancellation.** Cancellation is derived by the shared
+  `childproc.Classify` from whether `cmd.Cancel` successfully signaled the
+  process (the run's cancel-requested phase) plus signal-terminated process
+  status on POSIX, not from `ctx.Err()`,
   so a late Ctrl+C cannot relabel a finished run. Preserve that ordering.
 - **Making the trust preflight authoritative or fatal.** A probe failure, an
   older cake without `trust`, or malformed output must never block startup or
   prompt submission, and the probe must never write a trust record. Only a
   successful document with an attention state may add a warning.
-- **Unbounded memory.** stderr is kept as a bounded tail (`tailBuffer`); tool
-  output is truncated for display and retained with the existing per-result
+- **Unbounded memory.** stderr is kept as a bounded tail
+  (`childproc.TailBuffer`); tool output is truncated for display and retained
+  with the existing per-result
   ceiling. Replay uses the same limits; don't accumulate full streams in memory.
 - **Mistaking a green suite for forward compatibility.** Every fixture under
   `internal/cake/testdata/fixtures/` is ours, so `just test` only proves we

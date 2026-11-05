@@ -1,11 +1,8 @@
 package cake
 
 import (
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -350,59 +347,10 @@ exit 2
 	}
 }
 
-func TestCanceledExitRequiresSignalTermination(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows cancellation uses the cmd.Cancel flag")
-	}
-	bin := writeFakeCake(t, "exit 2\n")
-	err := exec.Command(bin).Run()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("Run error = %v, want *exec.ExitError", err)
-	}
-	if canceledExit(exitErr, true) {
-		t.Error("natural non-zero exit classified as canceled")
-	}
-}
-
 func TestSnippetDoesNotSplitRunes(t *testing.T) {
 	got := snippet(strings.Repeat("é", 10), 5) // 20 bytes; 5 lands mid-rune
 	if got != "éé…" {
 		t.Errorf("got %q, want %q", got, "éé…")
-	}
-}
-
-func TestTailBuffer(t *testing.T) {
-	tests := []struct {
-		name   string
-		limit  int
-		writes []string
-		want   string
-	}{
-		{"under limit", 8, []string{"  hi\n"}, "hi"},
-		{"rolls across writes", 8, []string{"aaaa", "bbbb", "cccc"}, "…bbbbcccc"},
-		{"single write over limit", 4, []string{"0123456789"}, "…6789"},
-		{"empty", 8, nil, ""},
-		// "aé日本" is 9 bytes; keeping the last 5 lands mid-rune inside 日,
-		// whose continuation bytes must be dropped.
-		{"utf8 boundary", 5, []string{"aé日本"}, "…本"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &tailBuffer{limit: tt.limit}
-			for _, w := range tt.writes {
-				n, err := b.Write([]byte(w))
-				if n != len(w) || err != nil {
-					t.Fatalf("Write(%q) = (%d, %v), want (%d, nil)", w, n, err, len(w))
-				}
-			}
-			if got := b.String(); got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-			if len(b.buf) > tt.limit {
-				t.Errorf("retained %d bytes, limit %d", len(b.buf), tt.limit)
-			}
-		})
 	}
 }
 

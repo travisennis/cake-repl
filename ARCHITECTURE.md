@@ -68,7 +68,7 @@ scope unless the cake contract itself has changed. See
 cmd/cake-repl/main.go    Entry point: flag parsing, validation, Bubble Tea program startup.
 cmd/cake-repl/suspend.go Terminal release/restore around an external SIGTSTP (POSIX).
 internal/config/         TOML config-file loading for REPL startup defaults.
-internal/childproc/      POSIX session boundary and process-level child shutdown registry (ADR 027, ADR 034).
+internal/childproc/      POSIX session boundary, shared child outcome classification and output buffers, and process-level shutdown registry (ADR 027, ADR 034).
 internal/cake/           cake-as-engine: subprocess lifecycle + stream-json decoding.
   events.go              Typed live and replay event structs and the Event interface (the wire schema).
   parser.go              ParseLine: one NDJSON line -> typed Event (forward-compatible).
@@ -101,8 +101,8 @@ internal/version/        Binary version plus embedded revision and commit time.
 Dependency direction is one-way: `app` depends on `cake`, `compact`,
 `suggest`, `childproc`, and `ui`; `cake`, `compact`, `suggest`, and `ui` depend
 on neither `app` nor each other. `cake`, `compact`, and `suggest` also use the
-leaf `internal/childproc` package for the shared session boundary. Keep it that
-way.
+leaf `internal/childproc` package for the shared session boundary, process
+outcome classification, and bounded stdout/stderr buffers. Keep it that way.
 
 ## Architectural invariants
 
