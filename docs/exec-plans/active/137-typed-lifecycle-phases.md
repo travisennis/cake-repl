@@ -58,8 +58,9 @@ deferred; 144 stays independent.
   stable timeline identity instead of a text prefix; covered duplicate results
   as no-ops and prompt, `/new`, `/resume`, and `/sessions` refusal through a
   canceled compaction's drain.
-- [ ] 141: type suggestion, keep ghost text as presentation, fold task 146's
-  completed-turn answer.
+- [x] (2026-11-05T01:57Z) 141: derived one suggestion phase for disabled,
+  idle, in-flight, draining, held, and shown; centralized ghost and placeholder
+  writes; added `admitSuggestion`; and used the shared completed-turn answer.
 - [ ] 139: type replay hydration and its post-boundary drain.
 - [ ] 143: derive title, status, composer activity, hint, and view from the
   presentation state.

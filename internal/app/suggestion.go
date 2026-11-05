@@ -24,12 +24,124 @@ const (
 )
 
 // suggestionDoneMsg delivers the terminal state of one suggester subprocess.
-// req is the request identity; a result whose identity no longer matches is
+// key is the request identity; a result whose identity no longer matches is
 // superseded and must not touch the composer.
 type suggestionDoneMsg struct {
-	req       uint64
-	sessionID string
-	res       suggest.Result
+	key operationKey
+	res suggest.Result
+}
+
+// suggestionPhase is the one answer for the suggestion's lifecycle and
+// presentation. A request phase and a result phase are mutually exclusive:
+// only one request may run, its usable result is either shown or held, and a
+// held result is never shown at the same time. The phase is derived from the
+// state fields so a request and its presentation cannot disagree.
+type suggestionPhase uint8
+
+const (
+	suggestionDisabled suggestionPhase = iota
+	suggestionIdle
+	suggestionInFlight
+	suggestionDraining
+	suggestionHeld
+	suggestionShown
+)
+
+// suggestionHold is a usable result waiting for compaction to release the
+// composer. key preserves the request and session identity so the held text
+// cannot cross a session boundary.
+type suggestionHold struct {
+	text string
+	key  operationKey
+}
+
+// suggestionState owns the single after-turn suggestion request and its
+// presentation. request is the child lifecycle; ghost and held are pure
+// presentation. warned keeps a broken suggester to one visible warning per
+// REPL process.
+type suggestionState struct {
+	request pendingOperation
+	seq     uint64
+	ghost   string
+	held    suggestionHold
+	warned  bool
+}
+
+// phase returns the one suggestion lifecycle state. Disabled is a config
+// state, not a request state: it short-circuits everything else so canSuggest
+// never has to re-derive the same answer from individual flags.
+func (s suggestionState) phase(enabled bool) suggestionPhase {
+	if !enabled {
+		return suggestionDisabled
+	}
+	switch {
+	case s.request.active():
+		return suggestionInFlight
+	case s.request.draining():
+		return suggestionDraining
+	case s.held.text != "":
+		return suggestionHeld
+	case s.ghost != "":
+		return suggestionShown
+	default:
+		return suggestionIdle
+	}
+}
+
+// begin allocates a generation-scoped request key and enters the in-flight
+// phase. The caller has already established that the suggestion phase is idle,
+// so ghost and held are empty; start must not write them here or it would clear
+// the presentation without updating the composer placeholder.
+func (s *suggestionState) begin(generation sessionGeneration, sessionID string, cancel context.CancelFunc, done <-chan struct{}) operationKey {
+	s.seq++
+	key := operationKey{generation: generation, request: s.seq, sessionID: sessionID}
+	s.request.begin(key, cancel, done)
+	return key
+}
+
+func (s *suggestionState) settle(key operationKey) bool {
+	return s.request.settle(key)
+}
+
+func (s *suggestionState) invalidate() {
+	s.request.invalidate()
+}
+
+func (s *suggestionState) doneChannel() <-chan struct{} {
+	return s.request.doneChannel()
+}
+
+// hold stores a usable result while compaction gates the composer. The caller
+// has already established that no ghost is shown, so the composer placeholder
+// still names the default rather than a result that is now held.
+func (s *suggestionState) hold(text string, key operationKey) {
+	s.held = suggestionHold{text: text, key: key}
+}
+
+// takeHeld removes and returns the held result, leaving the phase idle before
+// the caller re-checks whether it may be shown.
+func (s *suggestionState) takeHeld() suggestionHold {
+	hold := s.held
+	s.held = suggestionHold{}
+	return hold
+}
+
+func (s *suggestionState) dropHeld() {
+	s.held = suggestionHold{}
+}
+
+// suggestionPhase scopes the state to this process's resolved config. A
+// `-no-session` REPL has no pinned target for the suggester to read, so it is
+// disabled just like an unset `[suggestions] enabled`.
+func (m Model) suggestionPhase() suggestionPhase {
+	return m.suggestion.phase(m.cfg.Suggestions.Enabled && !m.cfg.NoSession)
+}
+
+// suggestionBusy reports whether a suggester child still owns a resource. A
+// held or shown result has no child and is not busy.
+func (m Model) suggestionBusy() bool {
+	p := m.suggestionPhase()
+	return p == suggestionInFlight || p == suggestionDraining
 }
 
 // canSuggest reports whether the REPL may start a suggestion request now. It is
@@ -43,14 +155,13 @@ type suggestionDoneMsg struct {
 // compacting gate still blocks submission is held for the composer. See ADR
 // 031.
 func (m Model) canSuggest() bool {
-	if !m.cfg.Suggestions.Enabled || m.cfg.NoSession {
+	if m.suggestionPhase() != suggestionIdle {
 		return false
 	}
-	if m.runBusy() || m.replayBusy() || m.browserOpen || m.exiting() {
+	if !m.admitSuggestion().allowed {
 		return false
 	}
-	if m.suggestion.active() || m.suggestion.draining() || m.suggestionText != "" ||
-		m.pendingSuggestion != "" || m.input.Value() != "" {
+	if m.input.Value() != "" {
 		return false
 	}
 	if !m.completedTurn() {
@@ -72,10 +183,7 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 	ctx, cancel := context.WithTimeout(context.Background(), suggestionTimeout)
 	done := make(chan struct{})
 	m.trackChild("suggestion", cancel, done)
-	m.suggestionSeq++
-	key := operationKey{request: m.suggestionSeq}
-	m.suggestion.begin(key, cancel, done)
-	req := key.request
+	key := m.suggestion.begin(m.session.Generation(), sessionID, cancel, done)
 	opts := suggest.Options{
 		Bin:             m.cfg.Suggestions.Bin,
 		Cwd:             m.cfg.Cwd,
@@ -92,7 +200,7 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 		// (SIGINT/SIGTERM) can wait on the child here, even if the program's own
 		// message channel is already gone.
 		close(done)
-		return suggestionDoneMsg{req: req, sessionID: sessionID, res: res}
+		return suggestionDoneMsg{key: key, res: res}
 	}
 }
 
@@ -105,7 +213,14 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 	// a request that typing or a session change already invalidated. Settle the
 	// drain state before deciding whether the document may be used; an
 	// invalidated request only closes its drain and never applies.
-	if !m.suggestion.settle(operationKey{request: msg.req}) {
+	if !m.suggestion.settle(msg.key) {
+		return m
+	}
+	if msg.key.generation != m.session.Generation() {
+		// The request was reaped after the target changed. The generation owns
+		// suppression here; the phase still had to settle so a canceled child can
+		// finish draining.
+		m.logDebug("suggestion: stale generation")
 		return m
 	}
 
@@ -130,7 +245,7 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 		m.logDebug("suggestion: no-op")
 		return m
 	}
-	if doc.SessionID != msg.sessionID {
+	if doc.SessionID != msg.key.sessionID {
 		// The suggester read a different session than the request named. This is
 		// a contract failure, not a suggestion for the session the user is in.
 		m.logDebug("suggestion: session mismatch")
@@ -146,7 +261,7 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 		// it started in.
 		return m
 	}
-	if _, pinned := m.session.RunOptions(); pinned != msg.sessionID {
+	if _, pinned := m.session.RunOptions(); pinned != msg.key.sessionID {
 		// The composer is idle and empty, but the pin is no longer the session
 		// the suggester read. Identity invalidation should already have dropped
 		// this result; never apply across a session boundary regardless.
@@ -157,8 +272,7 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 		// The composer is gated until the compactor is reaped. Hold the usable
 		// result so it can appear the moment the gate opens instead of starting
 		// a second metered request afterward. See ADR 031.
-		m.pendingSuggestion = text
-		m.pendingSuggestionSession = msg.sessionID
+		m.suggestion.hold(text, msg.key)
 		return m
 	}
 
@@ -167,12 +281,27 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 }
 
 // showSuggestion puts one usable, already-normalized suggestion in the
-// composer as ghost text.
+// composer as ghost text. It is the only transition into the shown phase.
 func (m *Model) showSuggestion(text string) {
-	m.suggestionText = text
-	m.input.Placeholder = text
+	m.suggestion.dropHeld()
+	m.writeSuggestionGhost(text)
 	m.layout()
 	m.contentChanged = true
+}
+
+// writeSuggestionGhost is the one runtime writer for both the suggestion's
+// ghost text and the composer placeholder. Keeping the pair in one function
+// makes it impossible for the visible placeholder to name stale text.
+func (m *Model) writeSuggestionGhost(text string) {
+	m.suggestion.ghost = text
+	placeholder := defaultInputPlaceholder
+	if text != "" {
+		placeholder = text
+	}
+	if m.input.Placeholder != placeholder {
+		m.input.Placeholder = placeholder
+		m.contentChanged = true
+	}
 }
 
 // applyPendingSuggestion promotes a suggestion held during compaction once the
@@ -180,46 +309,43 @@ func (m *Model) showSuggestion(text string) {
 // a live result; anything that changed while the compactor ran drops the held
 // text instead.
 func (m *Model) applyPendingSuggestion() {
-	if m.pendingSuggestion == "" {
+	hold := m.suggestion.takeHeld()
+	if hold.text == "" {
 		return
 	}
-	text := m.pendingSuggestion
-	sessionID := m.pendingSuggestionSession
-	m.pendingSuggestion = ""
-	m.pendingSuggestionSession = ""
-	if !m.canSuggest() {
+	if hold.key.generation != m.session.Generation() {
+		m.logDebug("suggestion: held generation changed")
 		return
 	}
-	if _, pinned := m.session.RunOptions(); pinned != sessionID {
+	if _, pinned := m.session.RunOptions(); pinned != hold.key.sessionID {
 		m.logDebug("suggestion: held session pin changed")
 		return
 	}
-	m.showSuggestion(text)
+	if !m.canSuggest() {
+		return
+	}
+	m.showSuggestion(hold.text)
 }
 
 // warnSuggestion surfaces a broken suggester once per REPL process. The feature
 // runs after every completed turn, so a repeated warning row would bury the
 // conversation; the debug log still records every lifecycle result.
 func (m *Model) warnSuggestion(text string) {
-	if m.suggestionWarned {
+	if m.suggestion.warned {
 		return
 	}
-	m.suggestionWarned = true
+	m.suggestion.warned = true
 	m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
 }
 
-// clearSuggestion removes the visible ghost and cancels any in-flight request.
-// It is called for every input action that supersedes a suggestion: typing,
-// history recall, completion, submit, a new session, a resume, and quit.
+// clearSuggestion removes the visible ghost and held result, and cancels any
+// in-flight request. It is called for every input action that supersedes a
+// suggestion: typing, history recall, completion, submit, a new session, a
+// resume, and quit.
 func (m *Model) clearSuggestion() {
-	m.suggestionText = ""
-	m.pendingSuggestion = ""
-	m.pendingSuggestionSession = ""
-	if m.input.Placeholder != defaultInputPlaceholder {
-		m.input.Placeholder = defaultInputPlaceholder
-		m.contentChanged = true
-	}
+	m.suggestion.dropHeld()
 	m.cancelSuggestion()
+	m.writeSuggestionGhost("")
 }
 
 // cancelSuggestion stops an in-flight request and invalidates its identity. The
@@ -232,7 +358,7 @@ func (m *Model) cancelSuggestion() {
 
 // suggestionActive reports whether a ghost suggestion is currently shown.
 func (m Model) suggestionActive() bool {
-	return m.suggestionText != ""
+	return m.suggestionPhase() == suggestionShown
 }
 
 // normalizeSuggestion turns the suggester's document text into one bounded,

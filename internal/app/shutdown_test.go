@@ -132,7 +132,7 @@ func TestCancelRunningDeadlineReportsTimedOutChildren(t *testing.T) {
 		run:             &cake.Run{Done: never},
 		replayDone:      never,
 		compaction:      pendingOperation{phase: phaseDraining, done: never},
-		suggestion:      pendingOperation{phase: phaseDraining, done: never},
+		suggestion:      suggestionState{request: pendingOperation{phase: phaseDraining, done: never}},
 		sessionListDone: map[uint64]chan struct{}{7: never},
 	}
 

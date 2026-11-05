@@ -217,6 +217,26 @@ func (m Model) admitRetarget() admission {
 	return m.admit(true)
 }
 
+// admitSuggestion is the suggestion's admission check. It deliberately ignores
+// compaction: ADR 031 starts a suggestion alongside the compactor, and the
+// result is held until the compaction gate opens. Its refusal is never shown to
+// the user; canSuggest uses the boolean only.
+func (m Model) admitSuggestion() admission {
+	if m.exiting() {
+		return admission{reason: refuseExiting}
+	}
+	if m.browserOpen {
+		return admission{reason: refuseBrowserOpen}
+	}
+	if m.runBusy() {
+		return admission{reason: refuseRunActive}
+	}
+	if m.replayBusy() {
+		return admission{reason: refuseReplayLoading}
+	}
+	return admission{allowed: true, reason: refuseNone}
+}
+
 func (m Model) admit(retarget bool) admission {
 	if m.exiting() {
 		return admission{reason: refuseExiting}

@@ -208,8 +208,7 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 		// A result for a superseded request cannot settle the current gate. Drop
 		// any suggestion held for that old compaction so it cannot leak into the
 		// next one; a live request keeps its own held result.
-		m.pendingSuggestion = ""
-		m.pendingSuggestionSession = ""
+		m.suggestion.dropHeld()
 		return m.maybeQuit()
 	}
 	m.compactionStart = time.Time{}
@@ -221,8 +220,7 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 		// the session the REPL left. Drop the pending start row and any suggestion
 		// held for the old session so neither can keep reading as current.
 		m.removeCompactionStart()
-		m.pendingSuggestion = ""
-		m.pendingSuggestionSession = ""
+		m.suggestion.dropHeld()
 		if m.exiting() {
 			return m.maybeQuit()
 		}

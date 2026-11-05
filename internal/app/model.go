@@ -205,23 +205,13 @@ type Model struct {
 	// canceled or superseded run cannot touch the status line or context of a
 	// later one.
 	compactionSeq uint64
-	// Suggestion state (ADR 028). At most one read-only suggestion request is in
-	// flight; suggestionSeq allocates a request identity that never repeats, and
-	// suggestion owns the identity whose result may still be applied. A draft, a
-	// new turn, or a session change invalidates the identity so a late result
-	// cannot overwrite the composer. suggestionText is the currently shown ghost
-	// suggestion; empty means none. suggestionWarned keeps a broken suggester to
-	// one visible warning per REPL process.
-	suggestion       pendingOperation
-	suggestionSeq    uint64
-	suggestionText   string
-	suggestionWarned bool
-	// pendingSuggestion holds a usable result that arrived while compaction
-	// still gated the composer. pendingSuggestionSession is the session the
-	// request named, so the held text cannot cross a session boundary. Both are
-	// cleared by every path that dismisses a visible ghost. See ADR 031.
-	pendingSuggestion        string
-	pendingSuggestionSession string
+	// suggestion is the one read-only after-turn suggester request and its
+	// presentation (ADR 028). The state owns the request identity, cancellation,
+	// reaping channel, ghost text, and any result held for compaction. Its phase
+	// is derived from those fields, so a request and its presentation cannot
+	// disagree. A draft, a new turn, or a session change invalidates the request
+	// so a late result cannot overwrite the composer. See ADR 031.
+	suggestion suggestionState
 
 	session      sessionState
 	history      promptHistory

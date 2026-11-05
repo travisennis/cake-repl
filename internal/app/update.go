@@ -494,7 +494,7 @@ func (m Model) maybeQuit() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.runBusy() || m.replayBusy() || m.compactionBusy() ||
-		m.suggestion.active() || m.suggestion.draining() || len(m.sessionListDone) > 0 {
+		m.suggestionBusy() || len(m.sessionListDone) > 0 {
 		return m, nil
 	}
 	return m, tea.Quit
@@ -779,7 +779,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	// parsing and always starts an ordinary prompt run.
 	fromSuggestion := false
 	if text == "" && m.suggestionActive() {
-		text = m.suggestionText
+		text = m.suggestion.ghost
 		fromSuggestion = true
 	}
 	if text == "" {

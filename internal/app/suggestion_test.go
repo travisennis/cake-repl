@@ -45,8 +45,8 @@ func suggestionRunReady(t *testing.T) Model {
 func startSuggestionForTest(t *testing.T, m Model) Model {
 	t.Helper()
 	next, cmd := m.maybeStartSuggestion()
-	if cmd == nil || !next.suggestion.active() {
-		t.Fatalf("maybeStartSuggestion = suggesting %v, cmd nil %v; want a request", next.suggestion.active(), cmd == nil)
+	if cmd == nil || next.suggestionPhase() != suggestionInFlight {
+		t.Fatalf("maybeStartSuggestion = phase %v, cmd nil %v; want an in-flight request", next.suggestionPhase(), cmd == nil)
 	}
 	return next
 }
@@ -54,15 +54,11 @@ func startSuggestionForTest(t *testing.T, m Model) Model {
 // finishSuggestionForTest fabricates one result for the current request.
 func finishSuggestionForTest(t *testing.T, m Model, res suggest.Result) Model {
 	t.Helper()
-	req := m.suggestion.key.request
-	if req == 0 {
+	key := m.suggestion.request.key
+	if key.request == 0 {
 		t.Fatal("no suggestion request is in flight")
 	}
-	return m.finishSuggestion(suggestionDoneMsg{
-		req:       req,
-		sessionID: suggestionSessionID,
-		res:       res,
-	})
+	return m.finishSuggestion(suggestionDoneMsg{key: key, res: res})
 }
 
 func suggestionBool(v bool) *bool { return &v }
@@ -94,9 +90,13 @@ func TestCanSuggest(t *testing.T) {
 		}, false},
 		{"no pinned session", func(m *Model) { m.session.Reset() }, false},
 		{"draft in the composer", func(m *Model) { m.input.SetValue("draft") }, false},
-		{"request already in flight", func(m *Model) { m.suggestion.begin(operationKey{request: 1}, nil, make(chan struct{})) }, false},
-		{"ghost already showing", func(m *Model) { m.suggestionText = "shown" }, false},
-		{"held result waiting for compaction", func(m *Model) { m.pendingSuggestion = "held" }, false},
+		{"request already in flight", func(m *Model) {
+			m.suggestion.begin(m.session.Generation(), suggestionSessionID, nil, make(chan struct{}))
+		}, false},
+		{"ghost already showing", func(m *Model) { m.showSuggestion("shown") }, false},
+		{"held result waiting for compaction", func(m *Model) {
+			m.suggestion.hold("held", operationKey{generation: m.session.Generation(), request: 1, sessionID: suggestionSessionID})
+		}, false},
 		{"run in flight", func(m *Model) { beginTestRun(m) }, false},
 		{"run draining", func(m *Model) { beginTestRun(m); m.runOp.cancel() }, false},
 		{"compaction in flight", func(m *Model) { m.compaction.begin(operationKey{request: 1}, nil, make(chan struct{})) }, true},
@@ -116,6 +116,143 @@ func TestCanSuggest(t *testing.T) {
 	}
 }
 
+// TestAdmitSuggestion covers the suggestion-specific admission check. It must
+// ignore compaction, because ADR 031 starts both operations together, and its
+// refusal is never user-facing.
+func TestAdmitSuggestion(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Model)
+		want  bool
+	}{
+		{"idle", func(*Model) {}, true},
+		{"exiting", func(m *Model) { m.exitPhase = phaseDraining }, false},
+		{"browser open", func(m *Model) { m.browserOpen = true }, false},
+		{"run in flight", func(m *Model) { beginTestRun(m) }, false},
+		{"run draining", func(m *Model) { beginTestRun(m); m.runOp.cancel() }, false},
+		{"replay loading", func(m *Model) { m.hydrating = true }, false},
+		{"replay pending", func(m *Model) { m.replayPending = true }, false},
+		{"compaction runs alongside", func(m *Model) {
+			m.compaction.begin(operationKey{request: 1}, nil, make(chan struct{}))
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := suggestionReady(t)
+			tt.setup(&m)
+			gate := m.admitSuggestion()
+			if gate.allowed != tt.want {
+				t.Fatalf("admitSuggestion = %+v, want allowed=%v", gate, tt.want)
+			}
+			if gate.text != "" {
+				t.Fatalf("suggestion refusal text = %q, want silent", gate.text)
+			}
+		})
+	}
+}
+
+// TestSuggestionPhaseTransitions covers the single phase used by disabled,
+// idle, in-flight, draining, held, and shown suggestions, and the one-writer
+// invariant tying the ghost text to the composer placeholder.
+func TestSuggestionPhaseTransitions(t *testing.T) {
+	m := suggestionReady(t)
+	if got := m.suggestionPhase(); got != suggestionIdle {
+		t.Fatalf("ready phase = %v, want idle", got)
+	}
+
+	m.cfg.Suggestions.Enabled = false
+	if got := m.suggestionPhase(); got != suggestionDisabled {
+		t.Fatalf("disabled phase = %v, want disabled", got)
+	}
+	m.cfg.Suggestions.Enabled = true
+
+	m = startSuggestionForTest(t, m)
+	if got := m.suggestionPhase(); got != suggestionInFlight {
+		t.Fatalf("started phase = %v, want in flight", got)
+	}
+	key := m.suggestion.request.key
+
+	m.clearSuggestion()
+	if got := m.suggestionPhase(); got != suggestionDraining {
+		t.Fatalf("cleared phase = %v, want draining", got)
+	}
+	m = m.finishSuggestion(suggestionDoneMsg{key: key, res: suggest.Result{Canceled: true}})
+	if got := m.suggestionPhase(); got != suggestionIdle {
+		t.Fatalf("reaped phase = %v, want idle", got)
+	}
+
+	m = startSuggestionForTest(t, m)
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("Try the lifecycle test."),
+	})
+	if got := m.suggestionPhase(); got != suggestionShown {
+		t.Fatalf("applied phase = %v, want shown", got)
+	}
+	if m.suggestion.ghost != m.input.Placeholder || m.suggestion.ghost != "Try the lifecycle test." {
+		t.Fatalf("ghost and placeholder disagree: ghost=%q placeholder=%q", m.suggestion.ghost, m.input.Placeholder)
+	}
+
+	m.clearSuggestion()
+	if got := m.suggestionPhase(); got != suggestionIdle {
+		t.Fatalf("dismissed phase = %v, want idle", got)
+	}
+	if m.suggestion.ghost != "" || m.input.Placeholder != defaultInputPlaceholder {
+		t.Fatalf("dismissed presentation = ghost %q placeholder %q", m.suggestion.ghost, m.input.Placeholder)
+	}
+
+	m.suggestion.hold("Held until compaction settles.", operationKey{
+		generation: m.session.Generation(),
+		request:    99,
+		sessionID:  suggestionSessionID,
+	})
+	if got := m.suggestionPhase(); got != suggestionHeld {
+		t.Fatalf("held phase = %v, want held", got)
+	}
+	m.suggestion.dropHeld()
+	if got := m.suggestionPhase(); got != suggestionIdle {
+		t.Fatalf("dropped held phase = %v, want idle", got)
+	}
+}
+
+// TestSuggestionPhaseDoesNotGateAdmission proves the suggestion never joins
+// the prompt or retarget resource gate, whether its child runs, drains, or the
+// result is held or shown.
+func TestSuggestionPhaseDoesNotGateAdmission(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{"in flight", func(m *Model) {
+			m.suggestion.begin(m.session.Generation(), suggestionSessionID, nil, make(chan struct{}))
+		}},
+		{"draining", func(m *Model) {
+			m.suggestion.begin(m.session.Generation(), suggestionSessionID, nil, make(chan struct{}))
+			m.suggestion.invalidate()
+		}},
+		{"held", func(m *Model) {
+			m.suggestion.hold("held", operationKey{
+				generation: m.session.Generation(),
+				request:    1,
+				sessionID:  suggestionSessionID,
+			})
+		}},
+		{"shown", func(m *Model) { m.showSuggestion("shown") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := suggestionReady(t)
+			tt.setup(&m)
+			if gate := m.admitPrompt(); !gate.allowed {
+				t.Fatalf("prompt admission = %+v, want allowed", gate)
+			}
+			if gate := m.admitRetarget(); !gate.allowed {
+				t.Fatalf("retarget admission = %+v, want allowed", gate)
+			}
+		})
+	}
+}
+
 func TestFinishSuggestionAppliesDocument(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
 	before := len(m.timeline.items)
@@ -124,8 +261,11 @@ func TestFinishSuggestionAppliesDocument(t *testing.T) {
 		Document: suggestionDocument("Add a test for the new path."),
 	})
 
-	if m.suggestionText != "Add a test for the new path." {
-		t.Fatalf("suggestionText = %q", m.suggestionText)
+	if m.suggestion.ghost != "Add a test for the new path." {
+		t.Fatalf("suggestion ghost = %q", m.suggestion.ghost)
+	}
+	if m.suggestionPhase() != suggestionShown {
+		t.Fatalf("suggestion phase = %v, want shown", m.suggestionPhase())
 	}
 	if m.input.Placeholder != "Add a test for the new path." {
 		t.Fatalf("placeholder = %q", m.input.Placeholder)
@@ -133,8 +273,8 @@ func TestFinishSuggestionAppliesDocument(t *testing.T) {
 	if m.input.Value() != "" {
 		t.Fatalf("input value = %q, want the ghost to stay out of the value", m.input.Value())
 	}
-	if m.suggestion.active() || m.suggestion.draining() || m.suggestion.key.request != 0 || m.suggestion.doneChannel() != nil {
-		t.Fatalf("request state not settled: active=%v draining=%v req=%d done=%v", m.suggestion.active(), m.suggestion.draining(), m.suggestion.key.request, m.suggestion.doneChannel() != nil)
+	if m.suggestion.request.key.request != 0 || m.suggestion.doneChannel() != nil {
+		t.Fatalf("request state not settled: req=%d done=%v", m.suggestion.request.key.request, m.suggestion.doneChannel() != nil)
 	}
 	if len(m.timeline.items) != before {
 		t.Fatalf("suggestion added %d timeline items, want none", len(m.timeline.items)-before)
@@ -295,7 +435,7 @@ func TestSuggestionDismissedByTyping(t *testing.T) {
 		t.Fatalf("input value = %q, want only the typed character", got)
 	}
 	if m.suggestionActive() || m.input.Placeholder != defaultInputPlaceholder {
-		t.Fatalf("ghost survived typing: text=%q placeholder=%q", m.suggestionText, m.input.Placeholder)
+		t.Fatalf("ghost survived typing: text=%q placeholder=%q", m.suggestion.ghost, m.input.Placeholder)
 	}
 	if got := m.composerHint(); got != "Ctrl+S submit · Enter newline · /help" {
 		t.Fatalf("composerHint = %q", got)
@@ -325,7 +465,7 @@ func TestSubmitUsesSuggestionAsPrompt(t *testing.T) {
 		t.Fatalf("last item = %+v, want the suggestion as an ordinary user prompt", got)
 	}
 	if m.suggestionActive() || m.input.Placeholder != defaultInputPlaceholder {
-		t.Fatalf("accepted suggestion survived submit: text=%q placeholder=%q", m.suggestionText, m.input.Placeholder)
+		t.Fatalf("accepted suggestion survived submit: text=%q placeholder=%q", m.suggestion.ghost, m.input.Placeholder)
 	}
 	if m.input.Value() != "" {
 		t.Fatalf("input value = %q, want reset", m.input.Value())
@@ -335,19 +475,18 @@ func TestSubmitUsesSuggestionAsPrompt(t *testing.T) {
 
 func TestSuggestionStaleResultIgnored(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
-	req := m.suggestion.key.request
+	key := m.suggestion.request.key
 	m.clearSuggestion()
 
 	next := m.finishSuggestion(suggestionDoneMsg{
-		req:       req,
-		sessionID: suggestionSessionID,
+		key: key,
 		res: suggest.Result{
 			ExitCode: 0,
 			Document: suggestionDocument("stale"),
 		},
 	})
 	if next.suggestionActive() || next.input.Placeholder != defaultInputPlaceholder {
-		t.Fatalf("stale result changed the composer: text=%q placeholder=%q", next.suggestionText, next.input.Placeholder)
+		t.Fatalf("stale result changed the composer: text=%q placeholder=%q", next.suggestion.ghost, next.input.Placeholder)
 	}
 	if next.suggestion.doneChannel() != nil {
 		t.Fatal("stale result left the drain channel set")
@@ -360,7 +499,7 @@ func TestSuggestionWrongSessionIgnored(t *testing.T) {
 	doc.SessionID = "99999999-2222-3333-4444-555555555555"
 	m = finishSuggestionForTest(t, m, suggest.Result{ExitCode: 0, Document: doc})
 	if m.suggestionActive() {
-		t.Fatalf("wrong-session result was applied: %q", m.suggestionText)
+		t.Fatalf("wrong-session result was applied: %q", m.suggestion.ghost)
 	}
 }
 
@@ -372,7 +511,7 @@ func TestSuggestionDraftWinsOverLateResult(t *testing.T) {
 		Document: suggestionDocument("late suggestion"),
 	})
 	if m.suggestionActive() || m.input.Value() != "my own draft" {
-		t.Fatalf("late result changed a draft: text=%q value=%q", m.suggestionText, m.input.Value())
+		t.Fatalf("late result changed a draft: text=%q value=%q", m.suggestion.ghost, m.input.Value())
 	}
 }
 
@@ -394,8 +533,8 @@ func TestSuggestionFailureWarnsOnce(t *testing.T) {
 	if warnings != 1 {
 		t.Fatalf("warnings = %d, want exactly one per process", warnings)
 	}
-	if !m.suggestionWarned {
-		t.Fatal("suggestionWarned = false")
+	if !m.suggestion.warned {
+		t.Fatal("suggestion.warned = false")
 	}
 }
 
@@ -411,7 +550,7 @@ func TestSuggestionNoOpAndCancellationSilent(t *testing.T) {
 		if len(m.timeline.items) != before {
 			t.Fatalf("result %+v added %d timeline items, want none", res, len(m.timeline.items)-before)
 		}
-		if m.suggestionActive() || m.suggestionWarned {
+		if m.suggestionActive() || m.suggestion.warned {
 			t.Fatalf("result %+v changed composer or warned", res)
 		}
 	}
@@ -421,9 +560,9 @@ func TestSuggestionCancelOnNewSession(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
 	next, _ := m.startNewSession()
 	m = next.(Model)
-	if m.suggestion.active() || m.suggestion.key.request != 0 {
-		t.Fatalf("new session left a request in flight: active=%v req=%d",
-			m.suggestion.active(), m.suggestion.key.request)
+	if m.suggestionPhase() != suggestionDraining || m.suggestion.request.key.request != 0 {
+		t.Fatalf("new session left the suggestion in phase %v, req=%d; want draining",
+			m.suggestionPhase(), m.suggestion.request.key.request)
 	}
 	if m.suggestion.doneChannel() == nil {
 		t.Fatal("new session dropped the drain channel before the child was reaped")
@@ -434,8 +573,8 @@ func TestFinishRunStartsSuggestion(t *testing.T) {
 	m := suggestionRunReady(t)
 	next, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	finished := next.(Model)
-	if cmd == nil || !finished.suggestion.active() {
-		t.Fatalf("finishRun did not start a suggestion: suggesting=%v cmd nil=%v", finished.suggestion.active(), cmd == nil)
+	if cmd == nil || finished.suggestionPhase() != suggestionInFlight {
+		t.Fatalf("finishRun did not start a suggestion: phase=%v cmd nil=%v", finished.suggestionPhase(), cmd == nil)
 	}
 	finished.cancelSuggestion()
 }
@@ -449,10 +588,10 @@ func TestFinishRunFailureSkipsSuggestion(t *testing.T) {
 		m := suggestionRunReady(t)
 		next, cmd := m.finishRun(res)
 		finished := next.(Model)
-		if finished.suggestion.active() || cmd == nil {
+		if finished.suggestionBusy() || cmd == nil {
 			// A nil cmd is fine only when the run did not start a suggestion;
 			// finishRun always returns a title command, so require one.
-			t.Fatalf("finishRun(%+v) started a suggestion: suggesting=%v cmd nil=%v", res, finished.suggestion.active(), cmd == nil)
+			t.Fatalf("finishRun(%+v) started a suggestion: busy=%v cmd nil=%v", res, finished.suggestionBusy(), cmd == nil)
 		}
 	}
 }
@@ -462,9 +601,8 @@ func TestFinishRunErroredCompletionSkipsSuggestion(t *testing.T) {
 	m.session.LastComplete.IsError = true
 	next, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	finished := next.(Model)
-	if finished.suggestion.active() || finished.suggestion.draining() {
-		t.Fatalf("errored completion started a suggestion: active=%v draining=%v",
-			finished.suggestion.active(), finished.suggestion.draining())
+	if finished.suggestionBusy() {
+		t.Fatalf("errored completion started a suggestion: phase=%v", finished.suggestionPhase())
 	}
 	if cmd == nil {
 		t.Fatal("finishRun returned no title command")
@@ -482,10 +620,10 @@ func TestSuggestionMissingSuggestedWarns(t *testing.T) {
 		},
 	})
 	if m.suggestionActive() {
-		t.Fatalf("malformed document was applied: %q", m.suggestionText)
+		t.Fatalf("malformed document was applied: %q", m.suggestion.ghost)
 	}
-	if !m.suggestionWarned {
-		t.Fatal("malformed document did not set suggestionWarned")
+	if !m.suggestion.warned {
+		t.Fatal("malformed document did not set suggestion.warned")
 	}
 	if len(m.timeline.items) != before+1 {
 		t.Fatalf("timeline items = %d, want one warning", len(m.timeline.items)-before)
@@ -498,8 +636,9 @@ func TestSuggestionMissingSuggestedWarns(t *testing.T) {
 func TestSuggestionDrainingChildBlocksNewRequest(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
 	m.cancelSuggestion()
-	if m.suggestion.doneChannel() == nil {
-		t.Fatal("cancelSuggestion dropped the drain channel before the child was reaped")
+	if m.suggestionPhase() != suggestionDraining || m.suggestion.doneChannel() == nil {
+		t.Fatalf("after cancel: phase=%v done=%v; want draining with a reap channel",
+			m.suggestionPhase(), m.suggestion.doneChannel() != nil)
 	}
 	if m.canSuggest() {
 		t.Fatal("canSuggest started a second request while the canceled child was draining")
@@ -508,7 +647,7 @@ func TestSuggestionDrainingChildBlocksNewRequest(t *testing.T) {
 
 func TestSuggestionDrainDoesNotGatePrompt(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
-	req := m.suggestion.key.request
+	key := m.suggestion.request.key
 	m.cfg.CakeBin = writeFakeCake(t, `
 cat <<'EOF'
 {"type":"task_complete","session_id":"`+suggestionSessionID+`","task_id":"t-1"}
@@ -521,55 +660,53 @@ EOF
 	if cmd == nil || !m.runBusy() {
 		t.Fatal("an in-flight suggestion blocked prompt submission")
 	}
-	if !m.suggestion.draining() {
-		t.Fatal("submit did not invalidate the suggestion into a drain")
+	if m.suggestionPhase() != suggestionDraining {
+		t.Fatalf("submit left suggestion phase %v, want draining", m.suggestionPhase())
 	}
 	_ = cmd
 	drainRun(t, m.run)
 
 	updated, _ := m.Update(suggestionDoneMsg{
-		req:       req,
-		sessionID: suggestionSessionID,
+		key: key,
 		res: suggest.Result{
 			ExitCode: 0,
 			Document: suggestionDocument("stale"),
 		},
 	})
 	m = updated.(Model)
-	if m.suggestionActive() || m.suggestion.draining() || m.suggestion.doneChannel() != nil {
-		t.Fatalf("late suggestion result touched the composer: ghost=%q draining=%v done=%v",
-			m.suggestionText, m.suggestion.draining(), m.suggestion.doneChannel() != nil)
+	if m.suggestionActive() || m.suggestionPhase() != suggestionIdle || m.suggestion.doneChannel() != nil {
+		t.Fatalf("late suggestion result touched the composer: ghost=%q phase=%v done=%v",
+			m.suggestion.ghost, m.suggestionPhase(), m.suggestion.doneChannel() != nil)
 	}
 }
 
 func TestSuggestionDrainDoesNotGateNewSession(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
-	req := m.suggestion.key.request
+	key := m.suggestion.request.key
 
 	tm, _ := m.execCommand(Command{Kind: CmdNew})
 	m = tm.(Model)
 	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
 		t.Fatalf("new session was gated by a suggestion drain: %v %q", mode, id)
 	}
-	if !m.suggestion.draining() {
-		t.Fatal("/new did not invalidate the suggestion into a drain")
+	if m.suggestionPhase() != suggestionDraining {
+		t.Fatalf("/new left suggestion phase %v, want draining", m.suggestionPhase())
 	}
 
 	updated, _ := m.Update(suggestionDoneMsg{
-		req:       req,
-		sessionID: suggestionSessionID,
-		res:       suggest.Result{Canceled: true},
+		key: key,
+		res: suggest.Result{Canceled: true},
 	})
 	m = updated.(Model)
-	if m.suggestionActive() || m.suggestion.draining() || m.suggestion.doneChannel() != nil {
-		t.Fatalf("late suggestion result crossed the new-session boundary: ghost=%q draining=%v done=%v",
-			m.suggestionText, m.suggestion.draining(), m.suggestion.doneChannel() != nil)
+	if m.suggestionActive() || m.suggestionPhase() != suggestionIdle || m.suggestion.doneChannel() != nil {
+		t.Fatalf("late suggestion result crossed the new-session boundary: ghost=%q phase=%v done=%v",
+			m.suggestion.ghost, m.suggestionPhase(), m.suggestion.doneChannel() != nil)
 	}
 }
 
 func TestQuitDrainsSuggestion(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
-	req := m.suggestion.key.request
+	key := m.suggestion.request.key
 	m, cmd := m.quit()
 	if cmd != nil {
 		t.Fatal("quit returned a command while the suggester child was in flight")
@@ -577,9 +714,9 @@ func TestQuitDrainsSuggestion(t *testing.T) {
 	if !m.exiting() || m.suggestion.doneChannel() == nil {
 		t.Fatalf("quit did not enter the drain state: exiting=%v done=%v", m.exiting(), m.suggestion.doneChannel() != nil)
 	}
-	if m.suggestion.active() || m.suggestion.key.request != 0 || m.suggestion.cancelFn != nil {
-		t.Fatalf("quit did not invalidate the request: active=%v req=%d cancel=%v",
-			m.suggestion.active(), m.suggestion.key.request, m.suggestion.cancelFn != nil)
+	if m.suggestionPhase() != suggestionDraining || m.suggestion.request.key.request != 0 || m.suggestion.request.cancelFn != nil {
+		t.Fatalf("quit did not invalidate the request: phase=%v req=%d cancel=%v",
+			m.suggestionPhase(), m.suggestion.request.key.request, m.suggestion.request.cancelFn != nil)
 	}
 	found := false
 	for _, it := range m.timeline.items {
@@ -606,16 +743,16 @@ func TestQuitDrainsSuggestion(t *testing.T) {
 	}
 
 	updated, cmd := m.Update(suggestionDoneMsg{
-		req:       req,
-		sessionID: suggestionSessionID,
-		res:       suggest.Result{Canceled: true},
+		key: key,
+		res: suggest.Result{Canceled: true},
 	})
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("the drained result did not return the quit command")
 	}
-	if m.suggestion.doneChannel() != nil || m.suggestionActive() {
-		t.Fatalf("drained result left state behind: done=%v ghost=%q", m.suggestion.doneChannel() != nil, m.suggestionText)
+	if m.suggestion.doneChannel() != nil || m.suggestionActive() || m.suggestionPhase() != suggestionIdle {
+		t.Fatalf("drained result left state behind: phase=%v done=%v ghost=%q",
+			m.suggestionPhase(), m.suggestion.doneChannel() != nil, m.suggestion.ghost)
 	}
 }
 
@@ -638,8 +775,7 @@ func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
 	// Model an invalidated suggestion child whose reaping command the test
 	// controls, without launching the real suggester.
 	done := make(chan struct{})
-	m.suggestionSeq++
-	m.suggestion.begin(operationKey{request: m.suggestionSeq}, func() {}, done)
+	m.suggestion.begin(m.session.Generation(), suggestionSessionID, func() {}, done)
 	m.trackChild("suggestion", func() {}, done)
 	release := make(chan struct{})
 	go func() {
@@ -666,6 +802,48 @@ func TestCancelRunningWaitsForSuggestionTeardown(t *testing.T) {
 	}
 }
 
+// TestHeldSuggestionAppliesAfterCanceledCompaction checks a held result follows
+// the compaction phase from in flight through draining to idle, without ever
+// joining the prompt gate itself.
+func TestHeldSuggestionAppliesAfterCanceledCompaction(t *testing.T) {
+	m := suggestionRunReady(t)
+	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
+	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
+
+	next, _ := m.finishRun(cake.Result{ExitCode: 0})
+	m = next.(Model)
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("Add the canceled-compaction test."),
+	})
+	if got := m.suggestionPhase(); got != suggestionHeld {
+		t.Fatalf("suggestion phase = %v, want held", got)
+	}
+
+	m.cancelCompaction()
+	if !m.compactionBusy() || !m.compaction.draining() {
+		t.Fatalf("compaction did not enter draining: busy=%v phase=%v", m.compactionBusy(), m.compaction.phase)
+	}
+	if gate := m.admitPrompt(); gate.allowed {
+		t.Fatal("compaction drain opened the prompt gate")
+	}
+
+	m, _ = m.finishCompaction(compactionDoneMsg{
+		req:       m.compaction.key.request,
+		sessionID: suggestionSessionID,
+		res:       compact.Result{Canceled: true},
+	})
+	if m.compactionBusy() {
+		t.Fatal("canceled compaction did not settle")
+	}
+	if got := m.suggestionPhase(); got != suggestionShown {
+		t.Fatalf("suggestion phase after compaction settle = %v, want shown", got)
+	}
+	if m.suggestion.ghost != "Add the canceled-compaction test." || m.input.Placeholder != m.suggestion.ghost {
+		t.Fatalf("held result presentation = ghost %q placeholder %q", m.suggestion.ghost, m.input.Placeholder)
+	}
+}
+
 // TestCompactionAndSuggestionRunTogether checks the end-of-turn transition
 // starts both background calls and that a suggestion result arriving while the
 // compacting gate is closed is held until the compactor settles.
@@ -676,19 +854,19 @@ func TestCompactionAndSuggestionRunTogether(t *testing.T) {
 
 	next, cmd := m.finishRun(cake.Result{ExitCode: 0})
 	m = next.(Model)
-	if cmd == nil || !m.compactionBusy() || !m.suggestion.active() {
-		t.Fatalf("finishRun did not start both: compacting=%v suggesting=%v cmd nil=%v", m.compactionBusy(), m.suggestion.active(), cmd == nil)
+	if cmd == nil || !m.compactionBusy() || m.suggestionPhase() != suggestionInFlight {
+		t.Fatalf("finishRun did not start both: compacting=%v suggestion phase=%v cmd nil=%v", m.compactionBusy(), m.suggestionPhase(), cmd == nil)
 	}
 
 	m = finishSuggestionForTest(t, m, suggest.Result{
 		ExitCode: 0,
 		Document: suggestionDocument("Add a test for the parallel path."),
 	})
-	if m.suggestionText != "" || m.input.Placeholder != defaultInputPlaceholder {
-		t.Fatalf("ghost appeared while compaction gated the composer: text=%q placeholder=%q", m.suggestionText, m.input.Placeholder)
+	if m.suggestionPhase() != suggestionHeld || m.suggestion.ghost != "" || m.input.Placeholder != defaultInputPlaceholder {
+		t.Fatalf("held result state: phase=%v ghost=%q placeholder=%q", m.suggestionPhase(), m.suggestion.ghost, m.input.Placeholder)
 	}
-	if m.pendingSuggestion != "Add a test for the parallel path." {
-		t.Fatalf("pendingSuggestion = %q", m.pendingSuggestion)
+	if m.suggestion.held.text != "Add a test for the parallel path." {
+		t.Fatalf("held suggestion = %q", m.suggestion.held.text)
 	}
 
 	m, cmd = m.finishCompaction(compactionDoneMsg{
@@ -696,14 +874,14 @@ func TestCompactionAndSuggestionRunTogether(t *testing.T) {
 		sessionID: suggestionSessionID,
 		res:       compact.Result{ExitCode: 1, Stderr: "compactor failed"},
 	})
-	if m.compactionBusy() || m.suggestion.active() || cmd == nil {
-		t.Fatalf("finishCompaction state: compacting=%v suggesting=%v cmd nil=%v", m.compactionBusy(), m.suggestion.active(), cmd == nil)
+	if m.compactionBusy() || m.suggestionPhase() != suggestionShown || cmd == nil {
+		t.Fatalf("finishCompaction state: compacting=%v suggestion phase=%v cmd nil=%v", m.compactionBusy(), m.suggestionPhase(), cmd == nil)
 	}
-	if m.pendingSuggestion != "" {
-		t.Fatalf("pendingSuggestion survived the settle: %q", m.pendingSuggestion)
+	if m.suggestion.held.text != "" {
+		t.Fatalf("held suggestion survived the settle: %q", m.suggestion.held.text)
 	}
-	if m.suggestionText != "Add a test for the parallel path." || m.input.Placeholder != "Add a test for the parallel path." {
-		t.Fatalf("held suggestion was not applied: text=%q placeholder=%q", m.suggestionText, m.input.Placeholder)
+	if m.suggestion.ghost != "Add a test for the parallel path." || m.input.Placeholder != "Add a test for the parallel path." {
+		t.Fatalf("held suggestion was not applied: ghost=%q placeholder=%q", m.suggestion.ghost, m.input.Placeholder)
 	}
 }
 
@@ -711,8 +889,11 @@ func TestCompactionAndSuggestionRunTogether(t *testing.T) {
 // superseded compaction request cannot keep a held suggestion alive.
 func TestStaleCompactionResultDropsHeldSuggestion(t *testing.T) {
 	m := suggestionReady(t)
-	m.pendingSuggestion = "Add a test for the parallel path."
-	m.pendingSuggestionSession = suggestionSessionID
+	m.suggestion.hold("Add a test for the parallel path.", operationKey{
+		generation: m.session.Generation(),
+		request:    1,
+		sessionID:  suggestionSessionID,
+	})
 	m.compaction.begin(operationKey{request: 2}, nil, make(chan struct{}))
 
 	m, cmd := m.finishCompaction(compactionDoneMsg{
@@ -726,8 +907,8 @@ func TestStaleCompactionResultDropsHeldSuggestion(t *testing.T) {
 	if !m.compactionBusy() {
 		t.Fatal("stale compaction result settled the live gate")
 	}
-	if m.pendingSuggestion != "" || m.pendingSuggestionSession != "" {
-		t.Fatalf("held suggestion survived: text=%q session=%q", m.pendingSuggestion, m.pendingSuggestionSession)
+	if m.suggestion.held.text != "" || m.suggestion.held.key.sessionID != "" {
+		t.Fatalf("held suggestion survived: text=%q session=%q", m.suggestion.held.text, m.suggestion.held.key.sessionID)
 	}
 }
 
@@ -752,8 +933,8 @@ func TestCompactionSettleDropsHeldSuggestionWhenComposerChanges(t *testing.T) {
 		sessionID: suggestionSessionID,
 		res:       compact.Result{ExitCode: 1, Stderr: "compactor failed"},
 	})
-	if m.suggestionActive() || m.pendingSuggestion != "" {
-		t.Fatalf("dismissed held result survived settling: text=%q pending=%q", m.suggestionText, m.pendingSuggestion)
+	if m.suggestionActive() || m.suggestion.held.text != "" {
+		t.Fatalf("dismissed held result survived settling: ghost=%q held=%q", m.suggestion.ghost, m.suggestion.held.text)
 	}
 }
 
@@ -770,8 +951,8 @@ func TestNewSessionDropsHeldSuggestion(t *testing.T) {
 		ExitCode: 0,
 		Document: suggestionDocument("Add a test for the parallel path."),
 	})
-	if m.pendingSuggestion == "" {
-		t.Fatal("suggestion was not held during compaction")
+	if m.suggestionPhase() != suggestionHeld {
+		t.Fatalf("suggestion phase = %v, want held during compaction", m.suggestionPhase())
 	}
 
 	next, _ = m.startNewSession()
@@ -781,8 +962,8 @@ func TestNewSessionDropsHeldSuggestion(t *testing.T) {
 		sessionID: suggestionSessionID,
 		res:       compact.Result{ExitCode: 1, Stderr: "compactor failed"},
 	})
-	if m.suggestionActive() || m.pendingSuggestion != "" {
-		t.Fatalf("held result crossed the new-session boundary: text=%q pending=%q", m.suggestionText, m.pendingSuggestion)
+	if m.suggestionActive() || m.suggestion.held.text != "" {
+		t.Fatalf("held result crossed the new-session boundary: ghost=%q held=%q", m.suggestion.ghost, m.suggestion.held.text)
 	}
 }
 
@@ -809,8 +990,8 @@ func TestFinishCompactionDoesNotStartSuggestion(t *testing.T) {
 		sessionID: suggestionSessionID,
 		res:       compact.Result{ExitCode: 1, Stderr: "compactor failed"},
 	})
-	if m.suggestion.active() || m.suggestion.key.request != 0 {
-		t.Fatalf("finishCompaction started a second request: active=%v req=%d", m.suggestion.active(), m.suggestion.key.request)
+	if m.suggestionPhase() == suggestionInFlight || m.suggestion.request.key.request != 0 {
+		t.Fatalf("finishCompaction started a second request: phase=%v req=%d", m.suggestionPhase(), m.suggestion.request.key.request)
 	}
 }
 
