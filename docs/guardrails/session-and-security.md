@@ -306,7 +306,14 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   and [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
 - **Replay isolation.** Replay is read-only and must not alter the session run
   mode or create a new session. Its late events are discarded after `Ctrl+N`,
-  and a canceled replay is drained before another cake process starts.
+  and a canceled replay is drained before another cake process starts. While
+  hydration is live, a prompt or retarget is refused with
+  `waiting for session history to load…` / `wait for session history to load
+  first`. After `Ctrl+N` stops applying records, the gate stays closed and names
+  the drain with `waiting for canceled session history to exit…` / `wait for
+  canceled session history to exit first` until the reaped result arrives. The
+  typed replay phase owns both states; the drain is not a live session lock, but
+  no prompt or session retarget may start a cake process before it settles.
 
 ## Required checks / test focus
 

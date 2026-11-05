@@ -623,7 +623,7 @@ func TestViewHeightFitsTheTerminal(t *testing.T) {
 			return m
 		},
 		"hydrating": func(m Model) Model {
-			m.hydrating = true
+			beginTestReplay(&m)
 			m.applyReplayEvent(cake.Message{Role: "assistant", Content: "replayed"})
 			m.syncViewport()
 			return m

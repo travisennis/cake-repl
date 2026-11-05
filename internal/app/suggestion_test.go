@@ -100,8 +100,8 @@ func TestCanSuggest(t *testing.T) {
 		{"run in flight", func(m *Model) { beginTestRun(m) }, false},
 		{"run draining", func(m *Model) { beginTestRun(m); m.runOp.cancel() }, false},
 		{"compaction in flight", func(m *Model) { m.compaction.begin(operationKey{request: 1}, nil, make(chan struct{})) }, true},
-		{"hydrating", func(m *Model) { m.hydrating = true }, false},
-		{"replay pending", func(m *Model) { m.replayPending = true }, false},
+		{"replay loading", func(m *Model) { beginTestReplay(m) }, false},
+		{"replay draining", func(m *Model) { beginTestReplay(m); m.replay.cancel() }, false},
 		{"session browser open", func(m *Model) { m.browserOpen = true }, false},
 		{"exit pending", func(m *Model) { m.exitPhase = phaseDraining }, false},
 	}
@@ -130,8 +130,8 @@ func TestAdmitSuggestion(t *testing.T) {
 		{"browser open", func(m *Model) { m.browserOpen = true }, false},
 		{"run in flight", func(m *Model) { beginTestRun(m) }, false},
 		{"run draining", func(m *Model) { beginTestRun(m); m.runOp.cancel() }, false},
-		{"replay loading", func(m *Model) { m.hydrating = true }, false},
-		{"replay pending", func(m *Model) { m.replayPending = true }, false},
+		{"replay loading", func(m *Model) { beginTestReplay(m) }, false},
+		{"replay draining", func(m *Model) { beginTestReplay(m); m.replay.cancel() }, false},
 		{"compaction runs alongside", func(m *Model) {
 			m.compaction.begin(operationKey{request: 1}, nil, make(chan struct{}))
 		}, true},

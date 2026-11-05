@@ -44,13 +44,11 @@ func (m Model) cancelRunning(timeout time.Duration) error {
 	} else if m.run != nil {
 		ops = append(ops, childproc.Operation{Name: "run", Done: m.run.Done})
 	}
-	if m.replayRun != nil {
-		ops = append(ops, childproc.Operation{Name: "replay", Done: m.replayRun.Done})
-	} else if m.replayDone != nil {
-		// The startup command owns the child until replayStartedMsg reaches
-		// Update. Its done channel is the only handle to a replay that is
-		// still starting.
-		ops = append(ops, childproc.Operation{Name: "replay", Done: m.replayDone})
+	if done := m.replay.doneChannel(); done != nil {
+		// The same reaping channel covers a startup command that has not
+		// delivered replayStartedMsg and a running replay whose result has not
+		// settled yet.
+		ops = append(ops, childproc.Operation{Name: "replay", Done: done})
 	}
 	if done := m.compaction.doneChannel(); done != nil {
 		ops = append(ops, childproc.Operation{Name: "compaction", Done: done})

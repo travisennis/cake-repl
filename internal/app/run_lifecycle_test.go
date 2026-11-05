@@ -198,10 +198,20 @@ func TestAdmissionRefusalMatrix(t *testing.T) {
 		},
 		{
 			name:     "replay loading",
-			setup:    func(m *Model) { m.hydrating = true },
+			setup:    func(m *Model) { beginTestReplay(m) },
 			reason:   refuseReplayLoading,
 			prompt:   "waiting for session history to load…",
 			retarget: "wait for session history to load first",
+		},
+		{
+			name: "replay draining",
+			setup: func(m *Model) {
+				beginTestReplay(m)
+				m.replay.cancel()
+			},
+			reason:   refuseReplayDraining,
+			prompt:   "waiting for canceled session history to exit…",
+			retarget: "wait for canceled session history to exit first",
 		},
 		{
 			name:     "compaction active",

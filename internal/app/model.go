@@ -163,16 +163,11 @@ type Model struct {
 	run    *cake.Run
 	runSeq uint64
 
-	hydrating     bool
-	replayPending bool
-	replayRun     *cake.Run
-	// replayCtx and replayCancel own the startup replay command before its
-	// *cake.Run reaches the model. replayDone closes when that child is reaped,
-	// including when the start message is never observed. See CancelRunning.
-	replayCtx    context.Context
-	replayCancel context.CancelFunc
-	replayDone   chan struct{}
-	replayWarn   bool
+	// replay owns the startup replay request, its subprocess, and the
+	// post-boundary drain. Its phase keeps the resource gate closed until the
+	// canceled child is reaped, while the request key suppresses records after
+	// the user leaves the session.
+	replay replayState
 
 	// sawComplete and runOutcome describe the last run's result, not a lifecycle
 	// phase. runGeneration scopes that result so a later session boundary can
@@ -289,14 +284,6 @@ func New(cfg Config) Model {
 	spin := spinner.New()
 	spin.Spinner = spinner.MiniDot
 
-	var replayCtx context.Context
-	var replayCancel context.CancelFunc
-	var replayDone chan struct{}
-	if cfg.ResumeID != "" {
-		replayCtx, replayCancel = context.WithCancel(context.Background())
-		replayDone = make(chan struct{})
-	}
-
 	m := Model{
 		cfg:             cfg,
 		theme:           th,
@@ -308,14 +295,14 @@ func New(cfg Config) Model {
 		pendingCalls:    map[string]*ui.ToolBlock{},
 		clipboard:       clipboard.WriteAll,
 		toolOutputMode:  ui.ToolOutputHidden,
-		hydrating:       cfg.ResumeID != "",
-		replayPending:   cfg.ResumeID != "",
-		replayCtx:       replayCtx,
-		replayCancel:    replayCancel,
-		replayDone:      replayDone,
 		session:         newSessionState(cfg.InitialMode, cfg.ResumeID),
 	}
-	m.trackChild("replay", replayCancel, replayDone)
+	if cfg.ResumeID != "" {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		m.replay.begin(ctx, m.session.Generation(), cfg.ResumeID, cancel, done)
+		m.trackChild("replay", cancel, done)
+	}
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "cake-repl — /help for commands"})
 
 	if cfg.StartupPicker {
@@ -463,15 +450,10 @@ func (m Model) CancelRunning() error {
 
 // cancelReplay stops the startup replay whether it is still starting or already
 // running. Canceling before cake.Replay starts prevents a child from being
-// created after shutdown begins.
+// created after shutdown begins. The phase keeps the key until the reaped
+// result settles the drain.
 func (m *Model) cancelReplay() {
-	if m.replayCancel != nil {
-		m.replayCancel()
-		m.replayCancel = nil
-	}
-	if m.replayRun != nil {
-		m.replayRun.Cancel()
-	}
+	m.replay.cancel()
 }
 
 // cancelCompaction stops an in-flight compactor. The pending operation keeps
@@ -519,8 +501,8 @@ func (m Model) Init() tea.Cmd {
 	if m.startupCmd != nil {
 		cmds = append(cmds, m.startupCmd)
 	}
-	if m.hydrating {
-		cmds = append(cmds, startReplayCmd(m.cfg, m.replayCtx, m.replayDone))
+	if m.replay.phase() == replayLoading {
+		cmds = append(cmds, startReplayCmd(m.cfg, m.replay.op.key, m.replay.ctx, m.replay.done))
 	}
 	return tea.Batch(cmds...)
 }

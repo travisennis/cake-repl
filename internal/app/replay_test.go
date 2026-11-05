@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,12 @@ import (
 )
 
 const replayTestSessionID = "11111111-2222-3333-4444-555555555555"
+
+// beginTestReplay enters the live hydration phase without launching a child.
+// Tests that need reaping supply their own run handle through the model state.
+func beginTestReplay(m *Model) operationKey {
+	return m.replay.begin(context.Background(), m.session.Generation(), m.session.ResumeID, nil, make(chan struct{}))
+}
 
 // replayStartMessage drives the same Init command batch Bubble Tea runs at
 // startup and returns the replay startup message it produced.
@@ -42,7 +49,7 @@ func hydrateTestModel(t *testing.T, m Model) Model {
 
 	tm, cmd := m.Update(start)
 	m = tm.(Model)
-	for m.hydrating || m.replayRun != nil {
+	for m.replay.phase() != replayIdle {
 		if cmd == nil {
 			t.Fatalf("replay state still active without a command: %+v", m)
 		}
@@ -101,15 +108,15 @@ fi
 		InitialMode: cake.RunResume,
 		ResumeID:    replayTestSessionID,
 	})
-	if !m.hydrating {
+	if m.replay.phase() != replayLoading {
 		t.Fatal("resume model did not enter hydration state")
 	}
 	m.width, m.height = 80, 24
 	m.layout()
 	m = hydrateTestModel(t, m)
 
-	if m.hydrating || m.replayRun != nil || m.runBusy() {
-		t.Fatalf("replay did not settle: hydrating=%v replay=%v running=%v", m.hydrating, m.replayRun != nil, m.runBusy())
+	if m.replay.phase() != replayIdle || m.runBusy() {
+		t.Fatalf("replay did not settle: phase=%v running=%v", m.replay.phase(), m.runBusy())
 	}
 	if m.session.SessionID != replayTestSessionID || m.session.TaskID != "old-task" {
 		t.Fatalf("session context = %+v, want replayed ids", m.session)
@@ -371,8 +378,8 @@ exit 0
 	m.layout()
 	m = hydrateTestModel(t, m)
 
-	if m.hydrating || m.runBusy() {
-		t.Fatalf("failed replay left model unavailable: hydrating=%v running=%v", m.hydrating, m.runBusy())
+	if m.replay.phase() != replayIdle || m.runBusy() {
+		t.Fatalf("failed replay left model unavailable: phase=%v running=%v", m.replay.phase(), m.runBusy())
 	}
 	var sawWarning bool
 	for _, item := range m.timeline.items {
@@ -425,8 +432,8 @@ func TestReplayStartupFailureShowsWarningImmediately(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("failed replay startup returned an unexpected command")
 	}
-	if m.hydrating || m.replayPending {
-		t.Fatalf("failed replay left hydration active: hydrating=%v pending=%v", m.hydrating, m.replayPending)
+	if m.replay.phase() != replayIdle {
+		t.Fatalf("failed replay left hydration active: phase=%v", m.replay.phase())
 	}
 	if view := m.View(); !strings.Contains(view, "session replay unavailable") {
 		t.Fatalf("startup warning not visible without another event:\n%s", view)
@@ -490,8 +497,8 @@ func TestReplayStartupFailureAfterNewSessionStaysBehindTheBoundary(t *testing.T)
 	if cmd != nil {
 		t.Fatalf("ctrl+n returned a command: %v", cmd)
 	}
-	if m.hydrating || !m.replayPending {
-		t.Fatalf("ctrl+n state: hydrating=%v pending=%v", m.hydrating, m.replayPending)
+	if m.replay.phase() != replayDraining {
+		t.Fatalf("ctrl+n state: phase=%v", m.replay.phase())
 	}
 
 	tm, cmd = m.Update(start)
@@ -499,8 +506,8 @@ func TestReplayStartupFailureAfterNewSessionStaysBehindTheBoundary(t *testing.T)
 	if cmd != nil {
 		t.Fatal("failed startup after ctrl+n returned a command")
 	}
-	if m.replayPending {
-		t.Fatal("failed startup left the replay pending after ctrl+n")
+	if m.replay.phase() != replayIdle {
+		t.Fatalf("failed startup left the replay active after ctrl+n: phase=%v", m.replay.phase())
 	}
 	if view := m.View(); strings.Contains(view, "session replay unavailable") {
 		t.Fatalf("startup warning crossed the new-session boundary:\n%s", view)
@@ -535,6 +542,112 @@ printf '%s\n' '{"type":"function_call","id":"fc-1","call_id":"call-1","name":"ba
 	}
 	if !dangling.Done || dangling.Output != "(no output — task ended)" {
 		t.Fatalf("dangling tool = %+v, want done with task-ended marker", dangling)
+	}
+}
+
+// TestReplayPhaseTransitions pins the one replay lifecycle: idle, live
+// hydration, post-boundary drain, and settled. The request key survives the
+// drain so the reaped result can close it.
+func TestReplayPhaseTransitions(t *testing.T) {
+	m := newLaidOutModel()
+	if got := m.replay.phase(); got != replayIdle {
+		t.Fatalf("new replay phase = %v, want idle", got)
+	}
+
+	key := beginTestReplay(&m)
+	if got := m.replay.phase(); got != replayLoading {
+		t.Fatalf("started replay phase = %v, want loading", got)
+	}
+
+	m.replay.cancel()
+	if got := m.replay.phase(); got != replayDraining {
+		t.Fatalf("canceled replay phase = %v, want draining", got)
+	}
+	if !m.replay.settle(key) {
+		t.Fatal("active replay key did not settle its drain")
+	}
+	if got := m.replay.phase(); got != replayIdle {
+		t.Fatalf("settled replay phase = %v, want idle", got)
+	}
+}
+
+// TestCtrlNDuringReplayDrainsBeforePrompt covers the boundary the old booleans
+// could not express: Ctrl+N ends live hydration immediately, but a prompt is
+// refused with the drain notice until the canceled child is reaped. No queued
+// replay record may enter the new timeline before or after that result.
+func TestCtrlNDuringReplayDrainsBeforePrompt(t *testing.T) {
+	m := newLaidOutModel()
+	m.session = newSessionState(cake.RunResume, replayTestSessionID)
+	m.cfg.CakeBin = writeFakeCake(t, `
+printf '%s\n' '{"type":"task_start","session_id":"bbbbbbbb-1111-2222-3333-444444444444","task_id":"new-task"}'
+printf '%s\n' '{"type":"task_complete","subtype":"success","is_error":false,"session_id":"bbbbbbbb-1111-2222-3333-444444444444","task_id":"new-task"}'
+`)
+
+	key := beginTestReplay(&m)
+	m.replay.run = &cake.Run{
+		Events: make(chan cake.Event),
+		Result: make(chan cake.Result, 1),
+		Done:   make(chan struct{}),
+	}
+
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Fatalf("ctrl+n returned a command: %v", cmd)
+	}
+	if got := m.replay.phase(); got != replayDraining {
+		t.Fatalf("replay phase after ctrl+n = %v, want draining", got)
+	}
+
+	m.input.SetValue("after replay")
+	tm, cmd = m.submit()
+	m = tm.(Model)
+	if cmd != nil || m.runBusy() {
+		t.Fatalf("prompt started during replay drain: cmd=%v busy=%v", cmd != nil, m.runBusy())
+	}
+	if it := lastItem(t, m); it.Kind != ui.KindWarning || it.Text != "waiting for canceled session history to exit…" {
+		t.Fatalf("drain refusal = %+v, want the canceled-history notice", it)
+	}
+
+	stale := replayEventsMsg{key: key, evs: []cake.Event{
+		cake.Message{Role: "assistant", Content: "STALE-REPLAY-RECORD"},
+	}}
+	tm, _ = m.Update(stale)
+	m = tm.(Model)
+	assertNoTimelineText(t, m, "STALE-REPLAY-RECORD")
+
+	tm, cmd = m.finishReplay(replayDoneMsg{key: key, res: cake.Result{Canceled: true}})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Fatalf("settled replay returned a command: %v", cmd)
+	}
+	if got := m.replay.phase(); got != replayIdle {
+		t.Fatalf("replay phase after result = %v, want idle", got)
+	}
+
+	tm, _ = m.Update(stale)
+	m = tm.(Model)
+	assertNoTimelineText(t, m, "STALE-REPLAY-RECORD")
+	assertNoTimelineText(t, m, "session replay canceled")
+	if gate := m.admitPrompt(); !gate.allowed {
+		t.Fatalf("prompt gate after replay result = %+v, want allowed", gate)
+	}
+
+	m.input.SetValue("after replay result")
+	tm, _ = m.submit()
+	live := tm.(Model)
+	if !live.runBusy() {
+		t.Fatal("prompt did not start after the replay was reaped")
+	}
+	drainRun(t, live.run)
+}
+
+func assertNoTimelineText(t *testing.T, m Model, text string) {
+	t.Helper()
+	for _, item := range m.timeline.items {
+		if strings.Contains(item.Text, text) {
+			t.Fatalf("stale replay record entered the timeline: %+v", item)
+		}
 	}
 }
 

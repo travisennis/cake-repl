@@ -127,8 +127,8 @@ exit 0
 		t.Fatalf("startup picker not open: open=%v loading=%v", m.browserOpen, m.browserLoading)
 	}
 	// No session was named, so nothing is hydrated and nothing is pinned.
-	if m.hydrating || m.replayPending || m.replayRun != nil {
-		t.Errorf("startup picker hydrated: hydrating=%v pending=%v run=%v", m.hydrating, m.replayPending, m.replayRun)
+	if m.replay.phase() != replayIdle {
+		t.Errorf("startup picker hydrated: phase=%v", m.replay.phase())
 	}
 	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
 		t.Errorf("run options = (%v, %q), want (fresh, no id)", mode, id)
@@ -527,7 +527,7 @@ func TestSessionsRejectedWhileRunning(t *testing.T) {
 
 func TestSessionsRejectedWhileHydrating(t *testing.T) {
 	m := newLaidOutModel()
-	m.hydrating = true
+	beginTestReplay(&m)
 
 	tm, _ := m.execCommand(Command{Kind: CmdSessions})
 	got := tm.(Model)

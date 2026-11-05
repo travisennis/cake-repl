@@ -61,7 +61,9 @@ deferred; 144 stays independent.
 - [x] (2026-11-05T01:57Z) 141: derived one suggestion phase for disabled,
   idle, in-flight, draining, held, and shown; centralized ghost and placeholder
   writes; added `admitSuggestion`; and used the shared completed-turn answer.
-- [ ] 139: type replay hydration and its post-boundary drain.
+- [x] (2026-11-05T02:19Z) 139: derived one replay phase for idle, live
+  hydration, and the post-boundary drain; keyed records and the result to the
+  session generation; and added the drain-specific prompt/retarget refusals.
 - [ ] 143: derive title, status, composer activity, hint, and view from the
   presentation state.
 - [ ] Move this plan to `docs/exec-plans/completed/` when 143 lands.

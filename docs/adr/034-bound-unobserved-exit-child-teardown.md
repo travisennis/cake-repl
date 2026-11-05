@@ -66,7 +66,8 @@ child teardown without competing with result delivery and bounds the whole exit.
   `CancelRunning` after every `p.Run` return, so a quit that left a compactor or
   listing draining also gets the bounded reaping wait; a fully settled quit has
   no operations to wait for.
-- `replayDone` and the startup listing's done channel exist before Bubble Tea
+- The startup replay's done channel and the startup listing's done channel
+  exist before Bubble Tea
   schedules their commands. If a command is never scheduled (for example,
   terminal initialization fails first), shutdown can wait the full deadline and
   report a timeout even though no child exists. The wait is bounded, and

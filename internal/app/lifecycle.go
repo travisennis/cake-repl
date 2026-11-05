@@ -63,6 +63,7 @@ const (
 	refuseRunActive
 	refuseRunDraining
 	refuseReplayLoading
+	refuseReplayDraining
 	refuseCompactionActive
 	refuseCompactionDraining
 )
@@ -186,11 +187,11 @@ func (m Model) runActive() bool {
 	return m.runOp.active()
 }
 
-// replayBusy reports whether startup hydration still owns a child. Replay is
-// typed as its own phase by task 139; until then these fields are the same
-// loading/draining resource gate.
+// replayBusy reports whether startup hydration still owns a child. The replay
+// phase keeps the resource gate closed from the start command through the
+// reaped result, including after Ctrl+N stops live hydration.
 func (m Model) replayBusy() bool {
-	return m.hydrating || m.replayPending || m.replayRun != nil
+	return m.replay.phase() != replayIdle
 }
 
 // exiting reports whether the exit phase is draining. Input is ignored from
@@ -232,7 +233,7 @@ func (m Model) admitSuggestion() admission {
 		return admission{reason: refuseRunActive}
 	}
 	if m.replayBusy() {
-		return admission{reason: refuseReplayLoading}
+		return admission{reason: m.replay.refusalReason()}
 	}
 	return admission{allowed: true, reason: refuseNone}
 }
@@ -256,7 +257,13 @@ func (m Model) admit(retarget bool) admission {
 		}
 		return admission{reason: refuseRunDraining, text: "the canceled task is still stopping — wait for it to exit"}
 	}
-	if m.replayBusy() {
+	if p := m.replay.phase(); p != replayIdle {
+		if p == replayDraining {
+			if retarget {
+				return admission{reason: refuseReplayDraining, text: "wait for canceled session history to exit first"}
+			}
+			return admission{reason: refuseReplayDraining, text: "waiting for canceled session history to exit…"}
+		}
 		if retarget {
 			return admission{reason: refuseReplayLoading, text: "wait for session history to load first"}
 		}

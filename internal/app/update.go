@@ -153,77 +153,6 @@ func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 	}
 }
 
-// replayStartedMsg reports the subprocess created for startup hydration.
-type replayStartedMsg struct {
-	run *cake.Run
-	err error
-}
-
-// replayEventsMsg delivers a batch of replay records in stream order.
-type replayEventsMsg struct{ evs []cake.Event }
-
-// replayDoneMsg delivers the terminal state of a replay subprocess.
-type replayDoneMsg struct{ res cake.Result }
-
-// startReplayCmd starts the read-only replay without making the live prompt
-// state look busy. The command runs outside the Update loop because starting a
-// subprocess can block briefly. The model-owned context lets an unobserved exit
-// stop a replay that has not yet delivered replayStartedMsg; done closes after
-// the child is reaped even if that message is never observed.
-func startReplayCmd(cfg Config, ctx context.Context, done chan struct{}) tea.Cmd {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return func() tea.Msg {
-		run, err := cake.Replay(cake.ReplayOptions{
-			Bin:       cfg.CakeBin,
-			Cwd:       cfg.Cwd,
-			SessionID: cfg.ResumeID,
-			DebugLog:  cfg.DebugLog,
-			Registry:  cfg.Runs,
-			Context:   ctx,
-		})
-		if run == nil {
-			if done != nil {
-				close(done)
-			}
-			return replayStartedMsg{run: nil, err: err}
-		}
-		if done != nil {
-			go func() {
-				<-run.Done
-				close(done)
-			}()
-		}
-		return replayStartedMsg{run: run, err: err}
-	}
-}
-
-// waitForReplay pulls the next batch of events from a replay run, or its final
-// result once the event stream is closed. It mirrors waitForRun but keeps
-// hydration separate from a live prompt run.
-func waitForReplay(run *cake.Run) tea.Cmd {
-	return func() tea.Msg {
-		ev, ok := <-run.Events
-		if !ok {
-			return replayDoneMsg{res: <-run.Result}
-		}
-		evs := []cake.Event{ev}
-		for len(evs) < maxEventsPerBatch {
-			select {
-			case ev, ok := <-run.Events:
-				if !ok {
-					return replayEventsMsg{evs: evs}
-				}
-				evs = append(evs, ev)
-			default:
-				return replayEventsMsg{evs: evs}
-			}
-		}
-		return replayEventsMsg{evs: evs}
-	}
-}
-
 // settleSweepMsg is the periodic tick that decides whether the frame needs a
 // settle repaint; see ADR 020.
 type settleSweepMsg struct{}
@@ -337,43 +266,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, nil
 
 	case replayStartedMsg:
-		if msg.err != nil {
-			m.cancelReplay()
-			m.replayDone = nil
-			if m.replayPending {
-				m.replayPending = false
-				if m.hydrating {
-					m.hydrating = false
-					m.replayWarn = true
-					m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay unavailable: " + msg.err.Error()})
-				}
-			}
-			// A startup failure is promised to be visibly non-fatal (ADR 011),
-			// so push the warning into the viewport now instead of leaving it
-			// for the next key or resize to flush.
-			m.syncViewport()
-			return m.maybeQuit()
-		}
-		m.replayRun = msg.run
-		if m.exiting() || !m.hydrating {
-			m.replayRun.Cancel()
-		}
-		return m, waitForReplay(m.replayRun)
+		return m.finishReplayStart(msg)
 
 	case replayEventsMsg:
-		if m.hydrating {
-			for _, ev := range msg.evs {
-				m.applyReplayEvent(ev)
-			}
-			m.syncViewport()
-		}
-		if m.replayRun == nil {
-			return m, nil
-		}
-		return m, waitForReplay(m.replayRun)
+		return m.handleReplayEvents(msg)
 
 	case replayDoneMsg:
-		return m.finishReplay(msg.res)
+		return m.finishReplay(msg)
 
 	case eventsMsg:
 		if m.run == nil || msg.key != m.runOp.key {
@@ -635,16 +534,15 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if m.compactionBusy() {
 		m.cancelCompaction()
 	}
-	if m.hydrating {
+	if m.replayBusy() {
 		m.cancelReplay()
 		// Keep consuming the canceled replay in the background, but suppress its
-		// records after this new-session boundary.
-		m.hydrating = false
+		// records after this new-session boundary. The phase stays draining until
+		// the child is reaped, so the prompt and retarget gates stay closed.
 	}
 	m.sawComplete = false
 	m.runOutcome = outcomeNone
 	m.runGeneration = 0
-	m.replayWarn = false
 	m.timeline.clear()
 	m.pendingCalls = map[string]*ui.ToolBlock{}
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "New session"})
@@ -1118,13 +1016,13 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 			if e.Error != "" {
 				text += ": " + e.Error
 			}
-			m.replayWarn = true
+			m.replay.warned = true
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
 		}
 
 	case cake.ParseError:
 		if replay {
-			m.replayWarn = true
+			m.replay.warned = true
 		}
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "malformed stream line: " + e.Line})
 
@@ -1139,35 +1037,6 @@ func (m *Model) logDebug(text string) {
 	if m.cfg.DebugLog != nil {
 		fmt.Fprintf(m.cfg.DebugLog, "repl: %s\n", text)
 	}
-}
-
-func (m Model) finishReplay(res cake.Result) (tea.Model, tea.Cmd) {
-	m.cancelReplay()
-	m.replayRun = nil
-	m.replayDone = nil
-	m.replayPending = false
-	if !m.hydrating {
-		return m.maybeQuit()
-	}
-	m.hydrating = false
-
-	if !m.replayWarn {
-		switch {
-		case res.Canceled:
-			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay canceled"})
-		case res.Err != nil:
-			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay failed: " + res.Err.Error()})
-		case res.ExitCode != 0:
-			text := fmt.Sprintf("session replay failed with exit code %d", res.ExitCode)
-			if res.Stderr != "" {
-				text += "\n" + ui.TruncateOutput(res.Stderr, m.cfg.OutputLimit)
-			}
-			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
-		}
-	}
-	m.finishPendingTools()
-	m.syncViewport()
-	return m.maybeQuit()
 }
 
 // finishPendingTools marks tool calls that never received an output as done,
