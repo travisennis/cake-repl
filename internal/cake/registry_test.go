@@ -20,8 +20,9 @@ func TestRegistryToleratesEmptyAndReaped(t *testing.T) {
 	reg.StopAll()
 	reg.ContinueAll()
 
-	reaped := &Run{pid: 12345}
-	reaped.exited.Store(true)
+	reaped := &Run{}
+	reaped.pid.Store(12345)
+	reaped.markReaped()
 	reg.Add(reaped)
 	reg.StopAll()
 	reg.ContinueAll()
@@ -65,8 +66,10 @@ func TestRegistryAddWhileSuspendedPausesNewRun(t *testing.T) {
 // panicking during startup or shutdown.
 func TestNilRegistryIsSafe(t *testing.T) {
 	var reg *Registry
-	reg.Add(&Run{pid: 12345})
-	reg.Remove(&Run{pid: 12345})
+	pinned := &Run{}
+	pinned.pid.Store(12345)
+	reg.Add(pinned)
+	reg.Remove(pinned)
 	reg.StopAll()
 	reg.ContinueAll()
 

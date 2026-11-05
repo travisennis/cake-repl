@@ -61,7 +61,10 @@ type Options struct {
 	Registry *Registry
 
 	afterWait func()
-	replay    bool
+	// afterStart is a test hook invoked after cmd.Start succeeds and before the
+	// pid is published, so tests can force a cancellation into that window.
+	afterStart func(*Run)
+	replay     bool
 	// waitDelay overrides the grace window between Cancel's SIGTERM and the
 	// REPL's process-group SIGKILL; zero keeps the production default (see
 	// Start). cmd.WaitDelay is set one second later as a PID-only fallback.
@@ -179,6 +182,47 @@ type ParseError struct {
 
 func (e ParseError) EventType() string { return "parse_error" }
 
+// processPhase is the lifecycle of one engine process from launch through
+// cmd.Wait. It is separate from Result: the phase says which cancellation
+// signal is outstanding, while Result says how the process ended. The phase
+// advances only forward, and processReaped is terminal.
+type processPhase uint32
+
+const (
+	// processStarting is a Run whose cmd.Start has not returned, or has just
+	// returned before pid is published; pid may still be unset. A context
+	// cancellation can win this race and move directly to
+	// processCancelRequested.
+	processStarting processPhase = iota
+	// processRunning is a successfully started process with no cancel signal
+	// sent.
+	processRunning
+	// processCancelRequested means cmd.Cancel successfully signaled the
+	// process. The signal is SIGTERM on POSIX and Kill on Windows.
+	processCancelRequested
+	// processGraceArmed has a REPL-owned timer that will send SIGKILL to the
+	// process group if cmd.Wait has not reaped it by the grace deadline.
+	processGraceArmed
+	// processGroupKilled means the grace timer fired and the group SIGKILL was
+	// attempted. The process may not have been reaped yet.
+	processGroupKilled
+	// processReaped is terminal: cmd.Wait returned, so no group signal may be
+	// sent again.
+	processReaped
+)
+
+// cancelRequested reports whether cmd.Cancel successfully signaled the process.
+// Classification reads this before markReaped replaces the phase; processReaped
+// intentionally does not retain cancellation history.
+func (p processPhase) cancelRequested() bool {
+	switch p {
+	case processCancelRequested, processGraceArmed, processGroupKilled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Run is one cake subprocess. Events is closed when stdout reaches EOF;
 // Result then delivers exactly one value. Done is closed when the child has
 // been reaped, independently of whether Result has been consumed, so shutdown
@@ -189,13 +233,81 @@ type Run struct {
 	Done   <-chan struct{}
 	cancel context.CancelFunc
 	// pid is the engine's process id and, after Setsid, its process-group id.
-	// exited becomes true once cmd.Wait has reaped it; every group signal checks
-	// it first so a finished run is not signaled.
-	pid    int
-	exited atomic.Bool
+	// It is atomic because cmd.Cancel can read it while the start goroutine
+	// publishes it after cmd.Start. phase is atomic because cmd.Cancel, the
+	// grace timer, and the Wait goroutine advance it on different goroutines.
+	// Every group signal checks the terminal phase first so a reaped run is not
+	// signaled again.
+	pid   atomic.Int64
+	phase atomic.Uint32
 
 	mu         sync.Mutex
 	graceTimer *time.Timer
+}
+
+// currentPhase returns the run's process phase.
+func (r *Run) currentPhase() processPhase {
+	return processPhase(r.phase.Load())
+}
+
+// markRunning records a successful start unless cancellation already won the
+// race with cmd.Start.
+func (r *Run) markRunning() {
+	if r == nil {
+		return
+	}
+	r.phase.CompareAndSwap(uint32(processStarting), uint32(processRunning))
+}
+
+// beginCancel records that cmd.Cancel successfully signaled the process and
+// reports whether this call owns the cancellation transition. A duplicate
+// callback or a cancellation after reaping does not re-arm the grace timer.
+func (r *Run) beginCancel() bool {
+	if r == nil {
+		return false
+	}
+	for {
+		switch phase := r.currentPhase(); phase {
+		case processStarting, processRunning:
+			if r.phase.CompareAndSwap(uint32(phase), uint32(processCancelRequested)) {
+				return true
+			}
+		default:
+			return false
+		}
+	}
+}
+
+// armGrace moves a signaled run to the grace-armed phase. It reports whether
+// this call owns the timer, so a reaped or already-escalated run cannot arm one.
+func (r *Run) armGrace() bool {
+	if r == nil {
+		return false
+	}
+	return r.phase.CompareAndSwap(uint32(processCancelRequested), uint32(processGraceArmed))
+}
+
+// markGroupKilled records that the grace timer fired and attempted the group
+// kill. It reports whether this timer callback still owns the escalation.
+func (r *Run) markGroupKilled() bool {
+	if r == nil {
+		return false
+	}
+	return r.phase.CompareAndSwap(uint32(processGraceArmed), uint32(processGroupKilled))
+}
+
+// markReaped records that cmd.Wait has reaped the process and stops the grace
+// timer. processReaped is terminal, so a later signal is a no-op.
+func (r *Run) markReaped() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.phase.Store(uint32(processReaped))
+	if r.graceTimer != nil {
+		r.graceTimer.Stop()
+	}
+	r.mu.Unlock()
 }
 
 // Cancel asks the cake process to stop (SIGTERM, then SIGKILL after a grace
@@ -210,36 +322,26 @@ func (r *Run) Cancel() {
 // PID-only fallback, so this timer is the primary bound for a leader that
 // ignores SIGTERM and for a descendant that still holds the stdout pipe.
 func (r *Run) armGroupKill(delay time.Duration, logf io.Writer) {
-	if r == nil || r.pid <= 0 {
+	if r == nil {
+		return
+	}
+	pid := int(r.pid.Load())
+	if pid <= 0 || !r.armGrace() {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.exited.Load() || r.graceTimer != nil {
+	if r.currentPhase() == processReaped {
 		return
 	}
 	r.graceTimer = time.AfterFunc(delay, func() {
-		if r.exited.Load() {
+		if !r.markGroupKilled() {
 			return
 		}
-		if err := killGroup(r.pid); err != nil && !processGone(err) && logf != nil {
-			fmt.Fprintf(logf, "cancel: killing process group %d failed: %v\n", r.pid, err)
+		if err := killGroup(pid); err != nil && !processGone(err) && logf != nil {
+			fmt.Fprintf(logf, "cancel: killing process group %d failed: %v\n", pid, err)
 		}
 	})
-}
-
-// markExited records that cmd.Wait has reaped the process and stops the grace
-// timer so a reaped pid is not signaled later.
-func (r *Run) markExited() {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	r.exited.Store(true)
-	if r.graceTimer != nil {
-		r.graceTimer.Stop()
-	}
-	r.mu.Unlock()
 }
 
 // stderrLimit bounds how much stderr is retained for error display; older
@@ -310,12 +412,6 @@ func start(parent context.Context, opts Options) (*Run, error) {
 	// deliver SIGTERM (Process.Signal returns an error, which would stall
 	// cancellation for the full WaitDelay), so kill outright there.
 
-	// cancelRequested records whether the exec context watcher successfully
-	// signaled the process. Unlike ctx.Err() it stays false for a cancel after
-	// Wait, and canceledExit checks the final POSIX status to disambiguate an
-	// exited-but-unreaped process.
-	var cancelRequested atomic.Bool
-
 	// grace is the window between SIGTERM and the REPL-owned group SIGKILL.
 	// cmd.WaitDelay is deliberately one second later: its kill is PID-only and
 	// can race the leader's reaping, while the group kill is the primary bound.
@@ -336,7 +432,9 @@ func start(parent context.Context, opts Options) (*Run, error) {
 		}
 		// Only record a successful signal. If the process has already
 		// exited, os/exec treats os.ErrProcessDone as a natural completion
-		// and Wait synchronizes with this callback before returning.
+		// and Wait synchronizes with this callback before returning. A cancel
+		// after Wait therefore never reaches here, so it cannot relabel a
+		// finished run as canceled.
 		var err error
 		if runtime.GOOS == "windows" {
 			err = cmd.Process.Kill()
@@ -346,7 +444,7 @@ func start(parent context.Context, opts Options) (*Run, error) {
 		if err != nil {
 			return err
 		}
-		if cancelRequested.CompareAndSwap(false, true) && runtime.GOOS != "windows" {
+		if run.beginCancel() && runtime.GOOS != "windows" {
 			run.armGroupKill(grace, opts.DebugLog)
 		}
 		return nil
@@ -364,7 +462,17 @@ func start(parent context.Context, opts Options) (*Run, error) {
 		cancel()
 		return nil, fmt.Errorf("starting %s: %w", opts.Bin, err)
 	}
-	run.pid = cmd.Process.Pid
+	if opts.afterStart != nil {
+		opts.afterStart(run)
+	}
+	run.pid.Store(int64(cmd.Process.Pid))
+	run.markRunning()
+	// A context cancellation can reach cmd.Cancel before the pid is published.
+	// armGroupKill then returns without a timer; re-arm here once the pid is
+	// visible. armGrace's CAS makes the two callers single-shot.
+	if run.currentPhase() == processCancelRequested {
+		run.armGroupKill(grace, opts.DebugLog)
+	}
 	if opts.Registry != nil {
 		opts.Registry.Add(run)
 	}
@@ -421,7 +529,8 @@ func start(parent context.Context, opts Options) (*Run, error) {
 		}
 
 		waitErr := cmd.Wait()
-		run.markExited()
+		cancelRequested := run.currentPhase().cancelRequested()
+		run.markReaped()
 		close(done)
 		if opts.Registry != nil {
 			opts.Registry.Remove(run)
@@ -429,9 +538,10 @@ func start(parent context.Context, opts Options) (*Run, error) {
 		if opts.afterWait != nil {
 			opts.afterWait()
 		}
-		// Classify cancellation from whether cmd.Cancel was invoked while
-		// Wait was active, not from ctx directly: a Ctrl+C landing after
-		// Wait has returned must not relabel a finished run as canceled.
+		// Classify cancellation from whether cmd.Cancel successfully signaled
+		// the process while Wait was active, not from ctx directly: a Ctrl+C
+		// landing after Wait has returned must not relabel a finished run as
+		// canceled. The phase is terminal now, so the pre-reap answer is kept.
 		res := Result{Stderr: stderr.String()}
 		var exitErr *exec.ExitError
 		switch {
@@ -444,7 +554,7 @@ func start(parent context.Context, opts Options) (*Run, error) {
 			res.ExitCode = cmd.ProcessState.ExitCode()
 		case errors.As(waitErr, &exitErr):
 			res.ExitCode = exitErr.ExitCode()
-			res.Canceled = canceledExit(exitErr, cancelRequested.Load())
+			res.Canceled = canceledExit(exitErr, cancelRequested)
 		default:
 			res.ExitCode = -1
 			res.Err = waitErr

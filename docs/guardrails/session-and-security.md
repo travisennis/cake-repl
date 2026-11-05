@@ -262,8 +262,13 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   files. Cancel sends SIGTERM to the leader; a
   REPL-owned timer sends SIGKILL to the detached process group at the grace
   deadline if `cmd.Wait` has not reaped it, and `cmd.WaitDelay` is one second
-  later as a PID-only fallback (kill outright on Windows). stderr is retained as
-  a bounded tail for error display. The read-only session listing is model-owned
+  later as a PID-only fallback (kill outright on Windows). The `Run` process
+  lifecycle is one typed phase (`starting`, `running`, `cancel-requested`,
+  `grace-armed`, `group-killed`, `reaped`); reaping is terminal, so a later
+  stop, continue, or group signal is a no-op. `Registry.suspended` remains a
+  two-state coordination flag rather than a phase: it only answers whether a
+  suspend cycle is active. stderr is retained as a bounded tail for error
+  display. The read-only session listing is model-owned
   too: it is canceled when the browser closes, when it is replaced, on quit, and
   by `main`'s teardown for an exit the Update loop never observed. `ListSessions`
   cancels by killing the listing's group outright and bounds teardown with

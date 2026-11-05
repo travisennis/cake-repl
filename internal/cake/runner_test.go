@@ -73,6 +73,9 @@ exit 0
 	default:
 		t.Error("Done was not closed after the run was reaped")
 	}
+	if got := run.currentPhase(); got != processReaped {
+		t.Errorf("phase = %d, want reaped", got)
+	}
 
 	if len(events) != 5 {
 		t.Fatalf("got %d events, want 5: %#v", len(events), events)
@@ -221,6 +224,9 @@ sleep 30
 
 	if !res.Canceled {
 		t.Errorf("result not marked canceled: %+v", res)
+	}
+	if got := run.currentPhase(); got != processReaped {
+		t.Errorf("phase = %d after cancellation, want reaped", got)
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("cancellation took too long: %v", elapsed)

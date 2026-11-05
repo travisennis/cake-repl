@@ -13,7 +13,10 @@ type Registry struct {
 	logf func(string, ...any)
 
 	// cycleMu serializes a stop/continue cycle with Add, so a run registered
-	// after StopAll's snapshot is still paused. suspended is guarded by mu.
+	// after StopAll's snapshot is still paused. suspended is a two-state
+	// coordination flag, not a lifecycle phase: StopAll and ContinueAll are its
+	// only writers, and no third registry state exists. A run's multi-step
+	// process lifecycle lives in Run.phase.
 	cycleMu   sync.Mutex
 	suspended bool
 }
@@ -102,7 +105,7 @@ func (r *Registry) logFailure(action string, run *Run, err error) {
 	if err == nil || processGone(err) || r.logf == nil {
 		return
 	}
-	r.logf("suspend: %s engine run %d failed: %v", action, run.pid, err)
+	r.logf("suspend: %s engine run %d failed: %v", action, run.pid.Load(), err)
 }
 
 func (r *Registry) snapshot() []*Run {

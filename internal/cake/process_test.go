@@ -171,6 +171,56 @@ exit 0
 	}
 }
 
+// TestStartWithCancellationDuringStartArmsGroupKill forces the context watcher
+// to signal the child before the start goroutine publishes the pid. The first
+// armGroupKill call cannot read a pid, so the start-side re-arm is the only
+// bound for a SIGTERM-ignoring child whose descendant holds the stdout pipe.
+func TestStartWithCancellationDuringStartArmsGroupKill(t *testing.T) {
+	bin := writeFakeCake(t, `
+trap '' TERM
+sleep 30
+`)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run, err := start(ctx, Options{
+		Bin:       bin,
+		Prompt:    "hi",
+		waitDelay: 100 * time.Millisecond,
+		afterStart: func(run *Run) {
+			cancel()
+			deadline := time.Now().Add(5 * time.Second)
+			for run.currentPhase() != processCancelRequested {
+				if time.Now().After(deadline) {
+					t.Fatal("cancellation did not win the start race")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(run.Cancel)
+
+	start := time.Now()
+	_, res := collectWithin(t, run, 5*time.Second)
+	elapsed := time.Since(start)
+
+	if !res.Canceled {
+		t.Errorf("result = %+v, want Canceled", res)
+	}
+	if res.Err != nil {
+		t.Errorf("group kill should not be an error: %v", res.Err)
+	}
+	if elapsed >= time.Second {
+		t.Errorf("cancellation took %s; want the grace-window group kill", elapsed)
+	}
+	if got := run.currentPhase(); got != processReaped {
+		t.Errorf("phase after group kill = %d, want reaped", got)
+	}
+}
+
 // TestCancelKillsDescendantGroup covers both pipe shapes: a background child
 // holding stdout and stderr, and one holding only stdout. WaitDelay alone
 // cannot unblock the second shape (Start reads stdout to EOF before Wait), so
@@ -215,6 +265,9 @@ while :; do sleep 0.05; done
 			}
 			if res.Err != nil {
 				t.Errorf("group kill should not be an error: %v", res.Err)
+			}
+			if got := run.currentPhase(); got != processReaped {
+				t.Errorf("phase after group kill = %d, want reaped", got)
 			}
 			if elapsed >= time.Second {
 				t.Errorf("cancellation took %s; want the grace-window group kill, not the later WaitDelay", elapsed)

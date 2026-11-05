@@ -33,10 +33,14 @@ func (r *Run) Continue() error {
 }
 
 func (r *Run) signal(sig syscall.Signal) error {
-	if r == nil || r.pid <= 0 || r.exited.Load() {
+	if r == nil {
 		return nil
 	}
-	return signalGroup(r.pid, sig)
+	pid := int(r.pid.Load())
+	if pid <= 0 || r.currentPhase() == processReaped {
+		return nil
+	}
+	return signalGroup(pid, sig)
 }
 
 // processGone reports whether err means the target no longer exists. A group

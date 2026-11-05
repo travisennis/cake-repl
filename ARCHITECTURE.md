@@ -276,7 +276,11 @@ way.
 - **Graceful cancellation.** Cancel sends SIGTERM to the child leader. A
   REPL-owned timer fires at the grace deadline and sends SIGKILL to the detached
   process group unless `cmd.Wait` has already reaped it; `cmd.WaitDelay` is one
-  second later as a redundant PID-only fallback. Cancellation is classified
+  second later as a redundant PID-only fallback. The run's process lifecycle is
+  one typed phase—starting, running, cancel-requested, grace-armed,
+  group-killed, reaped—advanced atomically by the start, cancellation callback,
+  grace timer, and `Wait` goroutine. Reaping is terminal, so a later stop,
+  continue, or group signal is a no-op. Cancellation is classified
   from whether `cmd.Cancel` successfully signaled the process and, on POSIX,
   whether the process was signal-terminated—not from `ctx.Err()`—so a late
   Ctrl+C cannot relabel a finished run.
