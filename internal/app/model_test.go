@@ -629,26 +629,24 @@ func TestViewHeightFitsTheTerminal(t *testing.T) {
 			return m
 		},
 		"browser loading": func(m Model) Model {
-			m.browserOpen = true
-			m.browserLoading = true
+			m.browser.startLoading()
 			return m
 		},
 		"browser error": func(m Model) Model {
-			m.browserOpen = true
-			m.browserErr = strings.Repeat("boom ", 40)
+			m.browser.failed(strings.Repeat("boom ", 40))
 			return m
 		},
 		"browser empty": func(m Model) Model {
-			m.browserOpen = true
+			m.browser.loaded(0)
 			return m
 		},
 		"browser list": func(m Model) Model {
-			m.browserOpen = true
 			now := time.Now()
 			m.sessionList.SetItems([]list.Item{
 				newSessionItem(cake.SessionSummary{SessionID: "aaaaaaaa-1111-2222-3333-444444444444", FirstPrompt: "one", Timestamp: time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)}, now),
 				newSessionItem(cake.SessionSummary{SessionID: "bbbbbbbb-1111-2222-3333-444444444444", FirstPrompt: "two", Timestamp: time.Date(2026, 10, 11, 8, 0, 0, 0, time.UTC)}, now),
 			})
+			m.browser.loaded(len(m.sessionList.Items()))
 			return m
 		},
 		"long single-line input": func(m Model) Model {

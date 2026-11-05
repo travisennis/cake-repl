@@ -50,10 +50,10 @@ func (m Model) presentationState() presentation {
 			label:       "exiting",
 			hint:        "waiting for child processes to exit…",
 			titleMarker: "[exiting]",
-			browser:     m.browserOpen,
+			browser:     m.browser.open(),
 		}
 	}
-	if m.browserOpen {
+	if m.browser.open() {
 		hint := "esc close"
 		if m.browserSelectable() {
 			hint = "↑/↓ move · enter resume · esc close"

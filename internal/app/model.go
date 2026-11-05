@@ -227,13 +227,11 @@ type Model struct {
 	completionMatches []string
 	completionIdx     int
 
-	// Session browser overlay state, driven by the /sessions command or, at
-	// startup, by the picker a bare `-resume` requests. The browser is idle-only
-	// and replaces the timeline while open.
-	browserOpen    bool
-	browserLoading bool
-	browserErr     string
-	sessionList    list.Model
+	// browser is the /sessions overlay's one presentation phase. The listing
+	// request identity, cancel function, and reaping channels below remain
+	// separate because more than one canceled listing can still drain.
+	browser     sessionBrowser
+	sessionList list.Model
 
 	// startupCmd is a command New built rather than Init. Init cannot mutate the
 	// model, and the startup session listing needs the request identity and

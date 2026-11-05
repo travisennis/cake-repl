@@ -226,7 +226,7 @@ func (m Model) admitSuggestion() admission {
 	if m.exiting() {
 		return admission{reason: refuseExiting}
 	}
-	if m.browserOpen {
+	if m.browser.open() {
 		return admission{reason: refuseBrowserOpen}
 	}
 	if m.runBusy() {
@@ -242,7 +242,7 @@ func (m Model) admit(retarget bool) admission {
 	if m.exiting() {
 		return admission{reason: refuseExiting}
 	}
-	if m.browserOpen {
+	if m.browser.open() {
 		return admission{reason: refuseBrowserOpen, text: "close the session browser first"}
 	}
 	if m.runActive() {

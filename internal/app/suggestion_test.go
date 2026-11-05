@@ -102,7 +102,7 @@ func TestCanSuggest(t *testing.T) {
 		{"compaction in flight", func(m *Model) { m.compaction.begin(operationKey{request: 1}, nil, make(chan struct{})) }, true},
 		{"replay loading", func(m *Model) { beginTestReplay(m) }, false},
 		{"replay draining", func(m *Model) { beginTestReplay(m); m.replay.cancel() }, false},
-		{"session browser open", func(m *Model) { m.browserOpen = true }, false},
+		{"session browser open", func(m *Model) { m.browser.startLoading() }, false},
 		{"exit pending", func(m *Model) { m.exitPhase = phaseDraining }, false},
 	}
 	for _, tt := range tests {
@@ -127,7 +127,7 @@ func TestAdmitSuggestion(t *testing.T) {
 	}{
 		{"idle", func(*Model) {}, true},
 		{"exiting", func(m *Model) { m.exitPhase = phaseDraining }, false},
-		{"browser open", func(m *Model) { m.browserOpen = true }, false},
+		{"browser open", func(m *Model) { m.browser.startLoading() }, false},
 		{"run in flight", func(m *Model) { beginTestRun(m) }, false},
 		{"run draining", func(m *Model) { beginTestRun(m); m.runOp.cancel() }, false},
 		{"replay loading", func(m *Model) { beginTestReplay(m) }, false},

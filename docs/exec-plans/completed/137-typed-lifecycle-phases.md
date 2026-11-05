@@ -32,7 +32,7 @@ state. A user sees the practical difference at the edges:
   a prompt; it is still tracked until reaped.
 
 This plan is the design deliverable for task 137. Implementation is split
-across tasks 147, 138, 140, 141, 139, and 143. Tasks 142, 145, and 148 remain
+across tasks 147, 138, 140, 141, 139, 143, and 142. Tasks 145 and 148 remain
 deferred; 144 stays independent.
 
 ## Progress
@@ -70,6 +70,10 @@ deferred; 144 stays independent.
   title markers and operation labels.
 - [x] (2026-11-05T12:39Z) Moved this plan to
   `docs/exec-plans/completed/`.
+- [x] (2026-11-05T16:30Z) 142: collapsed the browser's open/loading/error
+  fields into one closed/loading/ready/empty/error phase; selectability and the
+  rendered body now derive from it, with transition coverage for open, settle,
+  reload, and close.
 
 ## Surprises & Discoveries
 
@@ -460,8 +464,9 @@ The operation phases and their legal transitions are:
 | Reap / drain | `draining → idle`; a new suggestion may start, but input was never gated | `draining → idle`; no input gate | `tea.Quit` only when every operation is idle |
 
 The browser's `loading`, `ready`, `empty`, and `error` variants are
-presentation states inside `in-flight`, not lifecycle phases. Task 142 may
-collapse those fields later without changing this contract.
+presentation states inside `in-flight`, not lifecycle phases. Task 142 collapsed
+the separate open/loading/error fields into one presentation phase without
+changing this contract.
 
 ### 5. Fold the completed-turn answer from task 146
 
@@ -577,7 +582,8 @@ Implementation order, one task branch and task lifecycle per slice:
    suggestion with empty and non-empty input, and not-ready. No
    running-plus-compacting test; 138 owns that impossible state.
 
-Do not start 142, 145, or 148 until this core lands. 144 is independent.
+Do not start 145 or 148 until this core lands. Task 142 completed after the
+core; 144 is independent.
 
 ## Validation and Acceptance
 

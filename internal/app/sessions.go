@@ -61,11 +61,79 @@ func (m *Model) resizeSessionList(viewportHeight int) {
 
 // resetSessionList drops every row and resets the cursor. It runs when a load
 // starts and when one fails so the list only ever holds rows from the current
-// successful listing; otherwise a stale item from a previous visit would stay
-// selectable behind the loading or error body the user is looking at.
+// successful listing; otherwise rows from a previous visit could survive into
+// the next ready body after a reload or failure.
 func (m *Model) resetSessionList() {
 	m.sessionList.SetItems(nil)
 	m.sessionList.ResetSelected()
+}
+
+// browserPhase is the presentation state of the /sessions overlay. It is not
+// the listing request's lifecycle: request identity, cancellation, and draining
+// stay in the model's sessionListReq, sessionListCancel, and sessionListDone
+// fields, because a replacement can leave more than one canceled listing
+// draining. The phase only answers what the browser is showing and therefore
+// whether a row is selectable.
+type browserPhase uint8
+
+const (
+	browserClosed browserPhase = iota
+	browserLoading
+	browserReady
+	browserEmpty
+	browserError
+)
+
+// sessionBrowser is the one source for the overlay's visibility, selectability,
+// and body. The transition methods keep a ready phase paired with at least one
+// row and an empty phase with none; selectability has no separate item-count
+// check that could drift from the body.
+type sessionBrowser struct {
+	phase browserPhase
+	err   string
+}
+
+func (b sessionBrowser) open() bool {
+	return b.phase != browserClosed
+}
+
+func (b sessionBrowser) selectable() bool {
+	return b.phase == browserReady
+}
+
+func (b sessionBrowser) loading() bool {
+	return b.phase == browserLoading
+}
+
+// startLoading opens or reloads the overlay. It clears any previous error
+// before the caller drops the old rows and starts a new request.
+func (b *sessionBrowser) startLoading() {
+	*b = sessionBrowser{phase: browserLoading}
+}
+
+// dismiss closes the overlay without retaining any presentation state. The
+// caller cancels and invalidates the listing separately.
+func (b *sessionBrowser) dismiss() {
+	*b = sessionBrowser{}
+}
+
+// loaded settles a current successful listing. An empty result is its own
+// phase, not a ready list with zero rows, so selectability cannot disagree with
+// the body the user sees.
+func (b *sessionBrowser) loaded(count int) {
+	b.err = ""
+	if count == 0 {
+		b.phase = browserEmpty
+		return
+	}
+	b.phase = browserReady
+}
+
+// failed settles a current listing failure. The error text is presentation owned
+// by the error phase and is cleared by the next load or close.
+func (b *sessionBrowser) failed(err string) {
+	b.phase = browserError
+	b.err = err
 }
 
 // openSessionBrowser shows the idle session browser and starts loading this
@@ -77,9 +145,7 @@ func (m *Model) resetSessionList() {
 // never reads a receiver mutated in a sibling return operand.
 func (m Model) openSessionBrowser() (Model, tea.Cmd) {
 	m.clearSuggestion()
-	m.browserOpen = true
-	m.browserLoading = true
-	m.browserErr = ""
+	m.browser.startLoading()
 	m.resetSessionList()
 	m.sessionList.Title = "sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))
 	return m.startSessionListLoad()
@@ -91,8 +157,7 @@ func (m Model) openSessionBrowser() (Model, tea.Cmd) {
 // dropped when it arrives. The composer and its draft are untouched, so a prompt
 // stays available after closing.
 func (m *Model) closeBrowser() {
-	m.browserOpen = false
-	m.browserLoading = false
+	m.browser.dismiss()
 	m.cancelSessionList()
 }
 
@@ -108,17 +173,13 @@ func (m *Model) cancelSessionList() {
 }
 
 // browserSelectable reports whether the browser is showing a list with a row
-// the user can act on. It is the precondition for selection: Enter is a no-op
-// while a load is in flight, after a failed load, or on an empty listing, so it
-// can only ever resume a row visible on the current screen.
-//
-// resetSessionList clears rows both when a load starts and when one fails, so
-// the loading and error clauses are redundant with len(items) > 0 today. They
-// stay so the guard does not silently become "any row on screen" if a future
-// change lets a superseded or failed request leave rows behind: dropping them
-// would then let Enter resume a row the user cannot see.
+// the user can act on. It is the browser phase's single selection rule: Enter is
+// a no-op while a load is in flight, after a failed load, or on an empty
+// listing, so it can only ever resume a row visible on the current screen. The
+// ready phase is assigned only after a current successful listing set at least
+// one row, so there is no second item-count check to drift from the body.
 func (m *Model) browserSelectable() bool {
-	return !m.browserLoading && m.browserErr == "" && len(m.sessionList.Items()) > 0
+	return m.browser.selectable()
 }
 
 // browserBodyHeight returns the rows the browser list body occupies at a given

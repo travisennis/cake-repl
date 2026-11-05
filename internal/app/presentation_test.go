@@ -117,8 +117,7 @@ func TestPresentationStateCoversReachableStates(t *testing.T) {
 		{
 			name: "browser loading",
 			setup: func(_ *testing.T, m *Model) {
-				m.browserOpen = true
-				m.browserLoading = true
+				m.browser.startLoading()
 			},
 			activity: "browsing sessions", label: "browsing sessions", hint: browserCloseHint, marker: "[browsing]",
 			browser: true, browserBody: "loading sessions…",
@@ -126,8 +125,7 @@ func TestPresentationStateCoversReachableStates(t *testing.T) {
 		{
 			name: "browser error",
 			setup: func(_ *testing.T, m *Model) {
-				m.browserOpen = true
-				m.browserErr = "boom"
+				m.browser.failed("boom")
 			},
 			activity: "browsing sessions", label: "browsing sessions", hint: browserCloseHint, marker: "[browsing]",
 			browser: true, browserBody: "sessions unavailable: boom",
@@ -135,7 +133,7 @@ func TestPresentationStateCoversReachableStates(t *testing.T) {
 		{
 			name: "browser empty",
 			setup: func(_ *testing.T, m *Model) {
-				m.browserOpen = true
+				m.browser.loaded(0)
 			},
 			activity: "browsing sessions", label: "browsing sessions", hint: browserCloseHint, marker: "[browsing]",
 			browser: true, browserBody: "no sessions in project",

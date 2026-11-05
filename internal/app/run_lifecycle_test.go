@@ -177,7 +177,7 @@ func TestAdmissionRefusalMatrix(t *testing.T) {
 		},
 		{
 			name:     "browser open",
-			setup:    func(m *Model) { m.browserOpen = true },
+			setup:    func(m *Model) { m.browser.startLoading() },
 			reason:   refuseBrowserOpen,
 			prompt:   "close the session browser first",
 			retarget: "close the session browser first",
@@ -305,8 +305,8 @@ func TestCtrlNDuringRunKeepsGateClosedUntilReaped(t *testing.T) {
 		if m.session.Generation() != oldGeneration+1 {
 			t.Fatalf("%s changed the generation during the drain", tt.name)
 		}
-		if m.session.ResumeID != "" || m.browserOpen {
-			t.Fatalf("%s retargeted the session during the drain: resume=%q browser=%v", tt.name, m.session.ResumeID, m.browserOpen)
+		if m.session.ResumeID != "" || m.browser.open() {
+			t.Fatalf("%s retargeted the session during the drain: resume=%q browser=%v", tt.name, m.session.ResumeID, m.browser.open())
 		}
 	}
 

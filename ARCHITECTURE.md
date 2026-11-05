@@ -189,9 +189,13 @@ way.
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 - **Lifecycle state is typed and generation-scoped.** The model owns one
   private state per operation (run, replay, compaction, suggestion, browser,
-  exit) with only idle, in-flight, and draining phases; success, no-op,
-  failure, and cancellation are completion outcomes, and ghost text is
-  presentation. Every child request carries the session generation of the
+  exit). Run, replay, compaction, suggestion, and listing requests move through
+  only idle, in-flight, and draining phases; success, no-op, failure, and
+  cancellation are completion outcomes, and ghost text is presentation. The
+  browser has one presentation phase (closed, loading, ready, empty, error) that
+  derives whether the overlay is open, whether a row is selectable, and which
+  body renders, while its listing request keeps the same identity and drain
+  tracking. Every child request carries the session generation of the
   target it started for; `/new`, Ctrl+N, and a `/resume` or browser pick that
   changes the target advance it. A generation mismatch suppresses late events
   and results but never skips settling the request, so a resource-busy drain

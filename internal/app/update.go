@@ -318,16 +318,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// now.
 			return m, nil
 		}
-		m.browserLoading = false
 		m.sessionListCancel = nil
 		if msg.err != nil {
-			m.browserErr = ui.TruncateOutput(msg.err.Error(), m.cfg.OutputLimit)
-			// The rows on screen are gone, so the list must not keep the previous
-			// listing selectable behind the error.
+			m.browser.failed(ui.TruncateOutput(msg.err.Error(), m.cfg.OutputLimit))
+			// A failed listing keeps the browser open, but its rows must not
+			// survive into a later successful phase.
 			m.resetSessionList()
 			return m, nil
 		}
-		m.browserErr = ""
 		now := time.Now()
 		items := make([]list.Item, 0, len(msg.sessions))
 		for _, s := range msg.sessions {
@@ -335,6 +333,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sessionList.SetItems(items)
 		m.sessionList.ResetSelected()
+		m.browser.loaded(len(items))
 		return m, nil
 
 	case tea.MouseMsg:
@@ -417,7 +416,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// change here would start new work behind the quit.
 		return m, nil
 	}
-	if m.browserOpen {
+	if m.browser.open() {
 		return m.handleBrowserKey(msg)
 	}
 	switch {

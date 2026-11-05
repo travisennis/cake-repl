@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -27,10 +28,176 @@ const (
 func browserModel(t *testing.T, sessions []cake.SessionSummary) Model {
 	t.Helper()
 	m := newLaidOutModel()
-	m.browserOpen = true
+	m.browser.startLoading()
 	m.sessionListSeq, m.sessionListReq = 1, 1
 	tm, _ := m.Update(sessionsLoadedMsg{req: 1, sessions: sessions})
 	return tm.(Model)
+}
+
+// assertBrowserPhase checks the phase and the surfaces it derives. Selectability
+// must come from the same phase as the body, or Enter could accept a row the
+// browser is not showing.
+func assertBrowserPhase(t *testing.T, m Model, want browserPhase) {
+	t.Helper()
+	if m.browser.phase != want {
+		t.Fatalf("browser phase = %v, want %v", m.browser.phase, want)
+	}
+	wantOpen := want != browserClosed
+	if got := m.browser.open(); got != wantOpen {
+		t.Errorf("browser open = %v, want %v", got, wantOpen)
+	}
+	if got := m.presentationState().browser; got != wantOpen {
+		t.Errorf("presentation browser = %v, want %v", got, wantOpen)
+	}
+	wantSelectable := want == browserReady
+	if got := m.browser.selectable(); got != wantSelectable {
+		t.Errorf("browser selectable = %v, want %v", got, wantSelectable)
+	}
+	if got := m.browserSelectable(); got != wantSelectable {
+		t.Errorf("browserSelectable = %v, want %v", got, wantSelectable)
+	}
+}
+
+// TestBrowserOpensInLoadingPhase covers the closed -> loading transition. A new
+// browser has no rows, so it is not selectable until a current listing supplies
+// at least one.
+func TestBrowserOpensInLoadingPhase(t *testing.T) {
+	m := newLaidOutModel()
+	assertBrowserPhase(t, m, browserClosed)
+
+	m, cmd := m.openSessionBrowser()
+	t.Cleanup(m.cancelSessionList)
+	assertBrowserPhase(t, m, browserLoading)
+	if cmd == nil {
+		t.Fatal("openSessionBrowser returned no listing command")
+	}
+	if view := m.View(); !strings.Contains(view, "loading sessions") {
+		t.Errorf("loading body missing:\n%s", view)
+	}
+}
+
+// TestBrowserListingSettlesEveryPhase covers loading -> ready, loading -> empty,
+// and loading -> error. The successful empty listing is its own phase, not a
+// ready list with zero rows.
+func TestBrowserListingSettlesEveryPhase(t *testing.T) {
+	sessions := []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}}
+	tests := []struct {
+		name     string
+		sessions []cake.SessionSummary
+		err      error
+		want     browserPhase
+		body     string
+	}{
+		{"ready", sessions, nil, browserReady, "11111111"},
+		{"empty", nil, nil, browserEmpty, "no sessions in project"},
+		{"error", nil, errors.New("boom"), browserError, "sessions unavailable: boom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newLaidOutModel()
+			m.cfg.Cwd = "/tmp/project"
+			m.browser.startLoading()
+			m.sessionListSeq, m.sessionListReq = 1, 1
+			tm, _ := m.Update(sessionsLoadedMsg{req: 1, sessions: tt.sessions, err: tt.err})
+			m = tm.(Model)
+			assertBrowserPhase(t, m, tt.want)
+			if view := m.View(); !strings.Contains(view, tt.body) {
+				t.Errorf("body missing %q:\n%s", tt.body, view)
+			}
+			if tt.want == browserError {
+				if !strings.Contains(m.browser.err, "boom") {
+					t.Errorf("browser error = %q, want the failure text", m.browser.err)
+				}
+				return
+			}
+			if m.browser.err != "" {
+				t.Errorf("successful listing retained an error: %q", m.browser.err)
+			}
+		})
+	}
+}
+
+// TestBrowserReopenReturnsToLoading covers ready, empty, and error -> loading.
+// Reopening must drop the previous rows and error before the replacement listing
+// starts, so no stale body remains visible behind the loading state.
+func TestBrowserReopenReturnsToLoading(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(*Model)
+		staleUI string
+	}{
+		{"ready", func(m *Model) {
+			m.sessionList.SetItems([]list.Item{sessionItem{title: "stale row"}})
+			m.browser.loaded(1)
+		}, "stale row"},
+		{"empty", func(m *Model) { m.browser.loaded(0) }, "no sessions in project"},
+		{"error", func(m *Model) { m.browser.failed("boom") }, "sessions unavailable: boom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newLaidOutModel()
+			m.cfg.Cwd = "/tmp/project"
+			tt.setup(&m)
+
+			m, cmd := m.openSessionBrowser()
+			t.Cleanup(m.cancelSessionList)
+			assertBrowserPhase(t, m, browserLoading)
+			if cmd == nil {
+				t.Fatal("openSessionBrowser returned no replacement listing command")
+			}
+			if m.browser.err != "" {
+				t.Errorf("reload retained the previous error: %q", m.browser.err)
+			}
+			if items := m.sessionList.Items(); len(items) != 0 {
+				t.Errorf("reload retained %d previous rows", len(items))
+			}
+			view := m.View()
+			if !strings.Contains(view, "loading sessions") {
+				t.Errorf("reload view missing the loading body:\n%s", view)
+			}
+			if strings.Contains(view, tt.staleUI) {
+				t.Errorf("reload view retained stale UI %q:\n%s", tt.staleUI, view)
+			}
+		})
+	}
+}
+
+// TestBrowserCloseReturnsToClosed covers loading, ready, empty, and error ->
+// closed. Closing hides the overlay and invalidates the request; the next View
+// must show the timeline, never a browser body.
+func TestBrowserCloseReturnsToClosed(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{"loading", func(m *Model) { m.browser.startLoading() }},
+		{"ready", func(m *Model) {
+			m.sessionList.SetItems([]list.Item{sessionItem{title: "row"}})
+			m.browser.loaded(1)
+		}},
+		{"empty", func(m *Model) { m.browser.loaded(0) }},
+		{"error", func(m *Model) { m.browser.failed("boom") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newLaidOutModel()
+			m.sessionListSeq, m.sessionListReq = 1, 1
+			tt.setup(&m)
+
+			m.closeBrowser()
+			m.syncViewport()
+			assertBrowserPhase(t, m, browserClosed)
+			if m.browser.err != "" {
+				t.Errorf("closed browser retained an error: %q", m.browser.err)
+			}
+			if m.sessionListReq != 0 {
+				t.Errorf("closed browser retained request identity %d", m.sessionListReq)
+			}
+			if view := m.View(); !strings.Contains(view, "cake-repl — /help for commands") {
+				t.Errorf("closed browser did not restore the timeline:\n%s", view)
+			}
+		})
+	}
 }
 
 // sessionsListingCommand returns the session-listing command from the command
@@ -86,8 +253,8 @@ exit 0
 
 	tm, cmd := m.execCommand(Command{Kind: CmdSessions})
 	m = tm.(Model)
-	if !m.browserOpen || !m.browserLoading {
-		t.Fatalf("browser not opened/loading: open=%v loading=%v", m.browserOpen, m.browserLoading)
+	if !m.browser.open() || !m.browser.loading() {
+		t.Fatalf("browser not opened/loading: open=%v loading=%v", m.browser.open(), m.browser.loading())
 	}
 	if cmd == nil {
 		t.Fatal("expected a load command")
@@ -99,7 +266,7 @@ exit 0
 
 	tm, _ = m.Update(sessionsListingCommand(t, cmd)())
 	m = tm.(Model)
-	if m.browserLoading {
+	if m.browser.loading() {
 		t.Error("browser still loading after the listing arrived")
 	}
 	if len(m.sessionList.Items()) != 2 {
@@ -151,8 +318,8 @@ exit 0
 	m.width, m.height = 80, 24
 	m.layout()
 
-	if !m.browserOpen || !m.browserLoading {
-		t.Fatalf("startup picker not open: open=%v loading=%v", m.browserOpen, m.browserLoading)
+	if !m.browser.open() || !m.browser.loading() {
+		t.Fatalf("startup picker not open: open=%v loading=%v", m.browser.open(), m.browser.loading())
 	}
 	// No session was named, so nothing is hydrated and nothing is pinned.
 	if m.replay.phase() != replayIdle {
@@ -169,7 +336,7 @@ exit 0
 	}
 
 	m = startupListing(t, m)
-	if m.browserLoading {
+	if m.browser.loading() {
 		t.Error("browser still loading after the listing arrived")
 	}
 	if len(m.sessionList.Items()) != 1 {
@@ -184,9 +351,9 @@ exit 0
 // timeline, issues no listing, and starts fresh.
 func TestStartupPickerOnlyOpensWhenRequested(t *testing.T) {
 	m := New(Config{Cwd: t.TempDir()})
-	if m.browserOpen || m.browserLoading || m.startupCmd != nil {
+	if m.browser.open() || m.browser.loading() || m.startupCmd != nil {
 		t.Fatalf("plain startup opened the picker: open=%v loading=%v cmd=%v",
-			m.browserOpen, m.browserLoading, m.startupCmd)
+			m.browser.open(), m.browser.loading(), m.startupCmd)
 	}
 	if mode, id := m.session.RunOptions(); mode != cake.RunFresh || id != "" {
 		t.Errorf("run options = (%v, %q), want (fresh, no id)", mode, id)
@@ -222,7 +389,7 @@ exit 0
 	m = tm.(Model)
 	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := tm.(Model)
-	if got.browserOpen {
+	if got.browser.open() {
 		t.Error("Enter should close the startup picker")
 	}
 	if mode, id := got.session.RunOptions(); mode != cake.RunResume || id != browserID2 {
@@ -251,18 +418,18 @@ exit 0
 
 func TestSessionsLoadedErrorKeepsBrowserOpen(t *testing.T) {
 	m := browserModel(t, nil)
-	m.browserLoading = true
+	m.browser.startLoading()
 
 	tm, _ := m.Update(sessionsLoadedMsg{req: m.sessionListReq, err: errors.New("cake exploded\x1b[2J")})
 	got := tm.(Model)
-	if got.browserLoading {
+	if got.browser.loading() {
 		t.Error("browser still loading after an error")
 	}
-	if !got.browserOpen {
+	if !got.browser.open() {
 		t.Error("error should leave the browser open")
 	}
-	if !strings.Contains(got.browserErr, "cake exploded") {
-		t.Errorf("browserErr = %q", got.browserErr)
+	if !strings.Contains(got.browser.err, "cake exploded") {
+		t.Errorf("browser error = %q", got.browser.err)
 	}
 	view := got.View()
 	if !strings.Contains(view, "cake exploded") {
@@ -291,7 +458,7 @@ func TestBrowserEnterPinsSelectedSession(t *testing.T) {
 	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := tm.(Model)
 	requireTitle(t, cmd, windowTitle(got.cfg.Cwd, ""))
-	if got.browserOpen {
+	if got.browser.open() {
 		t.Error("Enter should close the browser")
 	}
 	if got.session.ResumeID != browserID2 {
@@ -317,8 +484,8 @@ func TestBrowserEnterIgnoredWhileReloading(t *testing.T) {
 	beforeMode, beforeID := m.session.RunOptions()
 
 	m, cmd := m.openSessionBrowser()
-	if !m.browserOpen || !m.browserLoading {
-		t.Fatalf("reopen: open=%v loading=%v", m.browserOpen, m.browserLoading)
+	if !m.browser.open() || !m.browser.loading() {
+		t.Fatalf("reopen: open=%v loading=%v", m.browser.open(), m.browser.loading())
 	}
 	if cmd == nil {
 		t.Fatal("expected a reload command")
@@ -333,7 +500,7 @@ func TestBrowserEnterIgnoredWhileReloading(t *testing.T) {
 
 	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(Model)
-	if !got.browserOpen {
+	if !got.browser.open() {
 		t.Error("Enter during a reload must leave the browser open")
 	}
 	if mode, id := got.session.RunOptions(); mode != beforeMode || id != beforeID {
@@ -363,7 +530,7 @@ func TestBrowserEnterIgnoredAfterFailedReload(t *testing.T) {
 
 	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := tm.(Model)
-	if !got.browserOpen {
+	if !got.browser.open() {
 		t.Error("Enter after a failed reload must leave the browser open")
 	}
 	if mode, id := got.session.RunOptions(); mode != beforeMode || id != beforeID {
@@ -380,7 +547,7 @@ func TestBrowserEnterIgnoredOnEmptyListing(t *testing.T) {
 
 	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := tm.(Model)
-	if !got.browserOpen {
+	if !got.browser.open() {
 		t.Error("Enter on an empty listing must leave the browser open")
 	}
 	if mode, id := got.session.RunOptions(); mode != beforeMode || id != beforeID {
@@ -404,7 +571,7 @@ func TestBrowserEnterSelectsOnlyTheCurrentListing(t *testing.T) {
 	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := tm.(Model)
 	requireTitle(t, cmd, windowTitle(got.cfg.Cwd, ""))
-	if got.browserOpen {
+	if got.browser.open() {
 		t.Error("Enter should close the browser")
 	}
 	if got.session.ResumeID != browserID2 {
@@ -426,7 +593,7 @@ func TestBrowserCloseKeysLeaveNoState(t *testing.T) {
 		tm, cmd := m.handleKey(k)
 		got := tm.(Model)
 		requireTitle(t, cmd, windowTitle(got.cfg.Cwd, ""))
-		if got.browserOpen {
+		if got.browser.open() {
 			t.Errorf("%v should close the browser", k)
 		}
 		if got.session.ResumeID != "" {
@@ -468,8 +635,7 @@ func TestBrowserEmptyState(t *testing.T) {
 
 func TestBrowserLoadingState(t *testing.T) {
 	m := newLaidOutModel()
-	m.browserOpen = true
-	m.browserLoading = true
+	m.browser.startLoading()
 	if got := m.View(); !strings.Contains(got, "loading sessions") {
 		t.Errorf("loading state missing:\n%s", got)
 	}
@@ -505,21 +671,23 @@ func TestBrowserViewStaysWithinTimelineRegion(t *testing.T) {
 		height int
 		setup  func(*Model)
 	}{
-		{"loading", 80, 24, func(m *Model) { m.browserOpen, m.browserLoading = true, true }},
+		{"loading", 80, 24, func(m *Model) { m.browser.startLoading() }},
 		{"list", 80, 24, func(m *Model) {
-			m.browserOpen = true
-			tm, _ := m.Update(sessionsLoadedMsg{sessions: sessions})
+			m.browser.startLoading()
+			m.sessionListSeq, m.sessionListReq = 1, 1
+			tm, _ := m.Update(sessionsLoadedMsg{req: 1, sessions: sessions})
 			*m = tm.(Model)
 		}},
-		{"empty", 80, 24, func(m *Model) { m.browserOpen = true }},
-		{"error", 80, 24, func(m *Model) { m.browserOpen, m.browserErr = true, longErr }},
-		{"narrow error", 20, 24, func(m *Model) { m.browserOpen, m.browserErr = true, longErr }},
+		{"empty", 80, 24, func(m *Model) { m.browser.loaded(0) }},
+		{"error", 80, 24, func(m *Model) { m.browser.failed(longErr) }},
+		{"narrow error", 20, 24, func(m *Model) { m.browser.failed(longErr) }},
 		{"narrow list", 20, 24, func(m *Model) {
-			m.browserOpen = true
-			tm, _ := m.Update(sessionsLoadedMsg{sessions: sessions})
+			m.browser.startLoading()
+			m.sessionListSeq, m.sessionListReq = 1, 1
+			tm, _ := m.Update(sessionsLoadedMsg{req: 1, sessions: sessions})
 			*m = tm.(Model)
 		}},
-		{"height 1 error", 20, 7, func(m *Model) { m.browserOpen, m.browserErr = true, longErr }},
+		{"height 1 error", 20, 7, func(m *Model) { m.browser.failed(longErr) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -548,7 +716,7 @@ func TestSessionsRejectedWhileRunning(t *testing.T) {
 
 	tm, _ := m.execCommand(Command{Kind: CmdSessions})
 	got := tm.(Model)
-	if got.browserOpen {
+	if got.browser.open() {
 		t.Error("the browser must not open while a task is running")
 	}
 	if it := lastItem(t, got); it.Kind != ui.KindWarning {
@@ -562,7 +730,7 @@ func TestSessionsRejectedWhileHydrating(t *testing.T) {
 
 	tm, _ := m.execCommand(Command{Kind: CmdSessions})
 	got := tm.(Model)
-	if got.browserOpen {
+	if got.browser.open() {
 		t.Error("the browser must not open while history is loading")
 	}
 	if it := lastItem(t, got); it.Kind != ui.KindWarning {
@@ -705,11 +873,11 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 	// error, still loading B.
 	next, _ := m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID2, FirstPrompt: "stale"}}})
 	m = next.(Model)
-	if !m.browserLoading {
+	if !m.browser.loading() {
 		t.Error("a superseded result cleared B's loading state")
 	}
-	if m.browserErr != "" {
-		t.Errorf("a superseded success set an error: %q", m.browserErr)
+	if m.browser.err != "" {
+		t.Errorf("a superseded success set an error: %q", m.browser.err)
 	}
 	if items := m.sessionList.Items(); len(items) != 0 {
 		t.Errorf("a superseded result put %d rows on screen", len(items))
@@ -718,10 +886,10 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 	// A late failure from A must be ignored too.
 	next, _ = m.Update(sessionsLoadedMsg{req: reqA, err: errors.New("stale failure")})
 	m = next.(Model)
-	if m.browserErr != "" {
-		t.Errorf("a superseded error reached the browser: %q", m.browserErr)
+	if m.browser.err != "" {
+		t.Errorf("a superseded error reached the browser: %q", m.browser.err)
 	}
-	if !m.browserLoading {
+	if !m.browser.loading() {
 		t.Error("a superseded error stopped B's load")
 	}
 
@@ -731,7 +899,7 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 		{SessionID: browserID2, FirstPrompt: "current two"},
 	}})
 	m = next.(Model)
-	if m.browserLoading {
+	if m.browser.loading() {
 		t.Error("B's result left the browser loading")
 	}
 	if len(m.sessionList.Items()) != 2 {
@@ -757,6 +925,15 @@ func TestSessionsReloadSupersedesLateListing(t *testing.T) {
 	if m.sessionList.Index() != 1 {
 		t.Errorf("a late result reset the selection: cursor = %d, want 1", m.sessionList.Index())
 	}
+
+	// A late failure must be ignored by the same identity check: it cannot move
+	// B out of ready or plant an error behind its rows.
+	next, _ = m.Update(sessionsLoadedMsg{req: reqA, err: errors.New("late failure")})
+	m = next.(Model)
+	assertBrowserPhase(t, m, browserReady)
+	if m.browser.err != "" {
+		t.Errorf("a late failure reached the ready browser: %q", m.browser.err)
+	}
 }
 
 // TestBrowserCloseCancelsInFlightListing: closing the browser cancels the
@@ -768,7 +945,7 @@ func TestBrowserCloseCancelsInFlightListing(t *testing.T) {
 
 	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	got := tm.(Model)
-	if got.browserOpen {
+	if got.browser.open() {
 		t.Fatal("Esc must close the browser")
 	}
 	if got.sessionListCancel != nil {
@@ -784,9 +961,9 @@ func TestBrowserCloseCancelsInFlightListing(t *testing.T) {
 	msg := awaitListing(t, done)
 	tm, _ = got.Update(msg)
 	got = tm.(Model)
-	if got.browserOpen || len(got.sessionList.Items()) != 0 || got.browserErr != "" || got.browserLoading {
+	if got.browser.open() || len(got.sessionList.Items()) != 0 || got.browser.err != "" || got.browser.loading() {
 		t.Errorf("a canceled listing touched the closed browser: open=%v loading=%v err=%q items=%d",
-			got.browserOpen, got.browserLoading, got.browserErr, len(got.sessionList.Items()))
+			got.browser.open(), got.browser.loading(), got.browser.err, len(got.sessionList.Items()))
 	}
 }
 
@@ -808,8 +985,8 @@ func TestSessionsReopenCancelsPriorListing(t *testing.T) {
 	// A's late result is superseded and ignored.
 	next, _ := m.Update(sessionsLoadedMsg{req: reqA, sessions: []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "stale"}}})
 	m = next.(Model)
-	if !m.browserLoading || len(m.sessionList.Items()) != 0 {
-		t.Errorf("stale result touched the replacement: loading=%v items=%d", m.browserLoading, len(m.sessionList.Items()))
+	if !m.browser.loading() || len(m.sessionList.Items()) != 0 {
+		t.Errorf("stale result touched the replacement: loading=%v items=%d", m.browser.loading(), len(m.sessionList.Items()))
 	}
 	// Leave no listing running.
 	m.closeBrowser()
@@ -893,9 +1070,9 @@ EOF
 
 	updated, _ := m.Update(awaitListing(t, done))
 	m = updated.(Model)
-	if m.browserOpen || m.browserErr != "" || len(m.sessionList.Items()) != 0 {
+	if m.browser.open() || m.browser.err != "" || len(m.sessionList.Items()) != 0 {
 		t.Fatalf("late listing result touched the closed browser: open=%v err=%q items=%d",
-			m.browserOpen, m.browserErr, len(m.sessionList.Items()))
+			m.browser.open(), m.browser.err, len(m.sessionList.Items()))
 	}
 }
 
@@ -922,7 +1099,7 @@ func TestPromptUsableAfterClosingBrowser(t *testing.T) {
 
 	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	m = tm.(Model)
-	if m.browserOpen {
+	if m.browser.open() {
 		t.Fatal("Esc must close the browser")
 	}
 

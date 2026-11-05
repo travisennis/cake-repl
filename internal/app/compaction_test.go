@@ -766,7 +766,7 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 			t.Fatalf("%s while the canceled compactor drained = %+v", tt.name, it)
 		}
 	}
-	if m.browserOpen {
+	if m.browser.open() {
 		t.Fatal("/sessions opened the browser while the canceled compactor drained")
 	}
 	if mode, id := m.session.RunOptions(); mode != cake.RunResume || id != compactionSessionID {

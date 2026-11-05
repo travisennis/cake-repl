@@ -49,14 +49,14 @@ func (m Model) browserView(p presentation) string {
 	capBody := lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(bodyHeight)
 
 	var body string
-	switch {
-	case m.browserLoading:
+	switch m.browser.phase {
+	case browserLoading:
 		body = fill.Render(m.theme.Debug.Render("loading sessions…"))
-	case m.browserErr != "":
-		body = fill.Render(m.theme.Warning.Render("sessions unavailable: " + ui.Sanitize(m.browserErr)))
-	case len(m.sessionList.Items()) == 0:
+	case browserError:
+		body = fill.Render(m.theme.Warning.Render("sessions unavailable: " + ui.Sanitize(m.browser.err)))
+	case browserEmpty:
 		body = fill.Render(m.theme.Info.Render("no sessions in " + ui.Sanitize(filepath.Base(m.cfg.Cwd))))
-	default:
+	case browserReady:
 		body = capBody.Render(m.sessionList.View())
 	}
 	if m.viewport.Height <= 1 {
