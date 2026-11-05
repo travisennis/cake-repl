@@ -64,9 +64,12 @@ deferred; 144 stays independent.
 - [x] (2026-11-05T02:19Z) 139: derived one replay phase for idle, live
   hydration, and the post-boundary drain; keyed records and the result to the
   session generation; and added the drain-specific prompt/retarget refusals.
-- [ ] 143: derive title, status, composer activity, hint, and view from the
-  presentation state.
-- [ ] Move this plan to `docs/exec-plans/completed/` when 143 lands.
+- [x] (2026-11-05T12:39Z) 143: derived title, status, composer
+  activity, hint, and browser/timeline selection from one
+  `presentationState()`; added a reachable-state table and finalized the new
+  title markers and operation labels.
+- [x] (2026-11-05T12:39Z) Moved this plan to
+  `docs/exec-plans/completed/`.
 
 ## Surprises & Discoveries
 
@@ -107,7 +110,25 @@ deferred; 144 stays independent.
   Evidence: `internal/app/suggestion.go` `cancelSuggestion`; `internal/app/sessions.go`
   `cancelSessionList`; `internal/app/compaction.go` `cancelCompaction`.
 
+- Observation: `composerHint` advertised `Ctrl+S submit` during a live run
+  even though `admitPrompt` refused the submission, and the title only changed
+  on run and compaction transitions. Task 143 made both read the presentation
+  state and emit the title command on replay settlement, cancellation drains,
+  browser open/close, and exit.
+  Evidence: `internal/app/view.go` before 143 and `internal/app/update.go`
+  transition handlers.
+
 ## Decision Log
+
+- Decision: the title markers are `[working]` for a live run, `[compacting]`
+  for compaction, `[loading]` for replay hydration, `[stopping]` for a canceled
+  run, replay, or compaction that is still draining, `[browsing]` for the
+  session browser, and `[exiting]` while the REPL waits for children. The
+  status and composer carry the drain-specific labels, while one `[stopping]`
+  marker keeps the terminal title stable across the three draining operations.
+  Rationale: the title is narrow and exists to name that the REPL is still busy;
+  the status line and composer have room to say which operation is stopping.
+  Date/Author: 2026-11-05 / Travis Ennis.
 
 - Decision: one private lifecycle state per operation, with exactly `idle`,
   `in-flight`, and `draining` phases. `outcomeSuccess`, `outcomeNoOp`,
@@ -573,7 +594,7 @@ The design is complete when all of the following are observable:
 - The invariant matrix and migration order are explicit, and each slice has a
   behavioral test list.
 - `ARCHITECTURE.md` contains the durable invariant.
-- This plan is in `docs/exec-plans/active/` and is linked from task 137.
+- This plan is in `docs/exec-plans/completed/` and is linked from task 137.
 
 Per-slice behavioral tests:
 
@@ -654,22 +675,25 @@ Required state transitions:
 
 ## Outcomes & Retrospective
 
-The design milestone is complete. It replaces the ad-hoc lifecycle flags with
-one private phase model, separates completion outcomes and ghost presentation
-from phases, defines a monotonic session generation, and gives every caller a
-single admission source with exact refusal texts. It also records the
-resource-busy gate policy explicitly: run, compaction, and canceled replay
-block prompt and retarget until reaped; suggestion and listing drains never
-gate.
+The implementation is complete. Tasks 147, 138, 140, 141, 139, and 143
+replaced the ad-hoc lifecycle flags with one private phase model, separated
+completion outcomes and ghost presentation from phases, defined a monotonic
+session generation, and gave every caller one admission source and one
+presentation derivation. The final presentation state names `ready` in the
+composer and `idle` on the status line, covers every reachable run, drain,
+hydration, browser, suggestion, and exit state, and keeps the hint limited to
+actions the current gate accepts. The resource-busy policy is explicit: run,
+compaction, and canceled replay block prompt and retarget until reaped;
+suggestion and listing drains never gate.
 
-The implementation is not complete. This plan stays in the active bucket
-until task 143 lands; its Progress section tracks the remaining slices. The
-main lesson is that `newSessionPending` conflated two concerns that must stay
-separate in the implementation: generation invalidation and resource-busy
-draining. The design's settlement order is the guard against reproducing the
-stale gate.
+The main lesson is that `newSessionPending` conflated two concerns that must
+stay separate: generation invalidation and resource-busy draining. The design's
+settlement order is the guard against reproducing the stale gate. A second
+lesson is that every presentation transition needs an explicit title update;
+drawing the title from the derived state is not enough if the transition never
+emits the command.
 
 No ADR is added because the external behavior is already governed by ADR 001,
 ADR 004, ADR 011, ADR 023, ADR 028, ADR 031, and ADR 034. The durable
-architecture change is recorded in `ARCHITECTURE.md`; the user-facing status
-and refusal wording changes are assigned to tasks 139 and 143.
+architecture change is recorded in `ARCHITECTURE.md`; the final user-facing
+labels and markers are documented in `README.md` and the CLI/output guardrail.

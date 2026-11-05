@@ -429,9 +429,7 @@ func TestReplayStartupFailureShowsWarningImmediately(t *testing.T) {
 
 	tm, cmd := m.Update(start)
 	m = tm.(Model)
-	if cmd != nil {
-		t.Fatal("failed replay startup returned an unexpected command")
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, ""))
 	if m.replay.phase() != replayIdle {
 		t.Fatalf("failed replay left hydration active: phase=%v", m.replay.phase())
 	}
@@ -460,9 +458,10 @@ func TestReplayStartupFailureHonorsPendingExit(t *testing.T) {
 
 	tm, cmd := m.execCommand(Command{Kind: CmdExit})
 	m = tm.(Model)
-	if !m.exiting() || cmd != nil {
-		t.Fatalf("exit while hydrating: exiting=%v cmd set=%v", m.exiting(), cmd != nil)
+	if !m.exiting() {
+		t.Fatalf("exit while hydrating did not enter the exit phase")
 	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[exiting]"))
 
 	tm, cmd = m.Update(start)
 	m = tm.(Model)
@@ -494,18 +493,14 @@ func TestReplayStartupFailureAfterNewSessionStaysBehindTheBoundary(t *testing.T)
 
 	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Fatalf("ctrl+n returned a command: %v", cmd)
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[stopping]"))
 	if m.replay.phase() != replayDraining {
 		t.Fatalf("ctrl+n state: phase=%v", m.replay.phase())
 	}
 
 	tm, cmd = m.Update(start)
 	m = tm.(Model)
-	if cmd != nil {
-		t.Fatal("failed startup after ctrl+n returned a command")
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, ""))
 	if m.replay.phase() != replayIdle {
 		t.Fatalf("failed startup left the replay active after ctrl+n: phase=%v", m.replay.phase())
 	}
@@ -592,9 +587,7 @@ printf '%s\n' '{"type":"task_complete","subtype":"success","is_error":false,"ses
 
 	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Fatalf("ctrl+n returned a command: %v", cmd)
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[stopping]"))
 	if got := m.replay.phase(); got != replayDraining {
 		t.Fatalf("replay phase after ctrl+n = %v, want draining", got)
 	}
@@ -618,9 +611,7 @@ printf '%s\n' '{"type":"task_complete","subtype":"success","is_error":false,"ses
 
 	tm, cmd = m.finishReplay(replayDoneMsg{key: key, res: cake.Result{Canceled: true}})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Fatalf("settled replay returned a command: %v", cmd)
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, ""))
 	if got := m.replay.phase(); got != replayIdle {
 		t.Fatalf("replay phase after result = %v, want idle", got)
 	}

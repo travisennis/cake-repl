@@ -382,7 +382,19 @@ func (m Model) quit() (Model, tea.Cmd) {
 	m.cancelSuggestion()
 	m.cancelSessionList()
 	m.syncViewport()
-	return m.maybeQuit()
+	return m.afterPresentationChange()
+}
+
+// afterPresentationChange returns tea.Quit when the exit phase has finished
+// draining, or the title command for the state the transition just entered.
+// Transitions that can settle or start a drain use this so the title keeps
+// naming the operation the status line and composer show.
+func (m Model) afterPresentationChange() (Model, tea.Cmd) {
+	next, cmd := m.maybeQuit()
+	if cmd != nil {
+		return next, cmd
+	}
+	return next, next.titleCmd()
 }
 
 // maybeQuit returns tea.Quit only once every operation is idle. A resource-busy
@@ -414,7 +426,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// A draining run is also re-canceled; its key stays until the reaped
 			// result settles it, so the gate cannot open early.
 			m.cancelRun()
-			return m, nil
+			return m, m.titleCmd()
 		}
 		if m.compactionBusy() {
 			// Keep the compaction gate closed until the child exits and the
@@ -422,7 +434,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// The reaped result supplies the one "canceled" notice, matching a
 			// canceled run, so no second notice is added here.
 			m.cancelCompaction()
-			return m, nil
+			return m, m.titleCmd()
 		}
 		return m.quit()
 
@@ -497,7 +509,7 @@ func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "ctrl+c":
 		m.closeBrowser()
-		return m, nil
+		return m, m.titleCmd()
 	case "enter":
 		// Only a row from the current successful listing is selectable: while a
 		// reload is in flight, after a failed reload, or on an empty listing the
@@ -508,7 +520,9 @@ func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if it, ok := m.sessionList.SelectedItem().(sessionItem); ok {
 			m.closeBrowser()
-			return m.resumeSession(it.summary.SessionID)
+			next, _ := m.resumeSession(it.summary.SessionID)
+			model := next.(Model)
+			return model, model.titleCmd()
 		}
 		return m, nil
 	case "up", "down", "pgup", "pgdown", "home", "end":
@@ -525,6 +539,7 @@ func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // or re-pin the new session.
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.clearSuggestion()
+	busy := m.runBusy() || m.replayBusy() || m.compactionBusy()
 	// Advance the generation before canceling the old children, so any result
 	// already queued still carries the old key and can only settle its drain.
 	m.session.Reset()
@@ -546,6 +561,9 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.timeline.clear()
 	m.pendingCalls = map[string]*ui.ToolBlock{}
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "New session"})
+	if busy {
+		return m, m.titleCmd()
+	}
 	return m, nil
 }
 
@@ -753,7 +771,8 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		return m.resumeSession(cmd.Arg)
 
 	case CmdSessions:
-		return m.openSessionBrowser()
+		next, cmd := m.openSessionBrowser()
+		return next, tea.Batch(cmd, next.titleCmd())
 
 	case CmdSession:
 		if cmd.Arg == "copy" {

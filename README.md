@@ -14,9 +14,11 @@ instead.
 Labeled user and assistant sections anchor the conversation. Assistant response
 bodies have no decorative prefix, so multiline terminal selections can be copied
 cleanly; operational events remain compact and visually distinct.
-The status line leads with current idle/running/compacting state (with the
-compactor's elapsed seconds while one runs), followed by labeled session,
-next-run, model, context, and working-directory context. The model
+The status line leads with the current operation — `idle`, `running`,
+`compacting` (with the compactor's elapsed seconds while one runs),
+`stopping task`, `stopping compaction`, `loading history`,
+`stopping history`, `browsing sessions`, or `exiting` — followed by labeled
+session, next-run, model, context, and working-directory context. The model
 shown is the identity cake reports on the stream once available — the
 `[[models]]` entry name, falling back to the provider model ID — and otherwise
 the `-model`/config value. The context segment reports the newest complete
@@ -90,8 +92,11 @@ cake-repl -cake-bin ../cake/target/debug/cake
 ```
 
 While running, cake-repl sets the terminal title to
-`cake-repl: <absolute working directory>`. While a task is in flight, a
-`[working]` marker prefixes that title and is removed when the run ends, so an
+`cake-repl: <absolute working directory>`. A marker prefixes that title while an
+operation is active: `[working]` for a task, `[compacting]` for context
+compaction, `[loading]` for history hydration, `[stopping]` for a canceled
+child that is still draining, `[browsing]` for the session browser, and
+`[exiting]` while the REPL waits for children to exit. Idle has no marker, so an
 unfocused window or a tab still shows whether the REPL is busy. The `-cwd` flag
 selects that working directory; otherwise cake-repl uses the directory where it
 was started. Relative `-add-dir` paths resolve against that working directory,
@@ -161,8 +166,8 @@ another policy (`read-only`, `workspace-write`, `workspace-write-interactive`, o
 | `Enter` | insert newline |
 | `Tab` | complete slash commands |
 | `Ctrl+S` | submit prompt, or the shown suggestion when the input is empty |
-| `Ctrl+C` | cancel running cake task or context compaction; quit when idle |
-| `Ctrl+N` | start a new session (cancels a running task or compaction) |
+| `Ctrl+C` | cancel a running cake task or context compaction; cancel hydration and exit; quit when idle |
+| `Ctrl+N` | start a new session (cancels a running task, hydration, or compaction) |
 | `Ctrl+U` | clear input |
 | `Ctrl+O` | cycle all tool output (starts hidden): truncated / full / hidden |
 | `Ctrl+Y` | copy the last assistant response (markdown) to the clipboard |
@@ -189,7 +194,7 @@ down. The status line and timeline only show it shortened.
 | Command | Action |
 |---|---|
 | `/help` | show commands and keybindings |
-| `/exit` `/quit` `/q` | exit (cancels a running task or compaction first, then exits) |
+| `/exit` `/quit` `/q` | exit (cancels a running task, hydration, or compaction first, then exits) |
 | `/new` | next prompt starts a fresh cake session |
 | `/resume <uuid>` | next prompt uses `cake --resume <uuid>` |
 | `/sessions` | browse this directory's past sessions and resume one |

@@ -71,15 +71,16 @@ commands or help text (`internal/app/commands.go`), key bindings
   `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
   stable. `/new`, `/resume`, and `/sessions` require an idle REPL (no live or
   draining run, replay, or compaction); `Ctrl+N` remains the cancel-and-reset
-  operation during an active run or compaction, and `/exit` cancels either
-  before exiting. A canceled child still gates prompt submission and session
-  retargeting until it has been reaped.
+  operation during an active run, hydration, or compaction, and `/exit` cancels
+  any of them before exiting. A canceled child still gates prompt submission and
+  session retargeting until it has been reaped.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (submit; when the input is
   empty, submit the shown suggestion), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden, starting from hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
-  (scroll). `Ctrl+C` cancels a running task or compaction and quits only when
-  idle; `Ctrl+N` cancels either and starts a new session. A canceled run remains
+  (scroll). `Ctrl+C` cancels a running task or compaction, cancels hydration
+  and exits, and quits only when idle; `Ctrl+N` cancels a run, hydration, or
+  compaction and starts a new session. A canceled run remains
   resource-busy until its result is settled. While the `/sessions` browser is open its keys are modal:
   `Up`/`Down`, `PgUp`/`PgDn`, and `Home`/`End` move the selection, `Enter`
   resumes the highlighted session, and `Esc`, `q`, or `Ctrl+C` close it.
@@ -98,9 +99,10 @@ prompt; `Enter` pins the next prompt to the selected session through the same
 path as `/resume <uuid>`, and `Esc` or `q` closes the list without action. The
 overlay is modal: while open it consumes keys before the composer, and it keeps
 the timeline's height so the composer and status line do not move. Loading,
-empty ("no sessions in <dir>"), and failure states render in place of the list;
-a listing failure is never fatal and never blocks input. `-no-color` renders it
-in plain text like every other surface.
+empty ("no sessions in <dir>"), and failure states render in place of the list
+and the hint offers only `esc close`; a selectable list adds the move and Enter
+hints. A listing failure is never fatal and never blocks input. `-no-color`
+renders it in plain text like every other surface.
 - **Startup resume.** `-resume <uuid>` first invokes the read-only
   `cake --output-format stream-json replay <uuid>` command. It hydrates the
   visible timeline before the first prompt; failures show a warning and keep
@@ -142,8 +144,10 @@ in plain text like every other surface.
   (e.g. a `summary`) is never shown because providers differ in what they emit.
   Reasoning and tool output remain secondary, while task starts, info,
   completions, warnings, and errors use distinct compact markers. The one-line
-  status display leads with a bracketed idle/running/compacting state, followed
-  by labeled session, next-run, optional
+  status display leads with a bracketed operational state: `idle`, `running`,
+  `compacting <elapsed>`, `stopping task`, `stopping compaction`,
+  `loading history`, `stopping history`, `browsing sessions`, or `exiting`,
+  followed by labeled session, next-run, optional
   model, optional context, and cwd context; the model is the identity cake
   reported on the stream once available (the `[[models]]` entry name, falling
   back to the provider model ID), else the `-model`/config value, and a new
@@ -178,27 +182,30 @@ in plain text like every other surface.
   field names the id cake
   reported for the current session and carries none after a retarget until the
   new target reports one, while the next-run field names the pinned target. It
-  pads or truncates to the terminal width. The prompt
-  textarea is framed as
-  a focused composer with ready/running/compacting state and concise submit,
-  newline, and help hints; it names the operation that is in flight while a
-  task or compaction runs, including the compactor's elapsed age
-  (`prompt · compacting 12s`), and its borders remain visible without color.
+  pads or truncates to the terminal width. The prompt textarea is framed as a
+  focused composer whose state is `ready`, `running`, `compacting <elapsed>`,
+  `stopping task`, `stopping compaction`, `loading history`, `stopping history`,
+  `browsing sessions`, or `exiting`; its borders remain visible without color.
   When a prompt suggestion is showing, the empty composer renders it as dim
   placeholder ghost text and the footer reads
   `Ctrl+S use suggestion · type to dismiss`; the textarea value stays empty,
   so typing inserts only the user's characters. The ghost is never parsed as a
-  slash command when accepted. While the compactor runs the footer hints name
-  `Ctrl+C cancel` and
-  `Ctrl+N new session` instead of submit, because the prompt gate is closed.
-  While
-  the TUI is running, the terminal title is `cake-repl: <absolute working directory>`,
-  using the directory selected by `-cwd` or the startup directory by default.
-  The title carries a `[working]` prefix while a task is in flight, a
-  `[compacting]` prefix while the compactor runs, and neither when idle, because
-  the status line and composer are both invisible
-  when the window is unfocused, minimized, or reduced to a tab. The title never
-  names a state the REPL has left: the model re-sets it on every run-state
+  slash command when accepted. The footer advertises only actions the current
+  gate accepts: submit, newline, and help while idle;
+  `Ctrl+C cancel · Ctrl+N new session` while a task or compaction is in flight;
+  `Ctrl+N new session` while one drains;
+  `Ctrl+C exit · Ctrl+N new session` during history hydration; the browser's
+  move, resume, and close keys while it is open; and a wait notice while
+  exiting. While the compactor runs the composer state carries its elapsed age,
+  for example `prompt · compacting 12s`. While the TUI is running, the terminal
+  title is `cake-repl: <absolute working directory>`, using the directory
+  selected by `-cwd` or the startup directory by default.
+  The title carries `[working]` while a task is in flight, `[compacting]` while
+  the compactor runs, `[loading]` while history hydrates, `[stopping]` while a
+  canceled run, replay, or compaction drains, `[browsing]` while the session
+  browser is open, and `[exiting]` while the REPL waits for children to exit;
+  idle has no marker. The title never
+  names a state the REPL has left: the model re-sets it on every presentation
   transition, and `main` writes the idle title sequence once the program
   returns, which covers the exits the model never observes (SIGINT, SIGTERM, a
   recovered panic). That sequence is written only to a terminal, never into

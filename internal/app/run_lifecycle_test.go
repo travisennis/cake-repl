@@ -260,8 +260,9 @@ func TestCtrlNDuringRunKeepsGateClosedUntilReaped(t *testing.T) {
 	m.session.OnTaskStart(cake.TaskStart{SessionID: oldID, TaskID: "t-1"})
 	oldGeneration := m.session.Generation()
 
-	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
 	m = tm.(Model)
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[stopping]"))
 	if !m.runOp.draining() {
 		t.Fatal("Ctrl+N did not put the run into its drain phase")
 	}
@@ -270,7 +271,7 @@ func TestCtrlNDuringRunKeepsGateClosedUntilReaped(t *testing.T) {
 	}
 
 	m.input.SetValue("after the boundary")
-	tm, cmd := m.submit()
+	tm, cmd = m.submit()
 	m = tm.(Model)
 	if cmd != nil {
 		t.Fatalf("prompt during the run drain returned a command: %v", cmd)
@@ -367,9 +368,7 @@ func TestCtrlCCancelsRunIntoDrain(t *testing.T) {
 
 	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Fatalf("Ctrl+C during a run returned %v, want no command", cmd)
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[stopping]"))
 	if !canceled {
 		t.Fatal("Ctrl+C did not ask the run child to stop")
 	}

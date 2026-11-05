@@ -8,7 +8,8 @@ import (
 )
 
 // PromptComposer renders the textarea content as the active input region.
-// state is the ready, running, or compacting label shown in the top border. The
+// state is the current operation label (for example ready, running, compacting,
+// loading history, browsing sessions, or exiting) shown in the top border. The
 // returned block is exactly width cells wide on every line.
 func PromptComposer(th Theme, content string, width int, state string, lineCount int, hint string) string {
 	if width <= 0 {

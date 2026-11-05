@@ -725,8 +725,9 @@ func TestCtrlCCancelsCompactionAndKeepsGateUntilReaped(t *testing.T) {
 	done := runCompactionCmd(cmd)
 	before := len(m.timeline.items)
 
-	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	tm, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = tm.(Model)
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[stopping]"))
 	// Cancellation is reported once, when the child is reaped; the keypress
 	// itself adds no notice, matching the run path. The start notice is still
 	// pending while the child drains.
@@ -807,9 +808,7 @@ func TestExitWhileCompactingCancelsThenQuits(t *testing.T) {
 
 	tm, cmd := m.execCommand(Command{Kind: CmdExit})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Fatalf("/exit returned %v, want no command before the child is reaped", cmd)
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[exiting]"))
 	if !m.exiting() || !m.compactionBusy() {
 		t.Fatalf("/exit state = exiting:%v compacting:%v", m.exiting(), m.compactionBusy())
 	}
@@ -839,8 +838,9 @@ func TestCtrlNWhileCompactingResetsWithoutApplyingResult(t *testing.T) {
 	done := runCompactionCmd(cmd)
 	generation := m.session.Generation()
 
-	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
+	tm, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
 	m = tm.(Model)
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[stopping]"))
 	if !m.compaction.draining() {
 		t.Fatal("ctrl+n did not put the canceled compaction into its drain phase")
 	}

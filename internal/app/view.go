@@ -14,22 +14,23 @@ func (m Model) View() string {
 	if !m.ready {
 		return "starting cake-repl…"
 	}
+	p := m.presentationState()
 	body := m.viewport.View()
-	if m.browserOpen {
-		body = m.browserView()
+	if p.browser {
+		body = m.browserView(p)
 	}
 	composer := ui.PromptComposer(
 		m.theme,
 		m.input.View(),
 		m.width,
-		m.activityState(),
+		p.activityLabel(),
 		m.input.LineCount(),
-		m.composerHint(),
+		p.hint,
 	)
 	return strings.Join([]string{
 		body,
 		composer,
-		m.statusLine(),
+		m.statusLineFor(p),
 	}, "\n")
 }
 
@@ -38,7 +39,7 @@ func (m Model) View() string {
 // hint. It occupies the timeline's height so the composer and status line do
 // not move while the browser is open, so every state is bounded to the
 // timeline's width and height however long or multiline its text is.
-func (m Model) browserView() string {
+func (m Model) browserView(p presentation) string {
 	bodyHeight := browserBodyHeight(m.viewport.Height)
 	// fill pads a short text body to the full region and caps a long or
 	// multiline one; capBody only truncates, leaving the list's own layout
@@ -61,56 +62,35 @@ func (m Model) browserView() string {
 	if m.viewport.Height <= 1 {
 		return body
 	}
-	hint := m.theme.PromptHint.MaxWidth(m.width).MaxHeight(1).Render("↑/↓ move · enter resume · esc close")
+	hint := m.theme.PromptHint.MaxWidth(m.width).MaxHeight(1).Render(p.hint)
 	return body + "\n" + hint
 }
 
-// activityState names the state shown by the composer: a live task, the
-// between-turn compactor with its whole-second age, or idle. The status line
-// uses "idle" instead of "ready", but the two surfaces must never disagree
-// about which operation is in flight or how long it has been running.
+// activityState is the composer activity label for callers that do not already
+// hold the presentation value, such as focused tests.
 func (m Model) activityState() string {
-	switch {
-	case m.runBusy():
-		return "running"
-	case m.compactionBusy():
-		return m.compactionStateLabel()
-	default:
-		return "ready"
-	}
+	return m.presentationState().activityLabel()
 }
 
-// compactionStateLabel names the in-flight compactor and its whole-second age.
-// The status line and composer share it so the two surfaces cannot disagree.
-func (m Model) compactionStateLabel() string {
-	return "compacting " + compactionElapsedText(m.compactionElapsed)
-}
-
-// composerHint names the actions that still work in the current state. While
-// the compactor runs the prompt gate is closed, so the footer advertises the two
-// keys that do something instead of the submit hint that would be refused.
+// composerHint is the footer hint for callers that do not already hold the
+// presentation value.
 func (m Model) composerHint() string {
-	if m.compactionBusy() {
-		return "Ctrl+C cancel · Ctrl+N new session"
-	}
-	if m.suggestionActive() && m.input.Value() == "" {
-		return "Ctrl+S use suggestion · type to dismiss"
-	}
-	return "Ctrl+S submit · Enter newline · /help"
+	return m.presentationState().hint
 }
 
 func (m Model) statusLine() string {
+	return m.statusLineFor(m.presentationState())
+}
+
+func (m Model) statusLineFor(p presentation) string {
 	session := "–"
 	if m.session.SessionID != "" {
 		session = ui.ShortID(m.session.SessionID)
 	}
 
-	state := "idle"
-	switch {
-	case m.runBusy():
-		state = m.spin.View() + " running"
-	case m.compactionBusy():
-		state = m.spin.View() + " " + m.compactionStateLabel()
+	state := p.label
+	if p.activity == activityRunning || p.activity == activityCompacting {
+		state = m.spin.View() + " " + state
 	}
 
 	mode, resumeID := m.session.RunOptions()

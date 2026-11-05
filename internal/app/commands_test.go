@@ -1,6 +1,21 @@
 package app
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestHelpTextMentionsHydrationControls(t *testing.T) {
+	for _, want := range []string{
+		"exit (cancels a running task, hydration, or compaction first)",
+		"ctrl+c           cancel running task or compaction; cancel hydration and exit; quit when idle",
+		"ctrl+n           start a new session (cancels a running task, hydration, or compaction)",
+	} {
+		if !strings.Contains(HelpText, want) {
+			t.Errorf("HelpText missing %q", want)
+		}
+	}
+}
 
 func TestParseCommandNotACommand(t *testing.T) {
 	for _, in := range []string{"hello", "what is /help?", "  plain prompt  "} {

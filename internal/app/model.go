@@ -507,31 +507,27 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// windowTitle renders the terminal title for a working directory and run state.
-// It is the single place the title format is defined, so the idle form, the
-// working form, the compacting form, and the sequence main writes on an
-// unobserved exit cannot drift apart.
-func windowTitle(cwd string, running, compacting bool) string {
+// windowTitle renders the terminal title for a working directory and the
+// presentation's title marker. It is the single place the title format is
+// defined, so the idle form, every operation marker, and the sequence main
+// writes on an unobserved exit cannot drift apart.
+func windowTitle(cwd, marker string) string {
 	title := "cake-repl: " + ui.Sanitize(cwd)
-	switch {
-	case running:
-		title = "[working] " + title
-	case compacting:
-		title = "[compacting] " + title
+	if marker != "" {
+		title = marker + " " + title
 	}
 	return title
 }
 
 // titleCmd returns a command that re-sets the terminal title from the current
-// working state. The status line and composer already report running state,
-// but neither is visible when the terminal window is unfocused, behind another
-// window, or reduced to a tab, so the title carries the same signal: a working
-// marker prefixes the documented `cake-repl: <cwd>` title while a task runs and
-// is absent when the REPL is idle. Emit this on every busy-state transition
-// (a run starting or ending, a compaction starting or ending) so the title never
-// describes a state the REPL has left.
+// presentation. The status line and composer already name the operation, but
+// neither is visible when the terminal window is unfocused, behind another
+// window, or reduced to a tab, so the title carries the same signal: a marker
+// prefixes the documented `cake-repl: <cwd>` title while an operation is active
+// and is absent when the REPL is idle. Emit this on every presentation
+// transition so the title never describes a state the REPL has left.
 func (m Model) titleCmd() tea.Cmd {
-	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.runBusy(), m.compactionBusy()))
+	return tea.SetWindowTitle(windowTitle(m.cfg.Cwd, m.presentationState().titleMarker))
 }
 
 // IdleTitleSequence returns the escape sequence that restores the idle terminal
@@ -541,7 +537,7 @@ func (m Model) titleCmd() tea.Cmd {
 // all, so neither exit runs the model's own title command. The sequence is the
 // one tea.SetWindowTitle writes.
 func IdleTitleSequence(cwd string) string {
-	return ansi.SetWindowTitle(windowTitle(cwd, false, false))
+	return ansi.SetWindowTitle(windowTitle(cwd, ""))
 }
 
 // renderTimelineItem is the timeline owner's render callback. It captures the

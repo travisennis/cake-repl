@@ -125,12 +125,17 @@ wait_for "$session" 'running'                 # a task is in flight
 wait_for "$session" '[ idle ]'                # the task finished
 ```
 
-Markers this REPL renders: the composer title `prompt · ready` / `prompt ·
-running` / `prompt · compacting`, and the status line `[ idle ]` / `[ <spinner>
-running ]` / `[ <spinner> compacting ]`. The spinner
-glyph advances every frame, so match the stable word (`running`, `prompt ·
-running`), not the glyph. Any other text you expect — an assistant message, a
-tool block, a hint — is a valid predicate too.
+Markers this REPL renders: the composer title `prompt · ready` /
+`prompt · running` / `prompt · compacting` / `prompt · stopping task` /
+`prompt · stopping compaction` / `prompt · loading history` /
+`prompt · stopping history` / `prompt · browsing sessions` /
+`prompt · exiting`, and the status line `[ idle ]` / `[ <spinner> running ]` /
+`[ <spinner> compacting ]` / `[ stopping task ]` / `[ stopping compaction ]` /
+`[ loading history ]` / `[ stopping history ]` / `[ browsing sessions ]` /
+`[ exiting ]`. The spinner glyph advances
+every frame, so match the stable word (`running`, `prompt · running`), not the
+glyph. Any other text you expect — an assistant message, a tool block, a hint —
+is a valid predicate too.
 Wait on the text the change is about, not on chrome: for a change *to* the
 chrome (a hint, a status-line field, a key-binding label), wait for the new text
 itself, since the old chrome renders whether or not the change worked.

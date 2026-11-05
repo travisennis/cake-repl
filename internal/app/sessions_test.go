@@ -33,6 +33,33 @@ func browserModel(t *testing.T, sessions []cake.SessionSummary) Model {
 	return tm.(Model)
 }
 
+// sessionsListingCommand returns the session-listing command from the command
+// tree /sessions returns. The browser transition now batches its title update
+// with the listing, so execution-order tests need the listing member rather
+// than the batch itself.
+func sessionsListingCommand(t *testing.T, cmd tea.Cmd) tea.Cmd {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected a session-listing command")
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, sub := range batch {
+			if sub == nil {
+				continue
+			}
+			if result, ok := sub().(sessionsLoadedMsg); ok {
+				return func() tea.Msg { return result }
+			}
+		}
+		t.Fatalf("command tree %T contains no sessionsLoadedMsg", msg)
+	}
+	if _, ok := msg.(sessionsLoadedMsg); !ok {
+		t.Fatalf("command returned %T, want sessionsLoadedMsg or a batch containing it", msg)
+	}
+	return func() tea.Msg { return msg }
+}
+
 func TestParseCommandSessions(t *testing.T) {
 	cmd, ok, err := ParseCommand("/sessions")
 	if !ok || err != nil {
@@ -65,11 +92,12 @@ exit 0
 	if cmd == nil {
 		t.Fatal("expected a load command")
 	}
+	requireBatchTitle(t, cmd, windowTitle(m.cfg.Cwd, "[browsing]"))
 	if want := "sessions in " + filepath.Base(m.cfg.Cwd); m.sessionList.Title != want {
 		t.Errorf("title = %q, want %q", m.sessionList.Title, want)
 	}
 
-	tm, _ = m.Update(cmd())
+	tm, _ = m.Update(sessionsListingCommand(t, cmd)())
 	m = tm.(Model)
 	if m.browserLoading {
 		t.Error("browser still loading after the listing arrived")
@@ -260,8 +288,9 @@ func TestBrowserEnterPinsSelectedSession(t *testing.T) {
 	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyDown}) // select the second row
 	m = tm.(Model)
 
-	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := tm.(Model)
+	requireTitle(t, cmd, windowTitle(got.cfg.Cwd, ""))
 	if got.browserOpen {
 		t.Error("Enter should close the browser")
 	}
@@ -372,8 +401,9 @@ func TestBrowserEnterSelectsOnlyTheCurrentListing(t *testing.T) {
 		t.Fatalf("cursor = %d, want the first row of the new listing", m.sessionList.Index())
 	}
 
-	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := tm.(Model)
+	requireTitle(t, cmd, windowTitle(got.cfg.Cwd, ""))
 	if got.browserOpen {
 		t.Error("Enter should close the browser")
 	}
@@ -393,8 +423,9 @@ func TestBrowserCloseKeysLeaveNoState(t *testing.T) {
 	} {
 		m := browserModel(t, []cake.SessionSummary{{SessionID: browserID1, FirstPrompt: "one"}})
 		before := len(m.timeline.items)
-		tm, _ := m.handleKey(k)
+		tm, cmd := m.handleKey(k)
 		got := tm.(Model)
+		requireTitle(t, cmd, windowTitle(got.cfg.Cwd, ""))
 		if got.browserOpen {
 			t.Errorf("%v should close the browser", k)
 		}
@@ -618,8 +649,7 @@ func blockingListing(t *testing.T, m Model) (Model, <-chan tea.Msg) {
 touch "$STARTED_FILE"
 exec sleep 30
 `)
-	tm, cmd := m.execCommand(Command{Kind: CmdSessions})
-	m = tm.(Model)
+	m, cmd := m.openSessionBrowser()
 	done := make(chan tea.Msg, 1)
 	go func() { done <- cmd() }()
 	waitForFile(t, started)
@@ -791,9 +821,7 @@ func TestSessionsExitCancelsInFlightListing(t *testing.T) {
 	m, done := blockingListing(t, newLaidOutModel())
 
 	tm, cmd := m.execCommand(Command{Kind: CmdExit})
-	if cmd != nil {
-		t.Fatalf("exit returned %v before the listing was reaped", cmd)
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[exiting]"))
 	m = tm.(Model)
 	if !m.exiting() {
 		t.Fatal("exit did not enter its draining phase")

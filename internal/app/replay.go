@@ -209,7 +209,7 @@ func (m Model) finishReplayStart(msg replayStartedMsg) (tea.Model, tea.Cmd) {
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay unavailable: " + err.Error()})
 			m.syncViewport()
 		}
-		return m.maybeQuit()
+		return m.afterPresentationChange()
 	}
 
 	m.replay.run = msg.run
@@ -252,7 +252,7 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 	current := msg.key.generation == m.session.Generation() &&
 		msg.key.sessionID == m.session.ResumeID
 	if !current {
-		return m.maybeQuit()
+		return m.afterPresentationChange()
 	}
 
 	if !m.replay.warned {
@@ -271,5 +271,5 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.finishPendingTools()
 	m.syncViewport()
-	return m.maybeQuit()
+	return m.afterPresentationChange()
 }

@@ -708,9 +708,7 @@ func TestQuitDrainsSuggestion(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
 	key := m.suggestion.request.key
 	m, cmd := m.quit()
-	if cmd != nil {
-		t.Fatal("quit returned a command while the suggester child was in flight")
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[exiting]"))
 	if !m.exiting() || m.suggestion.doneChannel() == nil {
 		t.Fatalf("quit did not enter the drain state: exiting=%v done=%v", m.exiting(), m.suggestion.doneChannel() != nil)
 	}
@@ -763,9 +761,10 @@ func TestQuitDrainsCanceledSuggestion(t *testing.T) {
 		t.Fatal("clearSuggestion dropped the drain channel before the child was reaped")
 	}
 	m, cmd := m.quit()
-	if cmd != nil || !m.exiting() || m.suggestion.doneChannel() == nil {
-		t.Fatalf("quit of a canceled child = cmd nil %v, exiting %v, done %v; want a drain",
-			cmd == nil, m.exiting(), m.suggestion.doneChannel() != nil)
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[exiting]"))
+	if !m.exiting() || m.suggestion.doneChannel() == nil {
+		t.Fatalf("quit of a canceled child = exiting %v, done %v; want a drain",
+			m.exiting(), m.suggestion.doneChannel() != nil)
 	}
 }
 

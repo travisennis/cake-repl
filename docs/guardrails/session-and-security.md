@@ -46,7 +46,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   replay command before accepting a new prompt. Ordered replay events hydrate
   the local timeline; metadata restores known session/task ids, and replayed
   user messages are rendered because no prompt was submitted by the REPL.
-  Hydration is not a live task, so the running state remains idle. A replayed
+  Hydration is not a live task, so it never renders as running. While its
+  replay child is live, the status line and composer name `loading history`; if
+  Ctrl+N cancels it, the gate stays closed and those surfaces name
+  `stopping history` until the child is reaped. A replayed
   `compaction` checkpoint renders one timeline marker and seeds the status
   context from its `estimated_input.after_tokens`, always marked with `~`; a
   newer complete `turn_usage`, replayed or live, replaces it. A replay failure

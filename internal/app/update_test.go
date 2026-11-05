@@ -1048,9 +1048,7 @@ func TestNewSessionDuringRunSuppressesOldRunEventsAndCancelState(t *testing.T) {
 
 	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlN})
 	m = tm.(Model)
-	if cmd != nil {
-		t.Errorf("cmd = %v, want nil", cmd)
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[stopping]"))
 	if !m.runOp.draining() {
 		t.Fatal("old run was not put into its drain phase")
 	}
@@ -1426,9 +1424,7 @@ func TestExecCommandExitWhileRunningCancelsFirst(t *testing.T) {
 	if !got.exiting() {
 		t.Error("exit phase not set")
 	}
-	if cmd != nil {
-		t.Errorf("cmd = %v, want nil — quitting happens in finishRun", cmd)
-	}
+	requireTitle(t, cmd, windowTitle(m.cfg.Cwd, "[exiting]"))
 	it := lastItem(t, got)
 	if it.Kind != ui.KindWarning || !strings.Contains(it.Text, "exiting") {
 		t.Errorf("got kind=%v text=%q, want canceling-then-exiting warning", it.Kind, it.Text)
