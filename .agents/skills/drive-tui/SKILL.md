@@ -25,6 +25,8 @@ not read.
   which is hermetic: no real `cake`, no network, no model calls.
 - A built binary: `just build` (run it directly, not `just run`; `go run` adds a
   second process per restart and its stderr noise lands in the pane).
+- `perl` for the color pass's SGR normalization. Like tmux, it is a host tool
+  for this skill only; nothing in CI depends on it.
 
 ## The fake cake
 
@@ -33,7 +35,7 @@ not read.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `FAKE_CAKE_FIXTURE` | `happy-path` | fixture for a live prompt: `happy-path`, `error-task`, `minimal`, `turn-usage`, `compaction` (forward-compat; current cake emits this record only on replay), `unknown-type`, `malformed-midstream`, `wide-emoji-row` |
+| `FAKE_CAKE_FIXTURE` | `happy-path` | fixture for a live prompt: `happy-path`, `error-task`, `minimal`, `turn-usage`, `compaction` (forward-compat; current cake emits this record only on replay), `intent` (tool calls with intent headers and detail lines), `unknown-type`, `malformed-midstream`, `wide-emoji-row` |
 | `FAKE_CAKE_REPLAY_FIXTURE` | `replay-path` | fixture for `replay <uuid>`, used when the REPL starts with `-resume`; `compaction` shows the checkpoint marker and estimated context, and `compaction-continued` shows a newer replayed `turn_usage` replacing the estimate |
 | `FAKE_CAKE_SESSIONS` | `valid` | response for `sessions list --json`: `valid` (two sessions), `empty`, or `error` |
 | `FAKE_CAKE_TRUST` | `not-required` | response for `trust --status --json`: `not-required`, `trusted`, `untrusted`, `changed`, `invalid`, `malformed`, or `error` |
@@ -54,7 +56,7 @@ with all of these:
 | --- | --- |
 | `-cake-bin "$root/scripts/fake-cake.sh"` | no real cake, no cost, fixed stream |
 | `-no-config` | the user's XDG and project-local config cannot change the defaults |
-| `-no-color` | termenv `Ascii`, so the capture is stable and readable on a bare terminal |
+| `-no-color` | termenv `Ascii`, so the plain capture is stable and readable; the color pass in step 6a omits it |
 | `-no-session` | nothing is written to a cake session |
 | `-cwd <temp>/project` | isolates the run; the base name is the `cwd:` field on the status line, so keep it stable (`project`) |
 | `-history-file <temp>/history` | prompt history starts empty on every run |
@@ -147,10 +149,16 @@ Send text and the submit key as **separate** writes, then observe. Submit is
 
 ```bash
 tmux send-keys -t "$session" -l "hello there"   # literal text
+wait_for "$session" 'hello there'               # the composer accepted it
 tmux send-keys -t "$session" C-s                # submit
-wait_for "$session" '[ idle ]'
+wait_for "$session" 'running'                   # the run started
+wait_for "$session" '[ idle ]'                  # the run finished
 tmux capture-pane -pt "$session" -S -200
 ```
+
+`[ idle ]` is already on screen before the task starts, so waiting for it
+immediately after `C-s` can snapshot the pre-submit frame. Wait for the typed
+text, then for the run to start, then for `[ idle ]`.
 
 Other bindings worth driving: `C-c` cancels a running task and quits when idle,
 `C-n` starts a new session, `C-u` clears input, `C-o` cycles tool output, `Up`
@@ -244,9 +252,78 @@ Name the file after the state, and capture every state the change affects
 capture is the handoff/PR artifact: paste it into the PR body or handoff under a
 "Terminal capture" heading, and attach the file if the host supports it. Keep it
 out of the repository — it carries a session UUID and machine paths, and a
-tracked capture would rot. For styled output, drop `-no-color` **only** when the
-change is about color, and add `-e` to `capture-pane` to keep the SGR
-sequences.
+tracked capture would rot. A plain capture proves text and layout, never color
+or intensity; when the change is about styling, run the color pass in step 6a.
+
+### 6a. Color and style pass
+
+A plain capture cannot prove color, intensity, or emphasis. `-no-color` forces
+termenv `Ascii`, which drops color and intensity, so a detail line that reuses
+the intent's style and one that uses a correct dim style both render as plain
+text. Run this second pass for any change to a foreground/background color,
+faint, bold, underline, reverse, or a theme role, and assert the SGR roles
+instead of eyeballing the pane.
+
+Start a second session from the same fixture and size, with the same isolation
+flags but **without** `-no-color`. Set a deterministic color profile so the
+capture does not depend on the host terminal, and use a separate history file
+and session name so the plain capture stays frozen. Use the fixture that
+renders the changed element; this example uses `intent` and the built binary.
+
+```bash
+color_session=cake-repl-tui-081-color
+tmux new-session -d -s "$color_session" -c "$root" -x 100 -y 30 \
+  "TERM=xterm-256color COLORTERM=truecolor \
+   FAKE_CAKE_FIXTURE=intent FAKE_CAKE_DELAY=0.4 \
+   $root/bin/cake-repl \
+     -cake-bin $root/scripts/fake-cake.sh \
+     -no-config -no-session \
+     -cwd $run/project -history-file $run/history-color"
+```
+
+Wait for `prompt · ready`, then send the fixture prompt and `C-s` as in steps 3
+and 4. Wait for the changed text to render, then for `[ idle ]`:
+
+```bash
+wait_for "$color_session" 'prompt · ready'
+tmux send-keys -t "$color_session" -l "run the fixture"
+wait_for "$color_session" 'run the fixture'       # the composer accepted it
+tmux send-keys -t "$color_session" C-s
+wait_for "$color_session" 'Listing the project files'   # the tool block rendered
+wait_for "$color_session" '[ idle ]'
+```
+
+(`wait_for` is the helper from step 3; define it in the same shell call.)
+
+Capture the escapes and translate each SGR sequence to a readable tag:
+
+```bash
+tmux capture-pane -p -e -t "$color_session" -S -300 \
+  > "$run/captures/after-prompt-color.ansi"
+perl -pe 's{\e\[([0-9;]*)m}{join("", map {"<$_>"} split /;/, $1)}ge' \
+  "$run/captures/after-prompt-color.ansi" \
+  > "$run/captures/after-prompt-color.tags"
+```
+
+Assert the role on the changed line, and assert the contrast case:
+
+```bash
+grep -nF '<2><36>$ ls -la' "$run/captures/after-prompt-color.tags"
+grep -nF '<36>Listing the project files' \
+  "$run/captures/after-prompt-color.tags" | grep -vF '<2>'
+```
+
+The first line must show the detail's faint + cyan role (`2` then `36`). The
+second must show the intent's cyan role (`36`) with **no** `2` on that line. In
+`internal/ui/theme.go`, `ToolDetail` is faint cyan and `ToolArgs` is cyan; `1`
+is bold, `4` underline, and `39` returns to the default foreground. Read the
+expected codes from the theme role, not from this example, and replace the
+fixture text when the change touches a different element.
+
+The `.ansi` file is the handoff artifact; keep the `.tags` file beside it as the
+readable assertion. The plain capture from step 6 is the `-no-color` check: both
+captures must show the same text, and only the `.ansi` capture may carry
+escapes. Tear down `$color_session` with the step 7 loop as well.
 
 ### 7. Tear down only your session
 
@@ -259,6 +336,9 @@ until ! tmux has-session -t "$session" 2>/dev/null; do
 done
 tmux kill-session -t "$session" 2>/dev/null || true   # backstop if it did not exit
 ```
+
+If step 6a ran, repeat this block with `$color_session`; never kill the tmux
+server.
 
 ## Worked example
 
@@ -316,5 +396,8 @@ echo "captures in $run/captures"
   capture stops being reproducible.
 - **Leaving the app running.** Snapshot the exit path too; a UI change can break
   terminal restore without changing the visible frames.
+- **Verifying styling with `-no-color`.** Termenv `Ascii` erases color and
+  intensity, so a style regression renders as plain text and looks "correct".
+  Run the color pass in step 6a for any styling change.
 - **Committed captures.** They encode a session UUID and local paths; keep them
   in the temp directory.
