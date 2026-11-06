@@ -18,6 +18,7 @@ type Theme struct {
 	Reasoning  lipgloss.Style
 	ToolHeader lipgloss.Style
 	ToolArgs   lipgloss.Style
+	ToolDetail lipgloss.Style
 	ToolOutput lipgloss.Style
 	Hook       lipgloss.Style
 	Complete   lipgloss.Style
@@ -54,6 +55,7 @@ func DefaultTheme() Theme {
 		Reasoning:         lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Faint(true).Italic(true),
 		ToolHeader:        lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true),
 		ToolArgs:          lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
+		ToolDetail:        lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Faint(true),
 		ToolOutput:        lipgloss.NewStyle().Faint(true),
 		Hook:              lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 		Complete:          lipgloss.NewStyle().Foreground(lipgloss.Color("2")),

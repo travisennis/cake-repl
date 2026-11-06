@@ -160,7 +160,7 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 	case intent != "" && showToolDetail(tool.Name):
 		// The intent leads, but the raw arguments stay visible where they
 		// carry audit value.
-		lines = append(lines, indent(th.ToolArgs.Width(width-2).Render(summary), "  "))
+		lines = append(lines, indent(th.ToolDetail.Width(width-2).Render(summary), "  "))
 	case intent == "":
 		// Multi-line argument summaries (edit previews) follow the header.
 		if rest := strings.SplitN(summary, "\n", 2); len(rest) == 2 {

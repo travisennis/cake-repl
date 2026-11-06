@@ -733,6 +733,71 @@ func TestWrapToolArgs(t *testing.T) {
 	})
 }
 
+func TestRenderToolDimsTechnicalDetail(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	th := DefaultTheme()
+	argsOpen := styleOpen(th.ToolArgs)
+	detailOpen := styleOpen(th.ToolDetail)
+	if argsOpen == "" || detailOpen == "" || argsOpen == detailOpen {
+		t.Fatalf("intent and detail styles must be distinct: args=%q detail=%q", argsOpen, detailOpen)
+	}
+
+	t.Run("bash detail is dim", func(t *testing.T) {
+		got := renderTool(th, &ToolBlock{
+			Name:      "bash",
+			Arguments: `{"command":"go test ./...","intent":"Running the test suite"}`,
+			Done:      true,
+		}, 80, 0, ToolOutputHidden)
+
+		if !strings.Contains(got, argsOpen+"Running the test suite") {
+			t.Errorf("intent header does not use the argument style: %q", got)
+		}
+		if !strings.Contains(got, "  "+detailOpen+"$ go test ./...") {
+			t.Errorf("bash detail does not use the detail style: %q", got)
+		}
+		if strings.Contains(got, "  "+argsOpen+"$ go test ./...") {
+			t.Errorf("bash detail still uses the argument style: %q", got)
+		}
+	})
+
+	t.Run("edit detail is dim", func(t *testing.T) {
+		got := renderTool(th, &ToolBlock{
+			Name:      "edit",
+			Arguments: `{"path":"main.go","edits":[{"old_text":"foo","new_text":"bar"}],"intent":"Renaming the helper"}`,
+			Done:      true,
+		}, 80, 0, ToolOutputHidden)
+
+		lines := strings.Split(got, "\n")
+		if len(lines) < 2 {
+			t.Fatalf("expected a detail line, got %q", got)
+		}
+		if !strings.Contains(lines[1], detailOpen) {
+			t.Errorf("edit detail does not use the detail style: %q", lines[1])
+		}
+		if strings.Contains(lines[1], argsOpen) {
+			t.Errorf("edit detail still uses the argument style: %q", lines[1])
+		}
+	})
+
+	t.Run("missing intent keeps the argument style", func(t *testing.T) {
+		got := renderTool(th, &ToolBlock{
+			Name:      "bash",
+			Arguments: `{"command":"go test ./..."}`,
+			Done:      true,
+		}, 80, 0, ToolOutputHidden)
+
+		if strings.Contains(got, detailOpen) {
+			t.Errorf("fallback rendering uses the detail style: %q", got)
+		}
+		if !strings.Contains(got, argsOpen+"$ go test ./...") {
+			t.Errorf("fallback summary does not use the argument style: %q", got)
+		}
+	})
+}
+
 func TestRenderToolShowsIntent(t *testing.T) {
 	th := DefaultTheme()
 
