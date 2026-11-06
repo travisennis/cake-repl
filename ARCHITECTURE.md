@@ -185,7 +185,11 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   pins future prompts to `--resume <session-id>`, whether the run succeeded,
   failed, was canceled, or ended before a completion record. No-session-ID
   completion leaves the current mode unchanged; the REPL has no latest-session
-  fallback. See
+  fallback. Two field invariants are encoded rather than only documented: a
+  `RunResume` target always carries a non-empty `ResumeID` while `RunFresh`
+  carries none, and a non-empty `AnnouncedID` always equals `SessionID`. Replay
+  hydration may name `SessionID` alone, which is display identity without pin
+  eligibility. See
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 - **Lifecycle state is typed and generation-scoped.** The model owns one
   private state per operation (run, replay, compaction, suggestion, browser,

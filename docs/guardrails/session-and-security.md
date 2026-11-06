@@ -202,6 +202,12 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   distinct in-flight and drain warnings. Only `/session`, `/help`, `/clear`, and
   `/exit` remain available during a run; the prompt and retarget gates open only
   when the canceled child is reaped.
+  **Encoded field invariants:** a `RunResume` target always carries a
+  non-empty `ResumeID` while `RunFresh` carries none (the constructor normalizes
+  a mismatched pair, and `UseResume` ignores an empty id), and a non-empty
+  `AnnouncedID` always equals `SessionID`. Only `OnTaskStart` and
+  `OnTaskComplete` announce an id; replay hydration may set `SessionID` alone,
+  which is display identity without pin eligibility.
   Keep session transitions pure and I/O-free so they stay testable.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
   secrets. They go **only** to `-debug-log` (opened `0o600`; the mode applies

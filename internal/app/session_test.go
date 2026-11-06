@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/travisennis/cake-repl/internal/cake"
@@ -438,5 +439,118 @@ func TestUseResumeSameTargetKeepsContextUsage(t *testing.T) {
 
 	if s.Context == nil || s.Context.Tokens != 10_000 {
 		t.Errorf("same-target resume dropped context: %+v", s.Context)
+	}
+}
+
+// sessionInvariantViolation reports the first documented sessionState field
+// invariant the state breaks, or "" when it is valid. Tests use it as the
+// oracle for every transition so the doc comment cannot drift from behavior.
+func sessionInvariantViolation(s sessionState) string {
+	if s.NextMode == cake.RunResume && s.ResumeID == "" {
+		return "RunResume target has no ResumeID"
+	}
+	if s.NextMode != cake.RunResume && s.ResumeID != "" {
+		return fmt.Sprintf("non-resume target carries ResumeID %q", s.ResumeID)
+	}
+	if s.AnnouncedID != "" && s.AnnouncedID != s.SessionID {
+		return fmt.Sprintf("AnnouncedID %q differs from SessionID %q", s.AnnouncedID, s.SessionID)
+	}
+	return ""
+}
+
+func requireSessionInvariants(t *testing.T, s sessionState) {
+	t.Helper()
+	if violation := sessionInvariantViolation(s); violation != "" {
+		t.Fatalf("invalid session state: %s: %+v", violation, s)
+	}
+}
+
+// The checker is only meaningful if it rejects the combinations the state
+// machine promises never to build.
+func TestSessionInvariantCheckerRejectsInvalidStates(t *testing.T) {
+	cases := []sessionState{
+		{NextMode: cake.RunResume},
+		{NextMode: cake.RunFresh, ResumeID: "s-1"},
+		{SessionID: "s-1", AnnouncedID: "s-2"},
+		{AnnouncedID: "s-1"},
+	}
+	for _, s := range cases {
+		if sessionInvariantViolation(s) == "" {
+			t.Errorf("checker accepted invalid state: %+v", s)
+		}
+	}
+}
+
+// Every transition leaves a documented field combination, including the replay
+// hydration path that names a session without announcing it. The zero value
+// stays valid because pure transition tests construct it directly.
+func TestSessionStateInvariantsHoldAcrossTransitions(t *testing.T) {
+	states := []struct {
+		name  string
+		state sessionState
+	}{
+		{"zero value", sessionState{}},
+		{"fresh constructor", newSessionState(cake.RunFresh, "")},
+		{"resume constructor", newSessionState(cake.RunResume, "s-1")},
+		// An empty id cannot name a resume target, and a fresh target cannot
+		// carry an unused one; construction normalizes both.
+		{"empty resume constructor", newSessionState(cake.RunResume, "")},
+		{"fresh constructor with stray id", newSessionState(cake.RunFresh, "s-1")},
+	}
+	for _, tc := range states {
+		t.Run(tc.name, func(t *testing.T) { requireSessionInvariants(t, tc.state) })
+	}
+
+	var s sessionState
+	s.OnTaskStart(cake.TaskStart{SessionID: "s-1", TaskID: "t-1"})
+	requireSessionInvariants(t, s)
+	s.OnModel("zen", "glm-5.1")
+	s.OnTurnUsage(completeTurn(10_000, 200_000))
+	s.OnCompactionEstimate(4_000, 200_000)
+	requireSessionInvariants(t, s)
+	s.OnTaskComplete(success("s-1"))
+	requireSessionInvariants(t, s)
+	s.OnRunEnded()
+	requireSessionInvariants(t, s)
+
+	s.UseResume("s-2")
+	requireSessionInvariants(t, s)
+	s.UseResume("s-2")
+	requireSessionInvariants(t, s)
+
+	// Replay hydration names the resumed session without an invocation having
+	// announced it; that identity is display-only and must not pin.
+	s.SessionID = "s-3"
+	requireSessionInvariants(t, s)
+
+	s.Reset()
+	requireSessionInvariants(t, s)
+}
+
+func TestUseResumeIgnoresEmptyID(t *testing.T) {
+	var s sessionState
+	s.OnTaskStart(cake.TaskStart{SessionID: "s-1", TaskID: "t-1"})
+	s.OnTaskComplete(success("s-1"))
+
+	s.UseResume("")
+
+	if mode, id := s.RunOptions(); mode != cake.RunResume || id != "s-1" {
+		t.Errorf("empty UseResume changed target to mode=%v id=%q", mode, id)
+	}
+	if s.SessionID != "s-1" || s.AnnouncedID != "s-1" {
+		t.Errorf("empty UseResume changed identity: %+v", s)
+	}
+	requireSessionInvariants(t, s)
+}
+
+func TestNewSessionStateNormalizesTarget(t *testing.T) {
+	s := newSessionState(cake.RunResume, "")
+	if mode, id := s.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Errorf("empty resume id: mode=%v id=%q, want fresh with no id", mode, id)
+	}
+
+	s = newSessionState(cake.RunFresh, "s-1")
+	if mode, id := s.RunOptions(); mode != cake.RunFresh || id != "" {
+		t.Errorf("fresh with stray id: mode=%v id=%q, want fresh with no id", mode, id)
 	}
 }

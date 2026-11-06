@@ -4,6 +4,17 @@ import "github.com/travisennis/cake-repl/internal/cake"
 
 // sessionState tracks which cake session the next prompt should target. It is
 // a pure state machine so run-mode transitions stay testable.
+//
+// Two field combinations are invariants, not conventions:
+//   - A RunResume target always names the session it resumes: ResumeID is
+//     non-empty. newSessionState normalizes an empty id to RunFresh and drops a
+//     stray id from a fresh target; UseResume ignores an empty id. No
+//     transition can build an id-less resume target or a fresh one carrying an
+//     unused id.
+//   - AnnouncedID is either empty or equal to SessionID. announce sets both
+//     together. Replay hydration may set SessionID alone because a replayed id
+//     names the session but was not announced by the invocation being run, so
+//     it must never pin the next prompt.
 type sessionState struct {
 	// generation identifies continuity of the session target. It starts at 1
 	// and advances only when the target is left, never when a run reports its
@@ -33,10 +44,18 @@ type sessionState struct {
 	Context *ContextUsage
 }
 
-// newSessionState builds the initial target with generation 1. A zero-value
-// sessionState is still usable in pure transition tests; its first Reset or
-// target change advances it to 1.
+// newSessionState builds the initial target with generation 1. The mode and id
+// are normalized to agree: an empty resumeID names no session, so the target is
+// RunFresh, and only a RunResume target keeps an id. A zero-value sessionState
+// is still usable in pure transition tests; its first Reset or target change
+// advances it to 1.
 func newSessionState(next cake.RunMode, resumeID string) sessionState {
+	if resumeID == "" {
+		next = cake.RunFresh
+	}
+	if next != cake.RunResume {
+		resumeID = ""
+	}
 	return sessionState{generation: 1, NextMode: next, ResumeID: resumeID}
 }
 
@@ -62,7 +81,9 @@ type ContextUsage struct {
 // record; any other value is a partial record, which is not a measurement.
 const usagePresenceComplete = "complete"
 
-// RunOptions returns the mode and resume id for the next cake invocation.
+// RunOptions returns the mode and resume id for the next cake invocation. The
+// pair agrees: RunResume always carries a non-empty id, and RunFresh never uses
+// one.
 func (s *sessionState) RunOptions() (cake.RunMode, string) {
 	return s.NextMode, s.ResumeID
 }
@@ -84,9 +105,17 @@ func (s *sessionState) OnModel(modelConfig, model string) {
 // session id becomes the current invocation's identity, the only one eligible
 // to pin the next prompt if the run ends without a completion record.
 func (s *sessionState) OnTaskStart(e cake.TaskStart) {
-	s.SessionID = e.SessionID
+	s.announce(e.SessionID)
 	s.TaskID = e.TaskID
-	s.AnnouncedID = e.SessionID
+}
+
+// announce records the session id the current invocation announced. It is the
+// only writer of a non-empty AnnouncedID and updates the reported identity with
+// it, so an announced id can never disagree with SessionID. UseResume and Reset
+// clear the field.
+func (s *sessionState) announce(id string) {
+	s.SessionID = id
+	s.AnnouncedID = id
 }
 
 // OnTurnUsage records the newest complete context measurement from a
@@ -145,8 +174,7 @@ func (s *sessionState) OnCompactionEstimate(after, window int) {
 func (s *sessionState) OnTaskComplete(e cake.TaskComplete) {
 	s.LastComplete = &e
 	if e.SessionID != "" {
-		s.SessionID = e.SessionID
-		s.AnnouncedID = e.SessionID
+		s.announce(e.SessionID)
 	}
 	if e.TaskID != "" {
 		s.TaskID = e.TaskID
@@ -188,9 +216,14 @@ func (s *sessionState) Reset() {
 // present that session as the one the next prompt continues. Until the new
 // target announces a session id of its own it is named only by NextMode and
 // ResumeID. Re-selecting the current target is a no-op that keeps the reported
-// identity. LastComplete is deliberately kept: /session labels it as the last
-// result, so it reads as the history it is and never as the current identity.
+// identity. An empty id names no session and leaves the current target
+// unchanged, so the state never holds an id-less resume target. LastComplete is
+// deliberately kept: /session labels it as the last result, so it reads as the
+// history it is and never as the current identity.
 func (s *sessionState) UseResume(id string) {
+	if id == "" {
+		return
+	}
 	if s.NextMode != cake.RunResume || s.ResumeID != id {
 		s.generation++
 		s.SessionID = ""
