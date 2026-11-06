@@ -148,12 +148,24 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 	// summarizing, not before: control characters arrive JSON-escaped
 	// as "\\u001b" and only become real control bytes once decoded.
 	name := Sanitize(tool.Name)
+	intent := Sanitize(IntentFromToolArgs(tool.Arguments))
 	summary := Sanitize(SummarizeToolArgs(tool.Name, tool.Arguments))
-	header := renderToolHeader(th, name, summary, width)
+	headerSummary := summary
+	if intent != "" {
+		headerSummary = intent
+	}
+	header := renderToolHeader(th, name, headerSummary, width)
 	lines := []string{header}
-	// Multi-line argument summaries (edit previews) follow the header.
-	if rest := strings.SplitN(summary, "\n", 2); len(rest) == 2 {
-		lines = append(lines, th.ToolArgs.Width(width).Render(rest[1]))
+	switch {
+	case intent != "" && showToolDetail(tool.Name):
+		// The intent leads, but the raw arguments stay visible where they
+		// carry audit value.
+		lines = append(lines, indent(th.ToolArgs.Width(width-2).Render(summary), "  "))
+	case intent == "":
+		// Multi-line argument summaries (edit previews) follow the header.
+		if rest := strings.SplitN(summary, "\n", 2); len(rest) == 2 {
+			lines = append(lines, th.ToolArgs.Width(width).Render(rest[1]))
+		}
 	}
 	if outputMode != ToolOutputHidden {
 		// Sanitizing inside this branch keeps hidden mode from scanning output
@@ -181,6 +193,18 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// showToolDetail reports whether the technical argument summary follows an
+// intent. Mutating tools keep it for audit value; the stream has no error flag
+// and its output text is not parsed to classify a call.
+func showToolDetail(name string) bool {
+	switch strings.ToLower(name) {
+	case "bash", "edit", "write":
+		return true
+	default:
+		return false
+	}
 }
 
 // renderFullToolOutput renders all retained output at the given content width

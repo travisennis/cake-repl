@@ -732,3 +732,128 @@ func TestWrapToolArgs(t *testing.T) {
 		}
 	})
 }
+
+func TestRenderToolShowsIntent(t *testing.T) {
+	th := DefaultTheme()
+
+	tests := []struct {
+		name   string
+		tool   *ToolBlock
+		want   []string
+		absent []string
+	}{
+		{
+			name: "read intent replaces the path summary",
+			tool: &ToolBlock{
+				Name:      "read",
+				Arguments: `{"path":"main.go","intent":"Reading the parser tests"}`,
+				Output:    "package main",
+				Done:      true,
+			},
+			want:   []string{"⚙ read", "Reading the parser tests", "package main"},
+			absent: []string{"main.go"},
+		},
+		{
+			name: "bash keeps the command detail",
+			tool: &ToolBlock{
+				Name:      "bash",
+				Arguments: `{"command":"go test ./...","intent":"Running the test suite"}`,
+				Output:    "ok",
+				Done:      true,
+			},
+			want: []string{"Running the test suite", "$ go test ./..."},
+		},
+		{
+			name: "edit keeps the edit previews",
+			tool: &ToolBlock{
+				Name:      "edit",
+				Arguments: `{"path":"main.go","edits":[{"old_text":"foo","new_text":"bar"}],"intent":"Renaming the helper"}`,
+				Output:    "applied",
+				Done:      true,
+			},
+			want: []string{"Renaming the helper", "main.go (1 edit)", "foo → bar"},
+		},
+		{
+			name: "failed read keeps the intent-only header",
+			tool: &ToolBlock{
+				Name:      "read",
+				Arguments: `{"path":"missing.go","intent":"Reading the config"}`,
+				Output:    "Error: file not found",
+				Done:      true,
+			},
+			want:   []string{"Reading the config", "Error: file not found"},
+			absent: []string{"missing.go"},
+		},
+		{
+			name: "hook-blocked read keeps the intent-only header",
+			tool: &ToolBlock{
+				Name:      "read",
+				Arguments: `{"path":"secret.go","intent":"Reading the secret"}`,
+				Output:    "Hook blocked tool execution: denied",
+				Done:      true,
+			},
+			want:   []string{"Reading the secret", "Hook blocked tool execution"},
+			absent: []string{"secret.go"},
+		},
+		{
+			name: "missing intent keeps today's rendering",
+			tool: &ToolBlock{
+				Name:      "read",
+				Arguments: `{"path":"main.go"}`,
+				Output:    "package main",
+				Done:      true,
+			},
+			want:   []string{"⚙ read", "main.go"},
+			absent: []string{"Reading"},
+		},
+		{
+			name: "non-string intent keeps today's rendering",
+			tool: &ToolBlock{
+				Name:      "read",
+				Arguments: `{"path":"main.go","intent":42}`,
+				Output:    "package main",
+				Done:      true,
+			},
+			want:   []string{"main.go"},
+			absent: []string{"42"},
+		},
+		{
+			name: "toolbox tool shows intent instead of compact JSON",
+			tool: &ToolBlock{
+				Name:      "tb__subagent_async",
+				Arguments: `{"prompt":"do work","name":"worker","intent":"Starting a background worker"}`,
+				Output:    "started",
+				Done:      true,
+			},
+			want:   []string{"Starting a background worker"},
+			absent: []string{"prompt"},
+		},
+		{
+			name: "intent is sanitized before rendering",
+			tool: &ToolBlock{
+				Name:      "read",
+				Arguments: `{"path":"main.go","intent":"Reading \u001b[31mthe tests"}`,
+				Output:    "package main",
+				Done:      true,
+			},
+			want:   []string{"Reading the tests"},
+			absent: []string{"\x1b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := renderTool(th, tt.tool, 200, 0, ToolOutputTruncated)
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q in:\n%s", want, got)
+				}
+			}
+			for _, absent := range tt.absent {
+				if strings.Contains(got, absent) {
+					t.Errorf("unexpected %q in:\n%s", absent, got)
+				}
+			}
+		})
+	}
+}

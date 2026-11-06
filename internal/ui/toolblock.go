@@ -18,8 +18,31 @@ const DefaultOutputLimit = 2000
 // unknownArgsLimit caps the JSON summary shown for unrecognized tools.
 const unknownArgsLimit = 160
 
+// maxIntentCells caps the user-facing intent shown in a tool header. The model
+// is asked for a short sentence; the cap only bounds accidental paragraphs.
+const maxIntentCells = 160
+
 // maxEditPreviews caps how many edit pairs are summarized for the edit tool.
 const maxEditPreviews = 3
+
+// IntentFromToolArgs returns the optional user-facing intent recorded in a
+// tool call's JSON arguments. It collapses whitespace to one line and caps the
+// result so it fits a header. The result is not sanitized: callers pass it
+// through [Sanitize] before it reaches the terminal. Missing, empty, and
+// non-string values return "".
+func IntentFromToolArgs(argsJSON string) string {
+	var args struct {
+		Intent string `json:"intent"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return ""
+	}
+	intent := strings.Join(strings.Fields(args.Intent), " ")
+	if intent == "" {
+		return ""
+	}
+	return truncateString(intent, maxIntentCells)
+}
 
 // SummarizeToolArgs renders a concise, single-purpose summary of a tool
 // call's arguments. Tool names are matched case-insensitively; the original

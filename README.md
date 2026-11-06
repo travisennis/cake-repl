@@ -675,8 +675,11 @@ validation is available with `just release-check`.
   first prompt still reports cake's exit-3 trust error as a generic run failure.
 - Tool output is hidden by default: each tool call shows its header and argument
   summary only, so a failed tool is quiet until you reveal its output with
-  `Ctrl+O`. The key cycles the session-wide mode through truncated, full, and
-  hidden; from the hidden start, the first press shows truncated output.
+  `Ctrl+O`. When a call includes the model's optional `intent` sentence, the
+  header shows that instead; `Bash`, `Edit`, and `Write` keep the technical
+  summary as a dim second line. The key cycles the session-wide mode through
+  truncated, full, and hidden; from the hidden start, the first press shows
+  truncated output.
   Truncated mode caps output at 2,000 bytes, cut on rune boundaries
   (configurable via `-output-limit` or config file). Independently of that
   display limit, the REPL bounds what one tool *result* pins: it retains at

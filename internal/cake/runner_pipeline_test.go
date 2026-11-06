@@ -12,6 +12,7 @@ import (
 func TestPipelineFromFixtures(t *testing.T) {
 	fixtures := []string{
 		"happy-path",
+		"intent",
 		"error-task",
 		"minimal",
 		"turn-usage",

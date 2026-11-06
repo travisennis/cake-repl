@@ -230,7 +230,11 @@ renders it in plain text like every other surface.
   single tokens (e.g. paths and bash commands) hard-wrap so the full content
   stays visible. Multi-line bash commands show their first and last non-empty
   lines joined by an ellipsis, so setup lines (`cd`, `export`) never hide the
-  actual payload.
+  actual payload. When the arguments include an `intent` string, the header
+  shows that sentence instead. `Bash`, `Edit`, and `Write` keep the technical
+  summary as a dim second line; every other tool shows only the intent. Intent
+  is collapsed to one line, capped at 160 cells, and sanitized with the rest of
+  the header. Calls without intent render exactly as before.
   All timeline and status-line text is sanitized before styling: ANSI escape
   sequences are stripped, tabs expand to the next eight-column stop, and
   remaining C0/C1 controls are dropped, so tool output renders as plain text

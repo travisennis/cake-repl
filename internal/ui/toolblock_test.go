@@ -5,7 +5,47 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
 )
+
+func TestIntentFromToolArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{
+			name: "present",
+			args: `{"path":"main.go","intent":"Reading the parser tests"}`,
+			want: "Reading the parser tests",
+		},
+		{
+			name: "collapses whitespace to one line",
+			args: `{"intent":"  Reading\n\tthe   tests  "}`,
+			want: "Reading the tests",
+		},
+		{name: "missing", args: `{"path":"main.go"}`, want: ""},
+		{name: "empty", args: `{"intent":"   "}`, want: ""},
+		{name: "non-string", args: `{"intent":42}`, want: ""},
+		{name: "malformed JSON", args: `{"intent":`, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IntentFromToolArgs(tt.args); got != tt.want {
+				t.Errorf("IntentFromToolArgs(%q) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIntentFromToolArgsCapsLongValues(t *testing.T) {
+	got := IntentFromToolArgs(`{"intent":"` + strings.Repeat("word ", 100) + `"}`)
+	if width := lipgloss.Width(got); width > maxIntentCells {
+		t.Errorf("intent width %d exceeds cap %d: %q", width, maxIntentCells, got)
+	}
+}
 
 func TestSummarizeBash(t *testing.T) {
 	got := SummarizeToolArgs("bash", `{"command":"ls -la","timeout":30}`)
