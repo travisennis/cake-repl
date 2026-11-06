@@ -214,11 +214,14 @@ renders it in plain text like every other surface.
   `DefaultTheme` must keep producing usable ASCII output. Markdown renders via
   glamour with compact REPL-themed headings, quotes, links, code, and emphasis;
   the ASCII profile uses text markers and strips all ANSI. Under a color profile,
-  each visible ASCII `http(s)` URL that is not markdown emphasis or
-  link-label text is wrapped in a generated OSC 8 hyperlink naming that same
-  URL, so a URL glamour hard-wraps across lines is openable from every visible
-  fragment and the terminal's link preview shows the full destination. A URL
-  with non-ASCII text stays plain, and the Ascii profile emits no hyperlinks.
+  each visible ASCII `http(s)` URL, including one wrapped in markdown emphasis,
+  is wrapped in a generated OSC 8 hyperlink naming that same URL, so a URL
+  glamour hard-wraps across lines is openable from every visible fragment and
+  the terminal's link preview shows the full destination. A visible URL that is
+  only a prefix of longer source text stays unlinked; brackets and fragment
+  markers (`(`, `)`, `#`, `{`, `}`, `^`, `|`) end the URL only when the source
+  does not resume URL text after them. A URL with non-ASCII text stays plain,
+  and the Ascii profile emits no hyperlinks.
   See
   [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
   Tool-block headers

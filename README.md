@@ -725,8 +725,8 @@ validation is available with `just release-check`.
   glamour wraps across lines can still be opened from any fragment, and the
   terminal's link preview shows the full destination. The sequence is generated
   after sanitization from the URL text itself, never passed through from the
-  stream, and `-no-color` emits none. A URL with non-ASCII text, one wrapped
-  in markdown emphasis, or one used as a link label stays plain text. See
+  stream, and `-no-color` emits none. A URL with non-ASCII text, or one used as
+  a link label, stays plain text. See
   [ADR 022](docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
   The raw bytes are still recorded when `-debug-log` is set.
 - Hook events are shown only when they deny, stop, or fail; successful hook

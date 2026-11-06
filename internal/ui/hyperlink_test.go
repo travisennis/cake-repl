@@ -406,3 +406,202 @@ func TestAddHyperlinks_JoinsURLSplitAtWrap(t *testing.T) {
 		t.Errorf("link spans the line padding: %q", got)
 	}
 }
+
+// TestRenderMarkdown_LinksEmphasisWrappedURLs covers emphasis delimiters that
+// the source-completeness guard used to read as URL text. Glamour removes the
+// delimiters from the rendered text, so the visible run is the complete URL.
+func TestRenderMarkdown_LinksEmphasisWrappedURLs(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	const url = "https://example.com/foo"
+	for _, tt := range []struct {
+		name string
+		text string
+	}{
+		{"bold", "**" + url + "**"},
+		{"double underscore bold", "__" + url + "__"},
+		{"asterisk italic", "*" + url + "*"},
+		{"underscore italic", "_" + url + "_"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderMarkdown(tt.text, 80)
+			links := renderedLinks(t, got)
+			if len(links) != 1 {
+				t.Fatalf("got %d links, want 1:\n%q", len(links), got)
+			}
+			if links[0].target != url || links[0].text != url {
+				t.Errorf("link = %+v, want the full URL", links[0])
+			}
+			if visible := stripANSI(stripGeneratedHyperlinks(got)); !strings.Contains(visible, url) {
+				t.Errorf("visible text lost the URL: %q", visible)
+			}
+		})
+	}
+}
+
+// TestRenderMarkdown_WrappedEmphasisURLIsLinkedPerSegment keeps the wrapped
+// path covered: every visible fragment of an emphasized URL names the full URL.
+func TestRenderMarkdown_WrappedEmphasisURLIsLinkedPerSegment(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	const width = 40
+	const url = "https://github.com/travisennis/cake-repl/blob/master/docs/adr/020-repaint-the-frame-after-content-changes-to-heal-terminal-side-scrolls.md"
+	for _, tt := range []struct {
+		name string
+		text string
+	}{
+		{"bold", "**" + url + "**"},
+		{"double underscore bold", "__" + url + "__"},
+		{"asterisk italic", "*" + url + "*"},
+		{"underscore italic", "_" + url + "_"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderMarkdown(tt.text, width)
+			links := renderedLinks(t, got)
+			if len(links) < 2 {
+				t.Fatalf("wrapped emphasized URL produced %d links, want one per segment:\n%q", len(links), got)
+			}
+			var joined strings.Builder
+			for _, link := range links {
+				if link.target != url {
+					t.Errorf("link target = %q, want the full URL", link.target)
+				}
+				joined.WriteString(link.text)
+			}
+			if joined.String() != url {
+				t.Errorf("linked fragments join to %q, want %q", joined.String(), url)
+			}
+		})
+	}
+}
+
+// TestAddHyperlinks_DoesNotLinkPrefixWhenSourceContinuesWithBoundary pins the
+// boundary marks that can either end prose or continue a URL. A visible prefix
+// must stay unlinked when the markdown source resumes URL text after the mark.
+func TestAddHyperlinks_DoesNotLinkPrefixWhenSourceContinuesWithBoundary(t *testing.T) {
+	const url = "https://example.com/foo"
+	for _, suffix := range []string{"(bar)", ")bar", "#frag", "{bar}", "}bar", "|bar", "^bar", "*bar", "_bar"} {
+		t.Run(suffix, func(t *testing.T) {
+			got := addHyperlinks(url, url+suffix)
+			if links := renderedLinks(t, got); len(links) != 0 {
+				t.Fatalf("prefix linked although source continues with %q: %+v", suffix, links)
+			}
+		})
+	}
+}
+
+// TestAddHyperlinks_LinksURLWithTrailingBoundary is the other side of the
+// lookahead: a boundary mark at the end of the source terminates the URL.
+func TestAddHyperlinks_LinksURLWithTrailingBoundary(t *testing.T) {
+	for _, url := range []string{
+		"https://example.com/foo#",
+		"https://example.com/foo|",
+		"https://example.com/foo^",
+		"https://example.com/foo{",
+		"https://example.com/foo(",
+	} {
+		t.Run(url, func(t *testing.T) {
+			links := renderedLinks(t, addHyperlinks(url, url))
+			if len(links) != 1 {
+				t.Fatalf("got %d links, want 1 for %q", len(links), url)
+			}
+			if links[0].target != url || links[0].text != url {
+				t.Errorf("link = %+v, want %q", links[0], url)
+			}
+		})
+	}
+}
+
+// TestRenderMarkdown_LinksURLAtProseBrackets keeps parenthesized prose working:
+// the bracket stays outside the link when it is not part of the URL.
+func TestRenderMarkdown_LinksURLAtProseBrackets(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	const url = "https://example.com/foo"
+	for _, text := range []string{
+		"See (" + url + ").",
+		"See " + url + ").",
+	} {
+		t.Run(text, func(t *testing.T) {
+			got := RenderMarkdown(text, 80)
+			links := renderedLinks(t, got)
+			if len(links) != 1 {
+				t.Fatalf("got %d links, want 1:\n%q", len(links), got)
+			}
+			if links[0].target != url || links[0].text != url {
+				t.Errorf("link = %+v, want only the URL", links[0])
+			}
+			if visible := stripANSI(stripGeneratedHyperlinks(got)); !strings.Contains(visible, text) {
+				t.Errorf("visible text changed: %q", visible)
+			}
+		})
+	}
+}
+
+func TestRenderMarkdown_LinksURLBeforeSentenceMarkWithSpace(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	const url = "https://example.com/foo"
+	got := RenderMarkdown("See "+url+". Next sentence.", 80)
+	links := renderedLinks(t, got)
+	if len(links) != 1 {
+		t.Fatalf("got %d links, want 1:\n%q", len(links), got)
+	}
+	if links[0].target != url || links[0].text != url {
+		t.Errorf("link = %+v, want only the URL", links[0])
+	}
+}
+
+// TestRenderMarkdown_LinksURLWithUnderscore keeps an underscore that belongs to
+// the URL inside the visible run after emphasis delimiters stopped counting as
+// continuations.
+func TestRenderMarkdown_LinksURLWithUnderscore(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	const url = "https://example.com/foo_bar"
+	got := RenderMarkdown(url, 80)
+	links := renderedLinks(t, got)
+	if len(links) != 1 {
+		t.Fatalf("got %d links, want 1:\n%q", len(links), got)
+	}
+	if links[0].target != url || links[0].text != url {
+		t.Errorf("link = %+v, want the full URL", links[0])
+	}
+}
+
+// TestRenderMarkdown_LinksFullURLWithBoundaryText keeps the lookahead from
+// truncating a URL whose own text contains a bracket or fragment marker.
+func TestRenderMarkdown_LinksFullURLWithBoundaryText(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(orig)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	for _, url := range []string{
+		"https://example.com/foo#frag",
+		"https://example.com/foo(bar)",
+		"https://example.com/foo{bar}",
+		"https://example.com/foo^bar",
+		"https://example.com/foo|bar",
+	} {
+		t.Run(url, func(t *testing.T) {
+			got := RenderMarkdown("See "+url+".", 80)
+			links := renderedLinks(t, got)
+			if len(links) != 1 {
+				t.Fatalf("got %d links, want 1:\n%q", len(links), got)
+			}
+			if links[0].target != url || links[0].text != url {
+				t.Errorf("link = %+v, want the full URL", links[0])
+			}
+		})
+	}
+}

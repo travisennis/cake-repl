@@ -285,6 +285,15 @@ func completeURLInSource(source, url string) bool {
 // away from the rest. Looking past the marks keeps such a prefix unlinked
 // instead of generating a truncated target.
 //
+// Brackets and fragment/table marks (()#{}^|) are ambiguous the same way: a
+// closing bracket can end prose or belong to the URL, and #, |, ^, {, }, and (
+// can continue a URL in a rendered run. They therefore get the same lookahead
+// instead of being treated as an unconditional terminator. Emphasis
+// delimiters (* and _) are ambiguous too: glamour removes a delimiter from the
+// visible run, but the same character is legal URL text and can continue the
+// source URL. The lookahead links an emphasized URL while still refusing a
+// visible prefix of a longer URL such as ".../_bar".
+//
 // A non-ASCII rune is ambiguous: it is either prose punctuation that follows
 // the URL without a space (CJK full stops, an em dash), or a prose word or an
 // internationalized URL that cannot be told apart from a longer URL. Only
@@ -300,10 +309,10 @@ func urlContinuesInSource(rest string) bool {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 			return true
 		}
-		if strings.ContainsRune("-_:~/?@$&*+=%[]", r) {
+		if strings.ContainsRune("-:~/?@$&+=%[]", r) {
 			return true
 		}
-		if !strings.ContainsRune(".,;!?'\"", r) {
+		if !strings.ContainsRune(".,;!?'\"()#{}^|*_", r) {
 			return false
 		}
 		rest = rest[size:]
