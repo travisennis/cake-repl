@@ -109,11 +109,11 @@ func (m Model) presentationState() presentation {
 			hint:        "Ctrl+N new session",
 			titleMarker: "[stopping]",
 		}
-	case m.suggestionActive() && m.input.Value() == "":
+	case m.suggestionActive():
 		return presentation{
 			activity: activityReady,
 			label:    "idle",
-			hint:     "Ctrl+S use suggestion · type to dismiss",
+			hint:     "Ctrl+S insert suggestion · type to hide",
 		}
 	default:
 		return presentation{

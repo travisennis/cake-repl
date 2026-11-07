@@ -26,7 +26,7 @@ func presentationModel(t *testing.T) Model {
 func TestPresentationStateCoversReachableStates(t *testing.T) {
 	const (
 		submitHint          = "Ctrl+S submit · Enter newline · /help"
-		suggestionHint      = "Ctrl+S use suggestion · type to dismiss"
+		suggestionHint      = "Ctrl+S insert suggestion · type to hide"
 		cancelHint          = "Ctrl+C cancel · Ctrl+N new session"
 		newSessionHint      = "Ctrl+N new session"
 		replayHint          = "Ctrl+C exit · Ctrl+N new session"

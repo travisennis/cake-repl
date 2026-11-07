@@ -39,9 +39,11 @@ supported `replay <uuid>`, `sessions list --json`, and
 `trust --status --json` commands, and its documented session, model, profile,
 tools, and add-dir flags.
 
-When `[suggestions]` is enabled, a completed turn also runs the external
-`cake-suggest` binary and offers its suggested next prompt as dim ghost text in
-the composer. `Ctrl+S` accepts the suggestion; any typing dismisses it.
+When `[suggestions]` is enabled, a completed turn or a clean startup resume
+also runs the external `cake-suggest` binary and offers its suggested next
+prompt as dim ghost text in the composer. `Ctrl+S` inserts the suggestion into
+the composer for editing; a second `Ctrl+S` submits it. Typing hides the ghost
+until the composer is empty again.
 
 ## Requirements
 
@@ -165,7 +167,7 @@ another policy (`read-only`, `workspace-write`, `workspace-write-interactive`, o
 |---|---|
 | `Enter` | insert newline |
 | `Tab` | complete slash commands |
-| `Ctrl+S` | submit prompt, or the shown suggestion when the input is empty |
+| `Ctrl+S` | insert a shown suggestion when the input is empty; otherwise submit the prompt |
 | `Ctrl+C` | cancel a running cake task or context compaction; cancel hydration and exit; quit when idle |
 | `Ctrl+N` | start a new session (cancels a running task, hydration, or compaction) |
 | `Ctrl+U` | clear input |
@@ -442,12 +444,15 @@ behavior. `reasoning-effort` requires a `cake-compact` build that supports
 ## Prompt suggestions (experimental)
 
 cake-repl can ask an external `cake-suggest` binary for the next user prompt
-after a completed turn. The suggestion is shown as dim ghost text in the
-composer, replacing the `Type a prompt…` placeholder. It is never real input
-until accepted: `Ctrl+S` submits the suggested text as an ordinary prompt, and
-any typing (or history recall, tab completion, or `Ctrl+U`) discards it. A
-suggestion beginning with `/` is still sent as a prompt, never executed as a
-slash command. The feature is opt-in, off by default, and experimental:
+after a completed turn or a clean startup resume. The suggestion is shown as dim
+ghost text in the composer, replacing the `Type a prompt…` placeholder. It is
+not real input until accepted: `Ctrl+S` inserts the suggested text into the
+composer, where it can be edited, and a second `Ctrl+S` submits it. While its
+text is unchanged, a filled suggestion is still sent as a prompt, never executed
+as a slash command; editing it restores normal command parsing. Typing hides the
+ghost until the composer is empty again, and `Ctrl+U` restores it by clearing the
+draft. History recall, tab completion, submit, a new session, a resume, and quit
+discard it. The feature is opt-in, off by default, and experimental:
 suggestion quality has not been qualified.
 
 ```toml
@@ -464,18 +469,19 @@ cake-suggest-bin = "cake-suggest"
 
 - The REPL runs one `cake-suggest suggest -json [-cake-bin <path>]
   [-model <name>] [-profile <name>] [-reasoning-effort <effort>] --
-  <session-id>` after a completed turn that ended cleanly and pinned a session.
-  It passes the resolved `[suggestions] model` and `profile` when set, falling
-  back independently to the REPL's `-model` and `-profile`, and omitting either
-  when empty. It passes `reasoning-effort` when set and omits it otherwise;
-  that key requires a `cake-suggest` build that accepts the flag. The suggester
-  reads the session itself; cake-repl never reads or writes session files. The
-  request is read-only, bounded, and model-owned: it never blocks prompt
-  submission and is canceled when the composer is edited, a new session
-  starts, the session target changes, or the REPL quits. A canceled child is
-  reaped before the REPL returns within the same bounded teardown, including
-  the quit and SIGINT/SIGTERM paths; keyboard input is ignored while that exit
-  is draining.
+  <session-id>` after a completed turn that ended cleanly and pinned a session,
+  or after a clean startup `-resume <uuid>` replay that ends at a completed,
+  non-errored turn. It passes the resolved `[suggestions] model` and `profile`
+  when set, falling back independently to the REPL's `-model` and `-profile`,
+  and omitting either when empty. It passes `reasoning-effort` when set and
+  omits it otherwise; that key requires a `cake-suggest` build that accepts the
+  flag. The suggester reads the session itself; cake-repl never reads or writes
+  session files. The request is read-only, bounded, and model-owned: it never
+  blocks prompt submission and is canceled when the composer is edited, a new
+  session starts, the session target changes, or the REPL quits. A canceled
+  child is reaped before the REPL returns within the same bounded teardown,
+  including the quit and SIGINT/SIGTERM paths; keyboard input is ignored while
+  that exit is draining.
 - The result is one JSON document:
   `{"suggested":true,"suggestion":"…","session_id":"…","reason":""}`. Unknown
   fields are ignored. A `suggested:false` document, a cancellation, or a result
@@ -483,7 +489,13 @@ cake-suggest-bin = "cake-suggest"
   exit, or timeout shows at most one warning per REPL process.
 - The suggestion is applied only when the input is still empty, the REPL is
   idle, the request is current, and the session pin is the one the request
-  named. A later result cannot overwrite a draft.
+  named. A later result cannot overwrite a draft. A shown ghost survives typing
+  while the composer has text and returns when the composer is empty again;
+  explicit draft or session actions discard it.
+- A clean startup `-resume <uuid>` replay that ends at a completed, non-errored
+  turn starts one suggestion after hydration settles. A failed, canceled,
+  incomplete, or warned replay does not. A bare `-resume` picker hydrates
+  nothing and keeps the no-suggestion-until-first-turn behavior.
 - A suggestion starts alongside an automatic context compaction from the same
   turn instead of waiting for the compactor. Cake replay is read-only and
   tolerates a trailing partial record, so the suggester safely reads the
@@ -505,8 +517,10 @@ cake-suggest-bin = "cake-suggest"
 See
 [ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
 [ADR 030](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
+[ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md),
+[ADR 036](docs/adr/036-fill-prompt-suggestions-into-the-composer-instead-of-submitting-them.md),
 and
-[ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md).
+[ADR 037](docs/adr/037-request-a-prompt-suggestion-after-startup-hydration.md).
 See
 [ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md)
 for the reasoning-effort selection.

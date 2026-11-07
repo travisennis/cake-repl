@@ -56,15 +56,24 @@ type suggestionHold struct {
 }
 
 // suggestionState owns the single after-turn suggestion request and its
-// presentation. request is the child lifecycle; ghost and held are pure
-// presentation. warned keeps a broken suggester to one visible warning per
+// presentation. request is the child lifecycle; ghost, held, and filledText are
+// pure presentation. warned keeps a broken suggester to one visible warning per
 // REPL process.
 type suggestionState struct {
 	request pendingOperation
 	seq     uint64
 	ghost   string
 	held    suggestionHold
-	warned  bool
+	// filledText is the exact composer value copied from ghost by fillSuggestion.
+	// While the trimmed composer still matches it, submit bypasses slash-command
+	// parsing; an edit changes the comparison and restores normal parsing.
+	filledText string
+	// hydrated marks a clean startup replay that ended at a completed, non-errored
+	// turn. It is suggestion-only eligibility: it must not write the live run
+	// outcome or enable between-turn compaction. clearSuggestion drops it at any
+	// draft or session boundary.
+	hydrated bool
+	warned   bool
 }
 
 // phase returns the one suggestion lifecycle state. Disabled is a config
@@ -147,7 +156,8 @@ func (m Model) suggestionBusy() bool {
 // canSuggest reports whether the REPL may start a suggestion request now. It is
 // deliberately stricter than "a turn just ended": the request starts only with
 // an empty composer, an idle program, and a pinned session that has a completed
-// turn behind it. A draft always wins over a suggestion.
+// turn behind it. A clean startup hydration that ended at a completed turn is
+// the other source of that evidence. A draft always wins over a suggestion.
 //
 // Compaction is intentionally not part of the gate: the suggester reads the
 // session through cake's read-only replay stream, which tolerates a concurrent
@@ -164,7 +174,7 @@ func (m Model) canSuggest() bool {
 	if m.input.Value() != "" {
 		return false
 	}
-	if !m.completedTurn() {
+	if !m.completedTurn() && !m.suggestion.hydrated {
 		return false
 	}
 	mode, sessionID := m.session.RunOptions()
@@ -338,14 +348,48 @@ func (m *Model) warnSuggestion(text string) {
 	m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
 }
 
-// clearSuggestion removes the visible ghost and held result, and cancels any
-// in-flight request. It is called for every input action that supersedes a
-// suggestion: typing, history recall, completion, submit, a new session, a
-// resume, and quit.
+// clearSuggestion removes the visible ghost, held result, and filled-text
+// provenance, and cancels any in-flight request. It is called for actions that
+// supersede a suggestion: history recall, completion, submit, a new session, a
+// resume, and quit. Ordinary typing uses hideSuggestion so the ghost can return
+// when the composer is empty again.
 func (m *Model) clearSuggestion() {
 	m.suggestion.dropHeld()
+	m.suggestion.filledText = ""
+	m.suggestion.hydrated = false
 	m.cancelSuggestion()
 	m.writeSuggestionGhost("")
+}
+
+// hideSuggestion keeps a shown ghost available for restore but cancels any
+// in-flight request, so a late result cannot overwrite the user's draft. The
+// placeholder is deliberately left in place: it is not rendered while the
+// composer has text, and restoring it after the text is cleared is then free.
+func (m *Model) hideSuggestion() {
+	m.cancelSuggestion()
+}
+
+// fillSuggestion copies a shown, already-normalized suggestion into the
+// composer as editable text without starting a run. The ghost is cleared so the
+// text is now a draft; filledText preserves the model-output provenance until
+// the user edits it or clears it.
+func (m *Model) fillSuggestion() {
+	text := m.suggestion.ghost
+	if text == "" {
+		return
+	}
+	m.clearSuggestion()
+	m.input.SetValue(text)
+	m.suggestion.filledText = text
+	m.layout()
+	m.contentChanged = true
+}
+
+// filledSuggestion reports whether the composer still holds exactly the text
+// copied from a suggestion. Slash-command parsing is bypassed only in this
+// state; any edit makes the text the user's own.
+func (m Model) filledSuggestion() bool {
+	return m.suggestion.filledText != "" && strings.TrimSpace(m.input.Value()) == m.suggestion.filledText
 }
 
 // cancelSuggestion stops an in-flight request and invalidates its identity. The
@@ -356,9 +400,11 @@ func (m *Model) cancelSuggestion() {
 	m.suggestion.invalidate()
 }
 
-// suggestionActive reports whether a ghost suggestion is currently shown.
+// suggestionActive reports whether a ghost suggestion is currently visible. A
+// ghost hidden behind a draft keeps its state but is not active: the footer and
+// submit path must behave like an ordinary draft until the composer is empty.
 func (m Model) suggestionActive() bool {
-	return m.suggestionPhase() == suggestionShown
+	return m.suggestionPhase() == suggestionShown && m.input.Value() == ""
 }
 
 // normalizeSuggestion turns the suggester's document text into one bounded,

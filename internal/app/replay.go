@@ -269,7 +269,27 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
 		}
 	}
+	// A clean replay that ends at a completed, non-errored turn is the startup
+	// evidence for one suggestion after the replay child is reaped. It is a
+	// suggestion-only flag: hydration must not write the live run outcome or
+	// start compaction. A replay task_start clears sawComplete, so an earlier
+	// completion cannot qualify a session whose final turn is incomplete. See
+	// ADR 037.
+	hydratedCompletion := !msg.res.Canceled && msg.res.Err == nil && msg.res.ExitCode == 0 &&
+		!m.replay.warned && m.sawComplete && m.session.LastComplete != nil &&
+		!m.session.LastComplete.IsError
+	if hydratedCompletion {
+		m.suggestion.hydrated = true
+	}
 	m.finishPendingTools()
 	m.syncViewport()
-	return m.afterPresentationChange()
+	next, cmd := m.afterPresentationChange()
+	if !hydratedCompletion {
+		return next, cmd
+	}
+	next, suggestionCmd := next.maybeStartSuggestion()
+	if suggestionCmd == nil {
+		return next, cmd
+	}
+	return next, tea.Batch(cmd, suggestionCmd)
 }

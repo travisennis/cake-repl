@@ -444,9 +444,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startNewSession()
 
 	case key.Matches(msg, m.keys.ClearInput):
-		m.clearSuggestion()
 		m.input.Reset()
+		m.suggestion.filledText = ""
 		m.layout()
+		// Clearing a draft reveals a hidden suggestion again; an in-flight request
+		// has no result to restore and still belongs to the superseded draft.
+		m.hideSuggestion()
 		return m, nil
 
 	case key.Matches(msg, m.keys.PageUp), key.Matches(msg, m.keys.PageDown):
@@ -467,8 +470,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// multi-line input they keep moving the cursor.
 	case key.Matches(msg, m.keys.HistoryPrev):
 		if m.input.Line() == 0 {
-			m.clearSuggestion()
 			if text, ok := m.history.Prev(m.input.Value()); ok {
+				m.clearSuggestion()
 				m.input.SetValue(text)
 				m.layout()
 				return m, nil
@@ -477,8 +480,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.HistoryNext):
 		if m.input.Line() == m.input.LineCount()-1 {
-			m.clearSuggestion()
 			if text, ok := m.history.Next(); ok {
+				m.clearSuggestion()
 				m.input.SetValue(text)
 				m.layout()
 				return m, nil
@@ -487,15 +490,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Any key that reaches here modifies the input — reset the completion cycle
-	// and dismiss a ghost suggestion before the character is inserted, so a
-	// suggestion is never appended to by the first typed word.
-	m.clearSuggestion()
+	// and hide a ghost suggestion before the character is inserted. Hiding keeps
+	// the ghost available until the composer is empty again; the first typed word
+	// is never appended to the suggestion.
+	m.hideSuggestion()
 	m.completionPrefix = ""
 	m.completionMatches = nil
 	m.completionIdx = 0
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	// A fill is model-output provenance only while the composer still holds the
+	// exact suggestion. The first real edit, including deleting back to empty,
+	// clears it so a later coincidence cannot bypass slash-command parsing.
+	if m.suggestion.filledText != "" && !m.filledSuggestion() {
+		m.suggestion.filledText = ""
+	}
 	m.layout() // input height tracks line count
 	return m, cmd
 }
@@ -621,7 +631,21 @@ func (m Model) copySessionID() (tea.Model, tea.Cmd) {
 }
 
 // handleTabComplete implements Tab key completion with cycling.
-func (m Model) handleTabComplete() (tea.Model, tea.Cmd) {
+func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
+	before := m.input.Value()
+	filled := m.suggestion.filledText
+	defer func() {
+		// ClearSuggestion drops the ghost and cancels the request, but Tab with no
+		// matching completion changes no text. Preserve the fill provenance in
+		// that case so an unedited model-produced /command still cannot run; a
+		// completion that changes the text keeps the cleared provenance.
+		if model, ok := next.(Model); ok {
+			if model.input.Value() == before && filled != "" {
+				model.suggestion.filledText = filled
+			}
+			next = model
+		}
+	}()
 	// Tab is an input action; a suggestion is a one-key hint, not a prefix to
 	// complete. Dismiss it before the completer reads the (empty) input.
 	m.clearSuggestion()
@@ -689,18 +713,19 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	text := strings.TrimSpace(m.input.Value())
-	// Ctrl+S on an empty composer accepts the ghost suggestion. The suggestion
-	// is model output, not a user-issued command, so it skips slash-command
-	// parsing and always starts an ordinary prompt run.
-	fromSuggestion := false
+	// Ctrl+S on an empty composer inserts the ghost suggestion instead of
+	// submitting it. Acceptance is editable text; a second Ctrl+S is the submit
+	// action, and the filled-text provenance below keeps an unedited suggestion
+	// from ever becoming a slash command.
 	if text == "" && m.suggestionActive() {
-		text = m.suggestion.ghost
-		fromSuggestion = true
+		m.fillSuggestion()
+		return m, nil
 	}
 	if text == "" {
 		return m, nil
 	}
 
+	fromSuggestion := m.filledSuggestion()
 	if !fromSuggestion {
 		if cmd, ok, err := ParseCommand(text); ok {
 			if m.history.Add(text) && m.persistHistory(text) {
@@ -834,10 +859,12 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	// A prompt attempt supersedes the previous completed-turn answer even if
-	// cake.Start itself fails and no run phase begins.
+	// cake.Start itself fails and no run phase begins. It also ends any startup
+	// hydration eligibility.
 	m.sawComplete = false
 	m.runOutcome = outcomeNone
 	m.runGeneration = 0
+	m.suggestion.hydrated = false
 	mode, resumeID := m.session.RunOptions()
 	run, err := cake.Start(cake.Options{
 		Bin:          m.cfg.CakeBin,
@@ -898,6 +925,12 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		m.session.OnTaskStart(e)
 		m.session.OnModel(e.ModelConfig, e.Model)
 		m.appendItem(ui.Item{Kind: ui.KindTaskStart, Text: "task started · session " + ui.ShortID(e.SessionID)})
+		if replay {
+			// A later task_start means the session's final turn is not yet proven
+			// complete; an earlier task_complete must not make the startup
+			// suggestion eligible. See ADR 037.
+			m.sawComplete = false
+		}
 
 	case cake.SessionMeta:
 		if replay {

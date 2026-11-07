@@ -112,13 +112,18 @@ consumes cake events. This is the project's core external contract.
   success shape; `suggested:false` is a silent no-op. The REPL accepts the
   suggestion only when the document's `session_id` matches the request, the
   request identity is current, the session pin is unchanged, the REPL is idle,
-  and the composer is empty. A request starts alongside an automatic
+  and the composer is empty. A shown ghost survives typing and returns when the
+  composer is empty again; explicit draft or session actions discard it. A
+  request starts alongside an automatic
   compaction; because Cake replay is read-only and skips a trailing partial
   record, the concurrent checkpoint append is safe. A result that arrives while
   compaction gates the composer is held and applied after the compactor
   settles. The text is sanitized, whitespace-collapsed to one line, and bounded
-  before it becomes placeholder ghost text; it is never parsed as a slash
-  command.
+  before it becomes placeholder ghost text. `Ctrl+S` fills the composer with
+  that text without submitting; a second `Ctrl+S` submits it. While the filled
+  text is unchanged, submit bypasses slash-command parsing; editing it restores
+  normal parsing. A clean startup `-resume <uuid>` hydration ending at a
+  completed, non-errored turn starts one request after the replay is reaped.
   Cancellation is silent when the child is signal-terminated; a child that exits
   non-zero on its own after the cancel is a failure. A missing binary, non-zero
   exit, malformed document (including a missing required `suggested` field), or
@@ -217,8 +222,10 @@ consumes cake events. This is the project's core external contract.
   SIGTERM-ignoring child that the `WaitDelay` force-kills, and the `WaitDelay`
   teardown when a descendant holds stdout. App tests drive the completed-turn
   trigger, the `is_error` rejection, the compaction ordering, applying a result,
-  stale/wrong-session rejection, the draft-wins rule, dismissal on typing,
-  acceptance through `Ctrl+S`, the missing-field warning, cancellation on new
+  stale/wrong-session rejection, the draft-wins rule, hide/restore on typing,
+  fill-without-submit, the second-Ctrl+S submit, edited-text slash parsing,
+  the missing-field warning, startup eligibility and rejection on incomplete or
+  failed hydration, cancellation on new
   session, the one-request gate while a child drains, quit/teardown draining
   (including ignored keyboard input), and the teardown wait; none may need a
   real cake or a model call.

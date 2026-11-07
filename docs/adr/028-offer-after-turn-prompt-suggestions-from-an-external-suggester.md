@@ -164,3 +164,10 @@ cake-suggest-bin = "cake-suggest"
   supersedes the trigger clause: the suggestion now starts alongside an
   automatic compaction, and a result arriving while the compacting gate is
   closed is held until the compactor settles.
+- [ADR 036](036-fill-prompt-suggestions-into-the-composer-instead-of-submitting-them.md)
+  partially supersedes **Accept and dismiss**: `Ctrl+S` now fills the composer
+  instead of submitting, typing hides and restores the ghost, and an unedited
+  filled suggestion still bypasses slash-command parsing.
+- [ADR 037](037-request-a-prompt-suggestion-after-startup-hydration.md)
+  partially supersedes the trigger: a clean startup `-resume <uuid>` hydration
+  that ends at a completed turn now starts one suggestion.

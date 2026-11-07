@@ -108,7 +108,7 @@ const HelpText = `commands
 
 keybindings
   enter            insert newline
-  ctrl+s           submit prompt (or the shown suggestion when empty)
+  ctrl+s           submit prompt (or insert a shown suggestion when empty)
   ctrl+c           cancel running task or compaction; cancel hydration and exit; quit when idle
   ctrl+n           start a new session (cancels a running task, hydration, or compaction)
   ctrl+u           clear input

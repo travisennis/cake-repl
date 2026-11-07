@@ -74,8 +74,8 @@ commands or help text (`internal/app/commands.go`), key bindings
   operation during an active run, hydration, or compaction, and `/exit` cancels
   any of them before exiting. A canceled child still gates prompt submission and
   session retargeting until it has been reaped.
-- **Key bindings.** `Enter` (newline), `Ctrl+S` (submit; when the input is
-  empty, submit the shown suggestion), `Ctrl+C`
+- **Key bindings.** `Enter` (newline), `Ctrl+S` (insert a shown suggestion
+  when the input is empty; otherwise submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden, starting from hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
   (scroll). `Ctrl+C` cancels a running task or compaction, cancels hydration
@@ -106,9 +106,12 @@ renders it in plain text like every other surface.
 - **Startup resume.** `-resume <uuid>` first invokes the read-only
   `cake --output-format stream-json replay <uuid>` command. It hydrates the
   visible timeline before the first prompt; failures show a warning and keep
-  the explicit resume pin usable. A bare `-resume` hydrates nothing: it opens
-  the startup session picker, pins nothing until a row is picked, and leaves the
-  REPL fresh when the picker is closed. The command `main` prints on exit
+  the explicit resume pin usable. A clean hydration that ends at a completed,
+  non-errored turn starts one prompt suggestion when the feature is enabled
+  ([ADR 037](../adr/037-request-a-prompt-suggestion-after-startup-hydration.md));
+  a failed, canceled, incomplete, or warned replay does not. A bare
+  `-resume` hydrates nothing: it opens the startup session picker, pins nothing
+  until a row is picked, and leaves the REPL fresh when the picker is closed. The command `main` prints on exit
   reuses the effective startup run controls (`-cwd`, `-config <path>` or
   `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
   `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`,
@@ -188,9 +191,14 @@ renders it in plain text like every other surface.
   `browsing sessions`, or `exiting`; its borders remain visible without color.
   When a prompt suggestion is showing, the empty composer renders it as dim
   placeholder ghost text and the footer reads
-  `Ctrl+S use suggestion · type to dismiss`; the textarea value stays empty,
-  so typing inserts only the user's characters. The ghost is never parsed as a
-  slash command when accepted. The footer advertises only actions the current
+  `Ctrl+S insert suggestion · type to hide`; the textarea value stays empty,
+  so typing inserts only the user's characters. Typing hides the ghost and
+  clearing the composer restores it; history recall, tab completion, submit, a
+  new session, a resume, and quit discard it. `Ctrl+S` fills the composer with
+  the suggestion instead of submitting it, and a second `Ctrl+S` submits. The
+  filled text remains ordinary input: while it is unchanged, submit bypasses
+  slash-command parsing, and editing it restores normal command parsing. The
+  ghost itself is never parsed as a slash command. The footer advertises only actions the current
   gate accepts: submit, newline, and help while idle;
   `Ctrl+C cancel · Ctrl+N new session` while a task or compaction is in flight;
   `Ctrl+N new session` while one drains;

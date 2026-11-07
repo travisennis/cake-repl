@@ -279,7 +279,7 @@ func TestFinishSuggestionAppliesDocument(t *testing.T) {
 	if len(m.timeline.items) != before {
 		t.Fatalf("suggestion added %d timeline items, want none", len(m.timeline.items)-before)
 	}
-	if got := m.composerHint(); got != "Ctrl+S use suggestion · type to dismiss" {
+	if got := m.composerHint(); got != "Ctrl+S insert suggestion · type to hide" {
 		t.Fatalf("composerHint = %q", got)
 	}
 }
@@ -313,7 +313,7 @@ func TestSuggestionFromFakeBinary(t *testing.T) {
 	if m.suggestion.doneChannel() != nil {
 		t.Fatal("suggestion drain channel still set after the fake child was reaped")
 	}
-	if got := m.composerHint(); got != "Ctrl+S use suggestion \u00b7 type to dismiss" {
+	if got := m.composerHint(); got != "Ctrl+S insert suggestion \u00b7 type to hide" {
 		t.Fatalf("composerHint = %q", got)
 	}
 }
@@ -422,11 +422,12 @@ func argsValue(args []string, name string) string {
 	return ""
 }
 
-func TestSuggestionDismissedByTyping(t *testing.T) {
+func TestSuggestionHiddenByTypingAndRestoredWhenCleared(t *testing.T) {
+	const suggestion = "Add a test for the new path."
 	m := startSuggestionForTest(t, suggestionReady(t))
 	m = finishSuggestionForTest(t, m, suggest.Result{
 		ExitCode: 0,
-		Document: suggestionDocument("Add a test for the new path."),
+		Document: suggestionDocument(suggestion),
 	})
 
 	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
@@ -434,43 +435,228 @@ func TestSuggestionDismissedByTyping(t *testing.T) {
 	if got := m.input.Value(); got != "x" {
 		t.Fatalf("input value = %q, want only the typed character", got)
 	}
-	if m.suggestionActive() || m.input.Placeholder != defaultInputPlaceholder {
-		t.Fatalf("ghost survived typing: text=%q placeholder=%q", m.suggestion.ghost, m.input.Placeholder)
+	if m.suggestionActive() {
+		t.Fatal("ghost remained active behind a draft")
+	}
+	if m.suggestion.ghost != suggestion {
+		t.Fatalf("typing destroyed the ghost: %q", m.suggestion.ghost)
+	}
+	if m.input.Placeholder != suggestion {
+		t.Fatalf("typing changed the placeholder: %q", m.input.Placeholder)
 	}
 	if got := m.composerHint(); got != "Ctrl+S submit · Enter newline · /help" {
 		t.Fatalf("composerHint = %q", got)
 	}
+
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = next.(Model)
+	if m.input.Value() != "" || !m.suggestionActive() {
+		t.Fatalf("cleared composer did not restore the suggestion: value=%q active=%v",
+			m.input.Value(), m.suggestionActive())
+	}
+	if m.suggestion.ghost != suggestion || m.input.Placeholder != suggestion {
+		t.Fatalf("restored presentation = ghost %q placeholder %q", m.suggestion.ghost, m.input.Placeholder)
+	}
+	if got := m.composerHint(); got != "Ctrl+S insert suggestion · type to hide" {
+		t.Fatalf("composerHint = %q", got)
+	}
 }
 
-func TestSubmitUsesSuggestionAsPrompt(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "fake-cake")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
+func TestCtrlUClearsDraftAndRestoresSuggestion(t *testing.T) {
+	const suggestion = "Add a test for the new path."
+	m := startSuggestionForTest(t, suggestionReady(t))
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument(suggestion),
+	})
+
+	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("draft")})
+	m = next.(Model)
+	if m.input.Value() != "draft" || m.suggestionActive() {
+		t.Fatalf("draft state = %q active=%v", m.input.Value(), m.suggestionActive())
 	}
 
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(Model)
+	if m.input.Value() != "" || !m.suggestionActive() {
+		t.Fatalf("ctrl+u did not restore the suggestion: value=%q active=%v",
+			m.input.Value(), m.suggestionActive())
+	}
+	if m.suggestion.ghost != suggestion {
+		t.Fatalf("restored ghost = %q", m.suggestion.ghost)
+	}
+}
+
+func TestSuggestionHistoryRecallDiscardsGhost(t *testing.T) {
 	m := startSuggestionForTest(t, suggestionReady(t))
-	m.cfg.CakeBin = bin
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("Add a test for the new path."),
+	})
+	m.history.Add("previous prompt")
+
+	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(Model)
+	if m.input.Value() != "previous prompt" {
+		t.Fatalf("history recall = %q", m.input.Value())
+	}
+	if m.suggestion.ghost != "" || m.suggestionActive() {
+		t.Fatalf("history recall kept the ghost: %q active=%v", m.suggestion.ghost, m.suggestionActive())
+	}
+}
+
+func TestSuggestionFillDoesNotSubmit(t *testing.T) {
+	m := startSuggestionForTest(t, suggestionReady(t))
 	m = finishSuggestionForTest(t, m, suggest.Result{
 		ExitCode: 0,
 		Document: suggestionDocument("/exit"),
 	})
+	before := len(m.timeline.items)
 
 	next, cmd := m.submit()
 	m = next.(Model)
+	if cmd != nil || m.runBusy() {
+		t.Fatalf("fill started work: running=%v cmd nil=%v", m.runBusy(), cmd == nil)
+	}
+	if got := m.input.Value(); got != "/exit" {
+		t.Fatalf("input = %q, want the filled suggestion", got)
+	}
+	if m.suggestion.ghost != "" || m.suggestionActive() {
+		t.Fatalf("fill left the ghost active: ghost=%q active=%v", m.suggestion.ghost, m.suggestionActive())
+	}
+	if m.suggestion.filledText != "/exit" {
+		t.Fatalf("filled provenance = %q", m.suggestion.filledText)
+	}
+	if m.input.Placeholder != defaultInputPlaceholder {
+		t.Fatalf("placeholder = %q, want the default", m.input.Placeholder)
+	}
+	if len(m.timeline.items) != before {
+		t.Fatalf("fill added %d timeline items, want none", len(m.timeline.items)-before)
+	}
+	if got := m.composerHint(); got != "Ctrl+S submit · Enter newline · /help" {
+		t.Fatalf("composerHint = %q", got)
+	}
+
+	// The second Ctrl+S submits the filled text as a prompt, not as the /exit
+	// command. The filled provenance is what keeps the slash-command bypass.
+	m.cfg.CakeBin = writeFakeCake(t, "exit 0\n")
+	next, cmd = m.submit()
+	m = next.(Model)
 	if cmd == nil || !m.runBusy() {
-		t.Fatalf("submit did not start a run: running=%v cmd nil=%v", m.runBusy(), cmd == nil)
+		t.Fatalf("second submit did not start a run: running=%v cmd nil=%v", m.runBusy(), cmd == nil)
 	}
 	if got := m.timeline.items[len(m.timeline.items)-1]; got.Kind != ui.KindUser || got.Text != "/exit" {
-		t.Fatalf("last item = %+v, want the suggestion as an ordinary user prompt", got)
-	}
-	if m.suggestionActive() || m.input.Placeholder != defaultInputPlaceholder {
-		t.Fatalf("accepted suggestion survived submit: text=%q placeholder=%q", m.suggestion.ghost, m.input.Placeholder)
-	}
-	if m.input.Value() != "" {
-		t.Fatalf("input value = %q, want reset", m.input.Value())
+		t.Fatalf("last item = %+v, want the filled suggestion as an ordinary user prompt", got)
 	}
 	m.run.Cancel()
+}
+
+func TestEditedFilledSuggestionParsesNormally(t *testing.T) {
+	m := startSuggestionForTest(t, suggestionReady(t))
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("/exit"),
+	})
+	next, _ := m.submit()
+	m = next.(Model)
+
+	m.input.SetValue("/session")
+	if m.filledSuggestion() {
+		t.Fatal("edited text still claims suggestion provenance")
+	}
+	next, cmd := m.submit()
+	m = next.(Model)
+	if cmd != nil || m.runBusy() {
+		t.Fatalf("edited text started a prompt run: running=%v cmd nil=%v", m.runBusy(), cmd == nil)
+	}
+	if it := m.timeline.items[len(m.timeline.items)-1]; it.Kind != ui.KindInfo || !strings.Contains(it.Text, "session:") {
+		t.Fatalf("edited slash command did not execute: %+v", it)
+	}
+}
+
+func TestClearingFilledSuggestionDropsProvenance(t *testing.T) {
+	m := startSuggestionForTest(t, suggestionReady(t))
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("/exit"),
+	})
+	next, _ := m.submit()
+	m = next.(Model)
+	if m.suggestion.filledText != "/exit" {
+		t.Fatalf("fill provenance = %q", m.suggestion.filledText)
+	}
+
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(Model)
+	if m.input.Value() != "" || m.suggestion.filledText != "" {
+		t.Fatalf("ctrl+u left value=%q provenance=%q", m.input.Value(), m.suggestion.filledText)
+	}
+
+	// Typing the same text again is now the user's own input, not the
+	// suggester's, so it must not regain the slash-command bypass.
+	m.input.SetValue("/exit")
+	if m.filledSuggestion() {
+		t.Fatal("retyped text regained suggestion provenance")
+	}
+}
+
+func TestDeletingFilledSuggestionDropsProvenance(t *testing.T) {
+	m := startSuggestionForTest(t, suggestionReady(t))
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("/exit"),
+	})
+	next, _ := m.submit()
+	m = next.(Model)
+
+	for range len("/exit") {
+		next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+		m = next.(Model)
+	}
+	if m.input.Value() != "" {
+		t.Fatalf("input = %q, want empty", m.input.Value())
+	}
+	if m.suggestion.filledText != "" {
+		t.Fatalf("deleting the fill left provenance %q", m.suggestion.filledText)
+	}
+}
+
+func TestTabWithoutTextChangePreservesFillProvenance(t *testing.T) {
+	m := startSuggestionForTest(t, suggestionReady(t))
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("/exit"),
+	})
+	next, _ := m.submit()
+	m = next.(Model)
+
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = next.(Model)
+	if m.input.Value() != "/exit" {
+		t.Fatalf("tab changed the text: %q", m.input.Value())
+	}
+	if !m.filledSuggestion() {
+		t.Fatal("no-op tab dropped the unedited fill provenance")
+	}
+}
+
+func TestTabCompletionChangingFillDropsProvenance(t *testing.T) {
+	m := startSuggestionForTest(t, suggestionReady(t))
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("/ex"),
+	})
+	next, _ := m.submit()
+	m = next.(Model)
+
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = next.(Model)
+	if m.input.Value() != "/exit" {
+		t.Fatalf("tab completion = %q, want /exit", m.input.Value())
+	}
+	if m.suggestion.filledText != "" || m.filledSuggestion() {
+		t.Fatalf("completion change kept provenance %q", m.suggestion.filledText)
+	}
 }
 
 func TestSuggestionStaleResultIgnored(t *testing.T) {
@@ -991,6 +1177,124 @@ func TestFinishCompactionDoesNotStartSuggestion(t *testing.T) {
 	})
 	if m.suggestionPhase() == suggestionInFlight || m.suggestion.request.key.request != 0 {
 		t.Fatalf("finishCompaction started a second request: phase=%v req=%d", m.suggestionPhase(), m.suggestion.request.key.request)
+	}
+}
+
+// TestStartupReplaySuggestionEligibility covers the startup trigger: only a
+// clean hydration whose final turn completed successfully may start a
+// suggestion. A later task_start invalidates an earlier completion, and an
+// errored final completion never qualifies.
+func TestStartupReplaySuggestionEligibility(t *testing.T) {
+	const sessionMeta = `{"type":"session_meta","session_id":"11111111-2222-3333-4444-555555555555"}
+`
+	const taskStart = `{"type":"task_start","session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task"}
+`
+	const taskComplete = `{"type":"task_complete","subtype":"success","is_error":false,"session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task"}
+`
+	const taskFailed = `{"type":"task_complete","subtype":"error","is_error":true,"session_id":"11111111-2222-3333-4444-555555555555","task_id":"old-task"}
+`
+
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"completed final turn", sessionMeta + taskStart + taskComplete, true},
+		{"incomplete final turn", sessionMeta + taskStart + taskComplete + taskStart, false},
+		{"errored final turn", sessionMeta + taskStart + taskFailed, false},
+		{"no completion", sessionMeta + taskStart, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bin := writeFakeCake(t, `
+if [ "$3" = "replay" ]; then
+cat <<'EOF'
+`+tt.body+`EOF
+fi
+`)
+			m := New(Config{
+				CakeBin:     bin,
+				Cwd:         t.TempDir(),
+				InitialMode: cake.RunResume,
+				ResumeID:    suggestionSessionID,
+				Suggestions: SuggestionConfig{Enabled: true, Bin: "cake-suggest"},
+			})
+			m.width, m.height = 120, 24
+			m.layout()
+			m = hydrateTestModel(t, m)
+
+			inFlight := m.suggestionPhase() == suggestionInFlight
+			if inFlight != tt.want {
+				t.Fatalf("suggestion in flight = %v (phase %v), want %v", inFlight, m.suggestionPhase(), tt.want)
+			}
+			if m.suggestion.hydrated != tt.want {
+				t.Fatalf("hydrated completion flag = %v, want %v", m.suggestion.hydrated, tt.want)
+			}
+			if m.completedTurn() {
+				t.Fatal("startup replay recorded a live completed turn")
+			}
+			if tt.want {
+				m.cancelSuggestion()
+			}
+		})
+	}
+}
+
+func TestStartupReplayFailureDoesNotStartSuggestion(t *testing.T) {
+	bin := writeFakeCake(t, `
+if [ "$3" = "replay" ]; then
+printf '%s\n' '{"type":"replay_error","kind":"session_corrupt","error":"corrupt transcript"}'
+exit 1
+fi
+`)
+	m := New(Config{
+		CakeBin:     bin,
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    suggestionSessionID,
+		Suggestions: SuggestionConfig{Enabled: true, Bin: "cake-suggest"},
+	})
+	m.width, m.height = 120, 24
+	m.layout()
+	m = hydrateTestModel(t, m)
+
+	if m.suggestionPhase() != suggestionIdle {
+		t.Fatalf("failed replay left suggestion phase %v, want idle", m.suggestionPhase())
+	}
+	if m.suggestion.hydrated {
+		t.Fatal("failed replay marked a hydrated completion")
+	}
+	if m.completedTurn() {
+		t.Fatal("failed replay recorded a completed turn")
+	}
+}
+
+func TestCanceledStartupReplayDoesNotStartSuggestion(t *testing.T) {
+	m := New(Config{
+		Cwd:         t.TempDir(),
+		InitialMode: cake.RunResume,
+		ResumeID:    suggestionSessionID,
+		Suggestions: SuggestionConfig{Enabled: true, Bin: "cake-suggest"},
+	})
+	m.width, m.height = 120, 24
+	m.layout()
+	key := beginTestReplay(&m)
+	m.sawComplete = true
+	m.session.LastComplete = &cake.TaskComplete{SessionID: suggestionSessionID}
+
+	next, cmd := m.finishReplay(replayDoneMsg{key: key, res: cake.Result{Canceled: true}})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("canceled replay did not return a title command")
+	}
+	if m.suggestionPhase() != suggestionIdle {
+		t.Fatalf("canceled replay left suggestion phase %v, want idle", m.suggestionPhase())
+	}
+	if m.suggestion.hydrated {
+		t.Fatal("canceled replay marked a hydrated completion")
+	}
+	if m.completedTurn() {
+		t.Fatal("canceled replay recorded a completed turn")
 	}
 }
 

@@ -138,10 +138,17 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   placeholder ghost text, not as the textarea value. A result that arrives while
   compaction still gates the composer is held, then applied only if those
   conditions still hold after the compactor settles; the REPL does not start a
-  second suggestion after compaction. `Ctrl+S` submits it as an ordinary prompt
-  with slash-command parsing bypassed; typing, history recall, tab completion,
-  `Ctrl+U`, submit, `Ctrl+N`, `/new`, `/resume`, `/sessions`, quit, and an
-  unobserved exit discard the ghost or held result and cancel the request. An
+  second suggestion after compaction. `Ctrl+S` inserts the ghost into the
+  composer as editable text and never submits by itself; a second `Ctrl+S`
+  submits the filled text as an ordinary prompt with slash-command parsing
+  bypassed while the text is unchanged. Editing the filled text restores normal
+  parsing. Typing hides the ghost but keeps it, and clearing the composer
+  (including `Ctrl+U`) restores it; history recall, tab completion, submit,
+  `Ctrl+N`, `/new`, `/resume`, `/sessions`, quit, and an unobserved exit discard
+  the ghost or held result and cancel the request. A clean startup `-resume
+  <uuid>` hydration that ends at a completed, non-errored turn starts one
+  suggestion after the replay child is reaped; a failed, canceled, incomplete,
+  or warned replay does not. An
   in-flight child stays tracked after invalidation; only one suggestion request
   runs at a time, and quit or an unobserved exit waits for the canceled child
   to be reaped within the same bounded teardown before the program returns. The
