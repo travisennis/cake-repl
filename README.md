@@ -21,12 +21,13 @@ The status line leads with the current operation — `idle`, `running`,
 session, next-run, model, context, and working-directory context. The model
 shown is the identity cake reports on the stream once available — the
 `[[models]]` entry name, falling back to the provider model ID — and otherwise
-the `-model`/config value. The context segment reports the newest complete
-main-agent attempt's input tokens against the model's configured window when cake
-reports one (for example `context: 132k/1M`), or a bare token count when the
-model configures no window. It is omitted until cake reports a complete
-measurement or a context checkpoint supplies an estimate, and cleared when the
-session target changes. Replay seeds it from a context checkpoint's own estimate,
+the current `/model` selection (initialized from `-model`/config). The context
+segment reports the newest complete main-agent attempt's input tokens against
+the model's configured window when cake reports one (for example
+`context: 132k/1M`), or a bare token count when the model configures no window.
+It is omitted until cake reports a complete measurement or a context checkpoint
+supplies an estimate, and cleared when the session target or turn selection
+changes. Replay seeds it from a context checkpoint's own estimate,
 marked with `~` (for example `~24k/200k`) because that is cake's estimate rather
 than a provider measurement; a newer complete `turn_usage`, replayed after the
 checkpoint or reported by a live turn, replaces it. Once a run reports a session
@@ -131,8 +132,8 @@ Flags:
 | `-fork [<uuid>]` | fork the latest session, or a specific session UUID, on the first prompt |
 | `-resume [<uuid>]` | with a UUID: replay visible history when supported, then resume that cake session on the first prompt; without one: pick this directory's past sessions at startup |
 | `-no-session` | do not save the cake session to disk |
-| `-model <name>` | passed through to cake |
-| `-profile <name>` | passed through to cake |
+| `-model <name>` | initial model for the first prompt; `/model` changes it |
+| `-profile <name>` | initial profile for the first prompt; `/profile` changes it |
 | `-add-dir <dir>` | add a directory to cake's sandbox as read-only; repeatable |
 | `-toolbox <dir>` | add a directory of user-defined cake tools; repeatable |
 | `-sandbox <policy>` | sandbox policy passed through to cake (default: `workspace-write-interactive`) |
@@ -202,6 +203,8 @@ down. The status line and timeline only show it shortened.
 | `/sessions` | browse this directory's past sessions and resume one |
 | `/session` | show session id, task id, cwd, run mode, last completion |
 | `/session copy` | copy the full session id to the clipboard |
+| `/model [name]` | show or set the model for the next prompt; `default` clears it |
+| `/profile [name]` | show or set the profile for the next prompt; `default` clears it |
 | `/clear` | clear the timeline (session state is kept) |
 
 ## Session behavior
@@ -222,16 +225,18 @@ down. The status line and timeline only show it shortened.
 - The status-line model comes from the stream when cake reports one: replay
   hydration reads `session_meta.model_config` (falling back to
   `session_meta.model`), and a newer cake reports the same optional identity on
-  `task_start`. Until then the `-model`/config value is shown, which is also
-  what an older cake keeps showing. A new session or a switch to a different
-  `-resume` target drops the reported identity.
+  `task_start`. Until then the current `/model` selection is shown (initialized
+  from `-model`/config), which is also what an older cake keeps showing. A new
+  session, a switch to a different `-resume` target, or a `/model`/`/profile`
+  change drops the reported identity.
 - The status-line context segment comes from cake's per-turn `turn_usage`
   stream record, in live runs and replay hydration alike. It shows the newest
   complete main-agent measurement's input tokens against the configured window
   (`132k/1M`), or the bare token count when the model configures no window.
   Partial usage records are ignored, an older cake that emits no record leaves
-  the segment out entirely, and a new session or a different `-resume` target
-  clears the measurement until that session reports its own. When replay
+  the segment out entirely, and a new session, a different `-resume` target, or
+  a `/model`/`/profile` change clears the measurement until the next run reports
+  its own. When replay
   hydrates a session containing a `compaction` record, that checkpoint's
   `estimated_input.after_tokens` seeds the segment and is prefixed with `~`
   (`~24k/200k`) because it is cake's estimate, not a provider measurement. A
@@ -242,11 +247,18 @@ down. The status line and timeline only show it shortened.
   announced, so the next prompt continues the session the run left behind
   instead of orphaning it.
 - `/new` clears local session state; the next prompt starts fresh.
+- `/model` and `/profile` set the model and profile used by the next prompt.
+  The startup `-model`/`-profile` or config values initialize the selection;
+  `default` clears a value to cake's own resolution. The selection survives
+  `/new`, `Ctrl+N`, and `/resume` until changed, and both commands require an
+  idle REPL. See
+  [ADR 007](docs/adr/007-model-and-profile-slash-commands-are-idle-only.md).
 - `Ctrl+N` clears the timeline and local session state immediately. If a task
   is running, it is canceled and its remaining events are discarded. Prompt
-  submission and `/new`, `/resume`, and `/sessions` stay refused until the
-  canceled child is reaped, so the next cake process cannot race it. Prompt
-  history, the current input draft, and model/profile settings are preserved.
+  submission and `/new`, `/resume`, `/sessions`, `/model`, and `/profile` stay
+  refused until the canceled child is reaped, so the next cake process cannot
+  race it. Prompt history, the current input draft, and the current
+  `/model`/`/profile` selection are preserved.
 - `/resume <uuid>` applies to the next prompt; once it succeeds, later prompts
   stay pinned to the same session. Choosing a different session — through
   `/resume` or the `/sessions` browser's `Enter` — drops the reported identity
@@ -267,7 +279,7 @@ down. The status line and timeline only show it shortened.
   listing that is still loading, so a slow helper never keeps running after you
   are done with it, and a prompt typed after closing is submitted normally. A
   missing or older cake binary, or malformed output, shows a non-fatal warning.
-  Like `/new` and `/resume`, it requires an idle REPL.
+  Like `/new`, `/resume`, `/model`, and `/profile`, it requires an idle REPL.
 - At startup cake-repl starts the read-only `cake trust --status --json` command
   once. When it returns, an untrusted, changed, or invalid `.cake/` snapshot, or
   an unrecognized trust state, adds a warning to the timeline naming the state,
@@ -288,10 +300,11 @@ down. The status line and timeline only show it shortened.
   `/resume <uuid>`, and `Esc` or `q` leaves the REPL idle and fresh so the next
   prompt starts a new session. `-resume <uuid>` keeps the replay-and-pin startup
   path above, and `-fork` stays mutually exclusive with `-resume` in both forms.
-- `/new` and `/resume` are rejected while a task, startup replay, or context
-  compaction is running or draining. Finish or cancel it first (Ctrl+C), or use
-  `Ctrl+N` to cancel and start a new session in one action; the retarget stays
-  refused until the canceled child has been reaped.
+- `/new`, `/resume`, `/sessions`, `/model`, and `/profile` are rejected while a
+  task, startup replay, or context compaction is running or draining. Finish or
+  cancel it first (Ctrl+C), or use `Ctrl+N` to cancel and start a new session in
+  one action; the retarget stays refused until the canceled child has been
+  reaped.
 - On exit, cake-repl prints the command that resumes the session. The hint
   reproduces the effective startup run controls — `-cwd`, `-config <path>` or
   `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
@@ -302,7 +315,8 @@ down. The status line and timeline only show it shortened.
   defaults. An explicit override that clears or defaults a value — `-sandbox ""`,
   `-model ""`, `-profile ""`, or `-cake-bin cake` — is re-emitted (for example
   `-sandbox ''`), so reloading the config cannot reintroduce a value the original
-  run suppressed.
+  run suppressed. The hint reflects the startup controls; a later `/model` or
+  `/profile` change is not reflected.
 
 ## Context compaction (experimental)
 
@@ -643,7 +657,8 @@ paths keep their usual resolution. A CLI flag always wins over the
 same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
 `-system-prompt` are startup-only CLI flags and are not persisted in the
-config file.
+config file. `model` and `profile` remain stable config defaults; `/model` and
+`/profile` change only the current REPL session and are not written back.
 
 ## Tests
 

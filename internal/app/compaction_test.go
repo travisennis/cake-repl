@@ -246,8 +246,8 @@ func compactionModelWithConfig(t *testing.T, cfg CompactionConfig, tokens, windo
 	m := laidOut(160, 24)
 	m.cfg.Compaction = cfg
 	m.cfg.CakeBin = "/opt/bin/cake"
-	m.cfg.Model = "test-model"
-	m.cfg.Profile = "test-profile"
+	m.turn.Model = "test-model"
+	m.turn.Profile = "test-profile"
 	m.session.OnTaskStart(cake.TaskStart{SessionID: compactionSessionID, TaskID: "t-1"})
 	m.applyEvent(cake.TurnUsage{
 		Usage:         cake.Usage{InputTokens: tokens},

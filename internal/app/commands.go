@@ -15,6 +15,8 @@ const (
 	CmdNew
 	CmdResume
 	CmdSession
+	CmdModel
+	CmdProfile
 	CmdClear
 	CmdSessions
 )
@@ -38,6 +40,8 @@ var commandTable = []struct {
 	{"/resume", CmdResume},
 	{"/sessions", CmdSessions},
 	{"/session", CmdSession},
+	{"/model", CmdModel},
+	{"/profile", CmdProfile},
 	{"/clear", CmdClear},
 	{"/quit", CmdExit},
 	{"/q", CmdExit},
@@ -82,6 +86,15 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 					return Command{Kind: CmdSession, Arg: "copy"}, true, nil
 				}
 				return Command{}, true, fmt.Errorf("usage: /session [copy]")
+			case CmdModel, CmdProfile:
+				arg, valid := parseTurnSelectionArg(strings.TrimSpace(trimmed[len(name):]))
+				if !valid {
+					return Command{}, true, fmt.Errorf("usage: %s [<name>|default]", name)
+				}
+				if strings.EqualFold(arg, "default") {
+					arg = "default"
+				}
+				return Command{Kind: entry.kind, Arg: arg}, true, nil
 			default:
 				return Command{Kind: entry.kind}, true, nil
 			}
@@ -89,6 +102,35 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 	}
 
 	return Command{}, true, fmt.Errorf("unknown command: %s (try /help)", name)
+}
+
+// parseTurnSelectionArg parses the optional argument for /model and /profile.
+// An empty rest is the status form; otherwise exactly one name is accepted,
+// either bare or quoted. An empty quoted argument and any extra input are not
+// part of the grammar. See ADR 007.
+func parseTurnSelectionArg(rest string) (string, bool) {
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", true
+	}
+	if rest[0] == '"' || rest[0] == '\'' {
+		if len(rest) < 2 || rest[len(rest)-1] != rest[0] || strings.Count(rest, string(rest[0])) != 2 {
+			return "", false
+		}
+		value := rest[1 : len(rest)-1]
+		if strings.TrimSpace(value) == "" {
+			return "", false
+		}
+		return value, true
+	}
+	if strings.ContainsAny(rest, `"'`) {
+		return "", false
+	}
+	fields := strings.Fields(rest)
+	if len(fields) != 1 {
+		return "", false
+	}
+	return fields[0], true
 }
 
 // HelpText lists commands and keybindings for /help.
@@ -102,9 +144,13 @@ const HelpText = `commands
   /session         show session id, task id, cwd, run mode, last result
   /session copy    copy the full session id to the clipboard
   /sessions        browse past sessions in this directory and pick one to resume
+  /model [name]    show or set the model for the next prompt
+                   (default clears to cake's default)
+  /profile [name]  show or set the profile for the next prompt
+                   (default clears to cake's default)
   /clear           clear the timeline (session state is kept)
 
-  /new, /resume, and /sessions require an idle REPL
+  /new, /resume, /sessions, /model, and /profile require an idle REPL
 
 keybindings
   enter            insert newline

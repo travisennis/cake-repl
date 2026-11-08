@@ -752,10 +752,12 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 }
 
 // needsIdle reports whether a command may only run against an idle REPL: it
-// either targets a session (or, for the browser, drives session selection) or
-// would race a running subprocess.
+// either targets a session, changes the next run's controls, or (for the
+// browser) drives session selection. All of them would race a running
+// subprocess.
 func needsIdle(kind CommandKind) bool {
-	return kind == CmdNew || kind == CmdResume || kind == CmdSessions
+	return kind == CmdNew || kind == CmdResume || kind == CmdSessions ||
+		kind == CmdModel || kind == CmdProfile
 }
 
 func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
@@ -804,6 +806,30 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		}
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.sessionInfo()})
 
+	case CmdModel:
+		switch cmd.Arg {
+		case "":
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.modelSelectionStatus()})
+		case "default":
+			m.selectModel("")
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt model: (cake default)"})
+		default:
+			m.selectModel(cmd.Arg)
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt model: " + cmd.Arg})
+		}
+
+	case CmdProfile:
+		switch cmd.Arg {
+		case "":
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.profileSelectionStatus()})
+		case "default":
+			m.selectProfile("")
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt profile: (cake default)"})
+		default:
+			m.selectProfile(cmd.Arg)
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt profile: " + cmd.Arg})
+		}
+
 	case CmdClear:
 		m.timeline.clear()
 		// Pending calls reference tool blocks directly; clear the map so a
@@ -812,6 +838,44 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.pendingCalls = map[string]*ui.ToolBlock{}
 	}
 	return m, nil
+}
+
+// selectModel stores the model for the next prompt and drops the reported
+// session identity and context figure so the status line shows the new
+// selection until the next run reports its own. The old measurement belongs to
+// the model being replaced and may carry a different window. See ADR 007 and
+// ADR 014.
+func (m *Model) selectModel(model string) {
+	m.turn.Model = model
+	m.session.Model = ""
+	m.session.Context = nil
+}
+
+// selectProfile stores the profile for the next prompt and drops the reported
+// session identity and context figure for the same reason as selectModel: a
+// different profile can resolve a different model, so the old identity and
+// measurement no longer describe the next run.
+func (m *Model) selectProfile(profile string) {
+	m.turn.Profile = profile
+	m.session.Model = ""
+	m.session.Context = nil
+}
+
+// modelSelectionStatus renders the model the next prompt will request, using
+// the same reported-then-selection precedence as the status line.
+func (m Model) modelSelectionStatus() string {
+	if model := m.displayModel(); model != "" {
+		return "model: " + model
+	}
+	return "model: (cake default)"
+}
+
+// profileSelectionStatus renders the profile the next prompt will request.
+func (m Model) profileSelectionStatus() string {
+	if m.turn.Profile != "" {
+		return "profile: " + m.turn.Profile
+	}
+	return "profile: (cake default)"
 }
 
 // resumeSession points the next prompt at id and reports it, mirroring the
@@ -872,8 +936,8 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 		Prompt:       prompt,
 		Mode:         mode,
 		ResumeID:     resumeID,
-		Model:        m.cfg.Model,
-		Profile:      m.cfg.Profile,
+		Model:        m.turn.Model,
+		Profile:      m.turn.Profile,
 		Tools:        m.cfg.Tools,
 		NoTools:      m.cfg.NoTools,
 		AddDirs:      m.cfg.AddDirs,
@@ -1224,11 +1288,11 @@ func (m Model) sessionInfo() string {
 		"cwd:      " + m.cfg.Cwd,
 		"next run: " + modeText,
 	}
-	if m.cfg.Model != "" {
-		lines = append(lines, "model:    "+m.cfg.Model)
+	if model := m.displayModel(); model != "" {
+		lines = append(lines, "model:    "+model)
 	}
-	if m.cfg.Profile != "" {
-		lines = append(lines, "profile:  "+m.cfg.Profile)
+	if m.turn.Profile != "" {
+		lines = append(lines, "profile:  "+m.turn.Profile)
 	}
 	if m.cfg.Tools != "" {
 		lines = append(lines, "tools:    "+m.cfg.Tools)

@@ -78,12 +78,22 @@ type Config struct {
 	Suggestions SuggestionConfig
 }
 
+// turnSelection is the model and profile the next cake invocation uses. It is
+// initialized from Config's startup flags and config file values, may be
+// changed by /model and /profile, and keeps an empty value as cake's own
+// default. It lives on Model rather than sessionState because /new, Ctrl+N, and
+// /resume preserve it. See ADR 007.
+type turnSelection struct {
+	Model   string
+	Profile string
+}
+
 // CompactionConfig is the resolved `[compaction]` configuration. Bin is the
 // external compactor executable, MaxContextTokens is the quality ceiling for
 // absolute mode, TriggerTokens is the absolute compaction line, and
 // ThresholdPercent/KeepTokens are the percent fallback and retained-tail target.
 // Model, Profile, and ReasoningEffort select the summary call; empty values
-// fall back to the REPL's -model/-profile and cake's own reasoning default. The
+// fall back to the current turn selection and cake's own reasoning default. The
 // trigger and ceiling are between-turn targets, not in-invocation caps; the
 // ceiling is policy only and is never passed to the compactor. See ADR 023,
 // ADR 025, and ADR 029.
@@ -101,7 +111,7 @@ type CompactionConfig struct {
 
 // SuggestionConfig is the resolved `[suggestions]` configuration. Bin is the
 // external suggester executable. Model and Profile select the suggestion call;
-// empty values fall back to the REPL's -model/-profile. ReasoningEffort is
+// empty values fall back to the current turn selection. ReasoningEffort is
 // passed through when set and otherwise leaves Cake's default. See ADR 028,
 // ADR 030, and ADR 032.
 type SuggestionConfig struct {
@@ -209,6 +219,7 @@ type Model struct {
 	suggestion suggestionState
 
 	session      sessionState
+	turn         turnSelection
 	history      promptHistory
 	pendingCalls map[string]*ui.ToolBlock // call_id -> pending tool block
 	// toolOutputMode applies to every tool block in the timeline and to tool
@@ -294,6 +305,7 @@ func New(cfg Config) Model {
 		clipboard:       clipboard.WriteAll,
 		toolOutputMode:  ui.ToolOutputHidden,
 		session:         newSessionState(cfg.InitialMode, cfg.ResumeID),
+		turn:            turnSelection{Model: cfg.Model, Profile: cfg.Profile},
 	}
 	if cfg.ResumeID != "" {
 		ctx, cancel := context.WithCancel(context.Background())

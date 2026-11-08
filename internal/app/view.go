@@ -115,11 +115,12 @@ func (m Model) statusLineFor(p presentation) string {
 }
 
 // displayModel returns the model shown in the status line: the identity cake
-// reported for the current session once received, otherwise the CLI/config
-// value. See ADR 014.
+// reported for the current session once received, otherwise the current turn
+// selection (initialized from the startup -model/config value). See ADR 007 and
+// ADR 014.
 func (m Model) displayModel() string {
 	if m.session.Model != "" {
 		return m.session.Model
 	}
-	return m.cfg.Model
+	return m.turn.Model
 }
