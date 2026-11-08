@@ -1000,8 +1000,8 @@ func TestLiveCompactionMarkerDoesNotSeedContext(t *testing.T) {
 
 func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.T) {
 	m := newLaidOutModel()
-	m.cfg.Model = "gpt-x"
-	m.cfg.Profile = "work"
+	m.turn.Model = "gpt-x"
+	m.turn.Profile = "work"
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "s-1", TaskID: "t-1"})
 	m.session.OnTaskComplete(success("s-1"))
 	m.history.Add("earlier prompt")
@@ -1035,8 +1035,8 @@ func TestHandleKeyNewSessionResetsConversationAndPreservesLocalState(t *testing.
 	if got.input.Value() != "draft prompt" {
 		t.Errorf("input = %q, want draft preserved", got.input.Value())
 	}
-	if got.cfg.Model != "gpt-x" || got.cfg.Profile != "work" {
-		t.Errorf("settings changed: model=%q profile=%q", got.cfg.Model, got.cfg.Profile)
+	if got.turn.Model != "gpt-x" || got.turn.Profile != "work" {
+		t.Errorf("selection changed: model=%q profile=%q", got.turn.Model, got.turn.Profile)
 	}
 	assertCacheMatchesFullRender(t, &got, "after new session")
 }
@@ -1645,8 +1645,8 @@ func TestExecCommandSessionModes(t *testing.T) {
 func TestExecCommandSessionInfo(t *testing.T) {
 	m := newLaidOutModel()
 	m.cfg.Cwd = "/tmp/proj"
-	m.cfg.Model = "gpt-x"
-	m.cfg.Profile = "fast"
+	m.turn.Model = "gpt-x"
+	m.turn.Profile = "fast"
 	m.cfg.Tools = "bash,read"
 	m.session.OnTaskStart(cake.TaskStart{SessionID: "11111111-2222-3333-4444-555555555555", TaskID: "t-1"})
 
@@ -2275,7 +2275,7 @@ func TestPreReadyTrimWithPendingCalls(t *testing.T) {
 
 func TestLiveTaskStartReportsDisplayedModel(t *testing.T) {
 	m := newLaidOutModel()
-	m.cfg.Model = "cli-model"
+	m.turn.Model = "cli-model"
 	m.applyEvent(cake.TaskStart{SessionID: "s-1", TaskID: "t-1", Model: "glm-5.1", ModelConfig: "zen"})
 
 	if got := m.displayModel(); got != "zen" {
@@ -2291,7 +2291,7 @@ func TestLiveTaskStartReportsDisplayedModel(t *testing.T) {
 
 func TestLiveTaskStartModelFallsBackToProviderID(t *testing.T) {
 	m := newLaidOutModel()
-	m.cfg.Model = "cli-model"
+	m.turn.Model = "cli-model"
 	m.applyEvent(cake.TaskStart{SessionID: "s-1", TaskID: "t-1", Model: "glm-5.1"})
 
 	if got := m.displayModel(); got != "glm-5.1" {
@@ -2301,7 +2301,7 @@ func TestLiveTaskStartModelFallsBackToProviderID(t *testing.T) {
 
 func TestNewSessionClearsReportedModel(t *testing.T) {
 	m := newLaidOutModel()
-	m.cfg.Model = "cli-model"
+	m.turn.Model = "cli-model"
 	m.applyEvent(cake.TaskStart{SessionID: "s-1", TaskID: "t-1", ModelConfig: "zen"})
 
 	tm, _ := m.startNewSession()

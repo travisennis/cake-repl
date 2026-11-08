@@ -66,14 +66,19 @@ commands or help text (`internal/app/commands.go`), key bindings
   [ADR 029](../adr/029-let-compaction-select-its-own-summarizer-model-and-reasoning-effort.md).
   Suggestions use the same provenance rule; see
   [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
-  Session-specific values must stay out of config.
+  Session-specific values, including `/model`/`/profile` selections, must stay out
+  of config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
-  `/sessions`, `/session [copy]`, `/clear`. Keep parsing, behavior, and names
-  stable. `/new`, `/resume`, and `/sessions` require an idle REPL (no live or
-  draining run, replay, or compaction); `Ctrl+N` remains the cancel-and-reset
-  operation during an active run, hydration, or compaction, and `/exit` cancels
-  any of them before exiting. A canceled child still gates prompt submission and
-  session retargeting until it has been reaped.
+  `/sessions`, `/session [copy]`, `/model [<name>|default]`,
+  `/profile [<name>|default]`, `/clear`. Keep parsing, behavior, and names
+  stable. `/new`, `/resume`, `/sessions`, `/model`, and `/profile` require an
+  idle REPL (no live or draining run, replay, or compaction); `Ctrl+N` remains
+  the cancel-and-reset operation during an active run, hydration, or compaction,
+  and `/exit` cancels any of them before exiting. `/model` and `/profile` omit
+  the argument to show the current value, take one name to set it for the next
+  prompt, and take `default` to clear it; an empty quoted argument is invalid.
+  A canceled child still gates prompt submission and session retargeting until
+  it has been reaped.
 - **Key bindings.** `Enter` (newline), `Ctrl+S` (insert a shown suggestion
   when the input is empty; otherwise submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
@@ -120,7 +125,9 @@ renders it in plain text like every other surface.
   the original run was started with. An explicit override that clears or
   defaults a value (`-sandbox ""`, `-model ""`, `-profile ""`, or `-cake-bin
   cake`) is re-emitted — for example `-sandbox ''` — so reloading the config on
-  resume cannot reintroduce a value the original run suppressed.
+  resume cannot reintroduce a value the original run suppressed. The hint
+  reflects the startup controls; a later `/model` or `/profile` change is not
+  reflected.
 - **Startup project-trust check.** During startup, one read-only
   `cake trust --status --json` probe inspects the configured `-cwd`. When it
   returns, an `untrusted`, `changed`, `invalid`, or unrecognized state adds one
@@ -153,17 +160,20 @@ renders it in plain text like every other surface.
   followed by labeled session, next-run, optional
   model, optional context, and cwd context; the model is the identity cake
   reported on the stream once available (the `[[models]]` entry name, falling
-  back to the provider model ID), else the `-model`/config value, and a new
-  session or resume switch drops the reported identity (ADR 014). While the
-  between-turn compactor runs, the state segment carries its whole-second
+  back to the provider model ID), else the current `/model` selection
+  (initialized from `-model`/config), and a new session, resume switch, or
+  `/model`/`/profile` change drops the reported identity (ADR 007, ADR 014).
+  While the between-turn compactor runs, the state segment carries its
+  whole-second
   elapsed age (`[ <spinner> compacting 12s ]`), refreshed from the spinner tick
   the REPL already runs, not from a second timer. The context
   field is cake's newest complete main-agent `turn_usage` measurement, rendered
   compactly as `132k/1M` (the attempt's input tokens over the configured
   window) or as a bare `132k` when the model configures no window. Partial usage
   records are ignored, the field is omitted when no complete measurement or
-  checkpoint estimate exists, and a new session or resume switch clears it so a
-  stale figure never crosses into another session's status line. A replayed
+  checkpoint estimate exists, and a new session, resume switch, or
+  `/model`/`/profile` change clears it so a stale figure never crosses into
+  another session's or model's status line. A replayed
   `compaction` record seeds the field from its `estimated_input.after_tokens`,
   and a live compactor success seeds it from the result's `after_tokens`;
   either is prefixed with `~` (for example `~24k/200k`) because it is an estimate

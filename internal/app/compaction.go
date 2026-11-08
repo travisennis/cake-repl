@@ -168,8 +168,8 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 		SessionID:                 sessionID,
 		CakeBin:                   m.cfg.CakeBin,
 		KeepTokens:                m.cfg.Compaction.KeepTokens,
-		SummarizerModel:           firstNonEmpty(m.cfg.Compaction.Model, m.cfg.Model),
-		SummarizerProfile:         firstNonEmpty(m.cfg.Compaction.Profile, m.cfg.Profile),
+		SummarizerModel:           firstNonEmpty(m.cfg.Compaction.Model, m.turn.Model),
+		SummarizerProfile:         firstNonEmpty(m.cfg.Compaction.Profile, m.turn.Profile),
 		SummarizerReasoningEffort: m.cfg.Compaction.ReasoningEffort,
 		DebugLog:                  m.cfg.DebugLog,
 	}

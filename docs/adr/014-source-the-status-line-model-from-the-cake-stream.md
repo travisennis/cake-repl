@@ -7,12 +7,12 @@ decision-makers: Travis Ennis
 
 ## Context and Problem Statement
 
-The status line renders `m.cfg.Model`, so it names a model only when `--model`
-(or config `model`) was supplied. cake resolves a concrete model for every run:
-a `[[models]]` entry can be selected by `default_model`, and several entries can
-share one provider model ID. cake-repl has never read that resolution, so a
-`-resume` start cannot show the resumed session's model, and any run that relies
-on cake's default shows an empty or misleading model field.
+At the time, the status line rendered `m.cfg.Model`, so it named a model only
+when `--model` (or config `model`) was supplied. cake resolves a concrete model
+for every run: a `[[models]]` entry can be selected by `default_model`, and
+several entries can share one provider model ID. cake-repl has never read that
+resolution, so a `-resume` start cannot show the resumed session's model, and
+any run that relies on cake's default shows an empty or misleading model field.
 
 The resolution is available on the supported CLI boundary. `cake replay` emits
 `session_meta` with `model` (the provider model ID) and `model_config` (the
@@ -45,22 +45,26 @@ status line.
    Rejected: it crosses the engine boundary and duplicates cake's resolution
    rules.
 3. Prefer the engine-reported value when present, falling back to the
-   CLI/config value, and prefer `model_config` over `model`. Chosen.
+   current turn selection (initialized from the CLI/config value), and prefer
+   `model_config` over `model`. Chosen.
 
 ## Decision Outcome
 
 Chosen option: 3. The status line's model is the engine-reported value once cake
-has reported one, otherwise the CLI/config value.
+has reported one, otherwise the current turn selection, which the CLI/config
+value initializes and `/model` can change (ADR 007).
 
 - Replay hydration takes `session_meta.model_config` and falls back to
   `session_meta.model`, storing it as the displayed model.
 - A `task_start` (or `task_complete`) that carries either field updates the
   displayed model the same way, live or replayed, so cake#664 needs no further
   change in cake-repl.
-- Resolution order is `model_config`, then `model`, then the CLI/config value.
-- The engine-reported value is per session: a new session (`/new`, Ctrl+N) and a
-  switch to a different resume target clear it, so the CLI/config value applies
-  again until cake reports the new session's model.
+- Resolution order is `model_config`, then `model`, then the current turn
+  selection (initialized from the CLI/config value).
+- The engine-reported value is per session: a new session (`/new`, Ctrl+N), a
+  switch to a different resume target, and a `/model`/`/profile` change clear
+  it, so the current turn selection applies again until cake reports the new
+  session's model.
 - Decoding stays additive. `SessionMeta` is corrected to read cake's real
   `working_directory` field and gains the optional `model_config` field;
   `task_start` and `task_complete` gain optional `model` / `model_config`.
@@ -75,7 +79,7 @@ has reported one, otherwise the CLI/config value.
   decodes; no engine boundary is crossed.
 - Good, because cake#664 integrates with no further cake-repl change.
 - Neutral, because with a cake older than cake#664 a live run still shows only
-  the CLI/config value.
+  the current turn selection.
 - Bad, because the displayed model can lag a live run until a model-bearing
   record arrives.
 - Neutral, because the value is display-only; session pinning and run mode do

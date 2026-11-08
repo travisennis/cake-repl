@@ -27,8 +27,9 @@ type sessionState struct {
 	LastComplete *cake.TaskComplete
 	// Model is the model identity cake reported for the current session: the
 	// [[models]] entry name when known, else the provider model ID. Empty means
-	// cake has not reported one, so the status line falls back to the
-	// CLI/config value. It is cleared whenever the session target changes.
+	// cake has not reported one, so the status line falls back to the current
+	// turn selection. It is cleared whenever the session target or turn
+	// selection changes.
 	Model string
 	// AnnouncedID is the session id the current invocation reported through
 	// task_start (or, failing that, its completion). Only an id an invocation

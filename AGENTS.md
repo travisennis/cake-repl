@@ -59,6 +59,9 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.
+  `/model` and `/profile` are idle-only, apply to the next prompt, and use
+  `default` to clear. See
+  [ADR 007](docs/adr/007-model-and-profile-slash-commands-are-idle-only.md).
 - **Session run-mode behavior**, which prevents session hijack.
 - **Secrets**: raw stream content goes only to the debug log, written
   owner-only at creation (an existing file's permissions are not narrowed).

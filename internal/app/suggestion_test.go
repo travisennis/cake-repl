@@ -383,8 +383,8 @@ func TestSuggestionSelection(t *testing.T) {
 			m.cfg.Suggestions.Model = tt.suggestionModel
 			m.cfg.Suggestions.Profile = tt.suggestionProfile
 			m.cfg.Suggestions.ReasoningEffort = tt.suggestionEffort
-			m.cfg.Model = tt.turnModel
-			m.cfg.Profile = tt.turnProfile
+			m.turn.Model = tt.turnModel
+			m.turn.Profile = tt.turnProfile
 			m, cmd := m.maybeStartSuggestion()
 			if cmd == nil {
 				t.Fatal("maybeStartSuggestion returned no command")

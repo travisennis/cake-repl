@@ -51,7 +51,8 @@ which keeps the initial flag values as defaults.
   class stays closed.
 - Good, because the grammar is explicit and fits the existing slash-command
   documentation surface.
-- Neutral, because model/profile remain startup-only until implemented.
+- Neutral, because the commands apply to the next prompt rather than the
+  current run.
 - Bad, none identified; the idle-only restriction matches existing session
   commands.
 

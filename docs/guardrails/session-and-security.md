@@ -205,10 +205,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   a no-op that keeps the reported identity and model; `/session`'s `last:` line
   stays as the previous run's labeled history — it is display only and can
   never pin. **Active-run restriction:** prompt submission and `/new`, `/resume`,
-  and `/sessions` are rejected while a task is in flight or draining, with
-  distinct in-flight and drain warnings. Only `/session`, `/help`, `/clear`, and
-  `/exit` remain available during a run; the prompt and retarget gates open only
-  when the canceled child is reaped.
+  `/sessions`, `/model`, and `/profile` are rejected while a task is in flight
+  or draining, with distinct in-flight and drain warnings. Only `/session`,
+  `/help`, `/clear`, and `/exit` remain available during a run; the prompt and
+  retarget gates open only when the canceled child is reaped.
   **Encoded field invariants:** a `RunResume` target always carries a
   non-empty `ResumeID` while `RunFresh` carries none (the constructor normalizes
   a mismatched pair, and `UseResume` ignores an empty id), and a non-empty
@@ -216,6 +216,16 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `OnTaskComplete` announce an id; replay hydration may set `SessionID` alone,
   which is display identity without pin eligibility.
   Keep session transitions pure and I/O-free so they stay testable.
+- **Turn selection.** `/model` and `/profile` set the model and profile the next
+  prompt passes to cake. The startup `-model`/`-profile` or config values
+  initialize the selection, and `default` clears it to cake's own resolution.
+  The selection is runtime state: it persists across `/new`, `Ctrl+N`, and
+  `/resume`, is never written to config, and is idle-only under the active-run
+  restriction above. Changing it drops the reported session model and context
+  figure so the status line reflects the new selection until the next run
+  reports its own. See
+  [ADR 007](../adr/007-model-and-profile-slash-commands-are-idle-only.md) and
+  [ADR 014](../adr/014-source-the-status-line-model-from-the-cake-stream.md).
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
   secrets. They go **only** to `-debug-log` (opened `0o600`; the mode applies
   at creation — an existing file's permissions are not narrowed), never to the
