@@ -350,9 +350,10 @@ func (m *Model) warnSuggestion(text string) {
 
 // clearSuggestion removes the visible ghost, held result, and filled-text
 // provenance, and cancels any in-flight request. It is called for actions that
-// supersede a suggestion: history recall, completion, submit, a new session, a
-// resume, and quit. Ordinary typing uses hideSuggestion so the ghost can return
-// when the composer is empty again.
+// supersede a suggestion: completion, submit, a new session, a resume, and
+// quit. Ordinary typing uses hideSuggestion and history recall uses
+// hideSuggestionForHistory so the ghost can return when the composer is empty
+// again.
 func (m *Model) clearSuggestion() {
 	m.suggestion.dropHeld()
 	m.suggestion.filledText = ""
@@ -365,8 +366,19 @@ func (m *Model) clearSuggestion() {
 // in-flight request, so a late result cannot overwrite the user's draft. The
 // placeholder is deliberately left in place: it is not rendered while the
 // composer has text, and restoring it after the text is cleared is then free.
+// Typing uses this path directly; history recall uses hideSuggestionForHistory.
 func (m *Model) hideSuggestion() {
 	m.cancelSuggestion()
+}
+
+// hideSuggestionForHistory keeps a shown ghost across prompt-history navigation
+// but drops filled-text provenance. A filled suggestion has left the composer,
+// so an unedited model-produced command must not regain execution merely by
+// being recalled again. The ghost is only a hint and can return; filled text is
+// real input. See ADR 038.
+func (m *Model) hideSuggestionForHistory() {
+	m.suggestion.filledText = ""
+	m.hideSuggestion()
 }
 
 // fillSuggestion copies a shown, already-normalized suggestion into the

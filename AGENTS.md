@@ -43,19 +43,21 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   automatic compaction; a result that arrives while the compacting gate is
   closed is held and applied after the compactor settles. `Ctrl+S` inserts the
   ghost into the composer and never submits it; a second `Ctrl+S` submits the
-  filled text, which bypasses slash-command parsing only while unedited. Typing
-  hides the ghost and clearing the composer restores it; history recall,
-  completion, submit, retarget, and quit discard it. A clean startup `-resume
-  <uuid>` hydration ending at a completed turn starts one suggestion. Only
-  trusted config may enable it, select the executable, or tune its model or
-  effort; the automatic project-local layer may only disable it. See
+  filled text, which bypasses slash-command parsing only while the text remains
+  in the composer unedited. Typing and history recall hide the ghost and
+  clearing the composer restores it; completion, submit, retarget, and quit
+  discard it. A clean startup `-resume <uuid>` hydration ending at a completed
+  turn starts one suggestion. Only trusted config may enable it, select the
+  executable, or tune its model or effort; the automatic project-local layer
+  may only disable it. See
   [ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
   [ADR 030](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
   [ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md),
   [ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md),
   [ADR 036](docs/adr/036-fill-prompt-suggestions-into-the-composer-instead-of-submitting-them.md),
+  [ADR 037](docs/adr/037-request-a-prompt-suggestion-after-startup-hydration.md),
   and
-  [ADR 037](docs/adr/037-request-a-prompt-suggestion-after-startup-hydration.md).
+  [ADR 038](docs/adr/038-restore-prompt-suggestions-after-history-navigation.md).
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
 - **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.

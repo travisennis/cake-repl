@@ -141,21 +141,22 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   second suggestion after compaction. `Ctrl+S` inserts the ghost into the
   composer as editable text and never submits by itself; a second `Ctrl+S`
   submits the filled text as an ordinary prompt with slash-command parsing
-  bypassed while the text is unchanged. Editing the filled text restores normal
-  parsing. Typing hides the ghost but keeps it, and clearing the composer
-  (including `Ctrl+U`) restores it; history recall, tab completion, submit,
-  `Ctrl+N`, `/new`, `/resume`, `/sessions`, quit, and an unobserved exit discard
-  the ghost or held result and cancel the request. A clean startup `-resume
-  <uuid>` hydration that ends at a completed, non-errored turn starts one
-  suggestion after the replay child is reaped; a failed, canceled, incomplete,
-  or warned replay does not. An
-  in-flight child stays tracked after invalidation; only one suggestion request
-  runs at a time, and quit or an unobserved exit waits for the canceled child
-  to be reaped within the same bounded teardown before the program returns. The
-  exit is already in progress, so further keyboard input is ignored while it
-  drains. A signal-terminated cancellation and a `suggested:false` result are
-  silent; a child that exits non-zero on its own after the cancel is a failure
-  that shares the warning budget, as are a missing binary, malformed document
+  bypassed while it remains in the composer unchanged. Editing the filled text
+  restores normal parsing. Typing and history recall hide the ghost but keep
+  it, and clearing the composer (including `Ctrl+U`, a recalled entry, or
+  walking back to the saved draft) restores it; completion, submit, `Ctrl+N`,
+  `/new`, `/resume`, `/sessions`, quit, and an unobserved exit discard the ghost
+  or held result and cancel the request. A clean startup `-resume <uuid>`
+  hydration that ends at a completed, non-errored turn starts one suggestion
+  after the replay child is reaped; a failed, canceled, incomplete, or warned
+  replay does not. An in-flight child stays tracked after invalidation; only
+  one suggestion request runs at a time, and quit or an unobserved exit waits
+  for the canceled child to be reaped within the same bounded teardown before
+  the program returns. The exit is already in progress, so further keyboard
+  input is ignored while it drains. A signal-terminated cancellation and a
+  `suggested:false` result are silent; a child that exits non-zero on its own
+  after the cancel is a failure that shares the warning budget, as are a
+  missing binary, malformed document
   (including a missing required `suggested` field), non-zero exit, and timeout.
   The suggester runs on the same child terminal boundary with the same SIGTERM
   and `WaitDelay` bound, a 64 KiB stdout cap, an 8 KiB stderr tail, and a

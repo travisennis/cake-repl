@@ -202,14 +202,15 @@ renders it in plain text like every other surface.
   When a prompt suggestion is showing, the empty composer renders it as dim
   placeholder ghost text and the footer reads
   `Ctrl+S insert suggestion · type to hide`; the textarea value stays empty,
-  so typing inserts only the user's characters. Typing hides the ghost and
-  clearing the composer restores it; history recall, tab completion, submit, a
-  new session, a resume, and quit discard it. `Ctrl+S` fills the composer with
-  the suggestion instead of submitting it, and a second `Ctrl+S` submits. The
-  filled text remains ordinary input: while it is unchanged, submit bypasses
+  so typing inserts only the user's characters. Typing and history recall hide
+  the ghost and clearing the composer restores it, including after walking back
+  to the saved draft; tab completion, submit, a new session, a resume, and quit
+  discard it. `Ctrl+S` fills the composer with the suggestion instead of
+  submitting it, and a second `Ctrl+S` submits. The filled text remains
+  ordinary input: while it remains in the composer unchanged, submit bypasses
   slash-command parsing, and editing it restores normal command parsing. The
-  ghost itself is never parsed as a slash command. The footer advertises only actions the current
-  gate accepts: submit, newline, and help while idle;
+  ghost itself is never parsed as a slash command. The footer advertises only
+  actions the current gate accepts: submit, newline, and help while idle;
   `Ctrl+C cancel · Ctrl+N new session` while a task or compaction is in flight;
   `Ctrl+N new session` while one drains;
   `Ctrl+C exit · Ctrl+N new session` during history hydration; the browser's

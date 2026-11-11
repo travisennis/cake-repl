@@ -61,6 +61,14 @@ compaction checkpoint, so either view is acceptable.
 
 ## More Information
 
+- Partially superseded by
+  [ADR 038](038-restore-prompt-suggestions-after-history-navigation.md) for
+  history recall: that action now hides and preserves a held result instead of
+  discarding it. Typing and `Ctrl+U` already hide rather than discard a held
+  result per
+  [ADR 036](036-fill-prompt-suggestions-into-the-composer-instead-of-submitting-them.md);
+  the remaining discard actions—tab completion, a new session, a retarget,
+  submit, and quit—are unchanged.
 - [ADR 028](028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md)
   defines the suggester contract partially superseded here.
 - [ADR 023](023-compact-context-between-turns-through-an-external-compactor.md)

@@ -100,6 +100,11 @@ start a run. A second `Ctrl+S` submits the filled text.
 
 ## More Information
 
+- Partially superseded by
+  [ADR 038](038-restore-prompt-suggestions-after-history-navigation.md) for
+  history recall: that action now hides and restores the ghost and keeps a held
+  result, while filled-text provenance is still dropped. The other discard
+  actions are unchanged.
 - Partially supersedes ADR 028's **Accept and dismiss** clause and its
   consequence about one-key acceptance. The external `cake-suggest` contract,
   cancellation, failure, provenance, and one-request rules are unchanged.

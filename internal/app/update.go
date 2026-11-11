@@ -467,11 +467,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.copyLastAssistant()
 
 	// Up/down recall prompt history only at the input's edge; inside a
-	// multi-line input they keep moving the cursor.
+	// multi-line input they keep moving the cursor. Recall is a temporary view
+	// of the same draft, so a shown ghost is hidden rather than cleared; walking
+	// back past the newest entry restores the draft and can reveal it again.
+	// Filled-text provenance is still dropped because that text left the
+	// composer. See ADR 038.
 	case key.Matches(msg, m.keys.HistoryPrev):
 		if m.input.Line() == 0 {
 			if text, ok := m.history.Prev(m.input.Value()); ok {
-				m.clearSuggestion()
+				m.hideSuggestionForHistory()
 				m.input.SetValue(text)
 				m.layout()
 				return m, nil
@@ -481,7 +485,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.HistoryNext):
 		if m.input.Line() == m.input.LineCount()-1 {
 			if text, ok := m.history.Next(); ok {
-				m.clearSuggestion()
+				m.hideSuggestionForHistory()
 				m.input.SetValue(text)
 				m.layout()
 				return m, nil

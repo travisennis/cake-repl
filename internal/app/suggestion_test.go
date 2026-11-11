@@ -487,11 +487,12 @@ func TestCtrlUClearsDraftAndRestoresSuggestion(t *testing.T) {
 	}
 }
 
-func TestSuggestionHistoryRecallDiscardsGhost(t *testing.T) {
+func TestSuggestionHistoryRoundTripRestoresGhost(t *testing.T) {
+	const suggestion = "Add a test for the new path."
 	m := startSuggestionForTest(t, suggestionReady(t))
 	m = finishSuggestionForTest(t, m, suggest.Result{
 		ExitCode: 0,
-		Document: suggestionDocument("Add a test for the new path."),
+		Document: suggestionDocument(suggestion),
 	})
 	m.history.Add("previous prompt")
 
@@ -500,9 +501,142 @@ func TestSuggestionHistoryRecallDiscardsGhost(t *testing.T) {
 	if m.input.Value() != "previous prompt" {
 		t.Fatalf("history recall = %q", m.input.Value())
 	}
-	if m.suggestion.ghost != "" || m.suggestionActive() {
-		t.Fatalf("history recall kept the ghost: %q active=%v", m.suggestion.ghost, m.suggestionActive())
+	if m.suggestion.ghost != suggestion || m.suggestionActive() {
+		t.Fatalf("history recall = ghost %q active=%v, want the ghost hidden behind the recalled text",
+			m.suggestion.ghost, m.suggestionActive())
 	}
+	if m.input.Placeholder != suggestion {
+		t.Fatalf("history recall placeholder = %q, want the saved suggestion", m.input.Placeholder)
+	}
+
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(Model)
+	if m.input.Value() != "" || !m.suggestionActive() {
+		t.Fatalf("history round trip did not restore the suggestion: value=%q active=%v",
+			m.input.Value(), m.suggestionActive())
+	}
+	if m.suggestion.ghost != suggestion || m.input.Placeholder != suggestion {
+		t.Fatalf("restored presentation = ghost %q placeholder %q", m.suggestion.ghost, m.input.Placeholder)
+	}
+	if got := m.composerHint(); got != "Ctrl+S insert suggestion · type to hide" {
+		t.Fatalf("composerHint = %q", got)
+	}
+}
+
+func TestSuggestionHistoryRoundTripDropsFillProvenance(t *testing.T) {
+	m := startSuggestionForTest(t, suggestionReady(t))
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("/exit"),
+	})
+	next, _ := m.submit()
+	m = next.(Model)
+	if !m.filledSuggestion() {
+		t.Fatal("fill did not record provenance")
+	}
+	m.history.Add("previous prompt")
+
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(Model)
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(Model)
+	if m.input.Value() != "/exit" {
+		t.Fatalf("history round trip = %q, want the filled draft", m.input.Value())
+	}
+	if m.suggestion.filledText != "" || m.filledSuggestion() {
+		t.Fatalf("history round trip kept fill provenance %q", m.suggestion.filledText)
+	}
+}
+
+func TestSuggestionHistoryRoundTripPreservesHeldResult(t *testing.T) {
+	m := suggestionRunReady(t)
+	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
+	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
+	next, _ := m.finishRun(cake.Result{ExitCode: 0})
+	m = next.(Model)
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("Add a test for the held history path."),
+	})
+	if m.suggestionPhase() != suggestionHeld {
+		t.Fatalf("suggestion phase = %v, want held", m.suggestionPhase())
+	}
+	m.history.Add("previous prompt")
+
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(Model)
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(Model)
+	if m.input.Value() != "" || m.suggestionPhase() != suggestionHeld {
+		t.Fatalf("history round trip changed held state: value=%q phase=%v", m.input.Value(), m.suggestionPhase())
+	}
+
+	m, _ = m.finishCompaction(compactionDoneMsg{
+		req:       m.compaction.key.request,
+		sessionID: suggestionSessionID,
+		res:       compact.Result{Canceled: true},
+	})
+	if m.suggestionPhase() != suggestionShown || m.suggestion.ghost != "Add a test for the held history path." {
+		t.Fatalf("held result after settle: phase=%v ghost=%q", m.suggestionPhase(), m.suggestion.ghost)
+	}
+}
+
+func TestSuggestionHistoryRecallDropsHeldResultWhenDraftRemains(t *testing.T) {
+	m := suggestionRunReady(t)
+	m.cfg.Compaction = CompactionConfig{Enabled: true, Bin: "cake-compact", ThresholdPercent: 80}
+	m.session.Context = &ContextUsage{Tokens: 170_000, Window: 200_000}
+	next, _ := m.finishRun(cake.Result{ExitCode: 0})
+	m = next.(Model)
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument("Add a test for the held history path."),
+	})
+	m.history.Add("previous prompt")
+
+	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(Model)
+	if m.input.Value() != "previous prompt" || m.suggestionPhase() != suggestionHeld {
+		t.Fatalf("history recall changed held state: value=%q phase=%v", m.input.Value(), m.suggestionPhase())
+	}
+
+	m, _ = m.finishCompaction(compactionDoneMsg{
+		req:       m.compaction.key.request,
+		sessionID: suggestionSessionID,
+		res:       compact.Result{Canceled: true},
+	})
+	if m.suggestionPhase() != suggestionIdle || m.suggestion.ghost != "" {
+		t.Fatalf("recalled draft did not win: phase=%v ghost=%q", m.suggestionPhase(), m.suggestion.ghost)
+	}
+	if m.input.Value() != "previous prompt" {
+		t.Fatalf("recalled text = %q", m.input.Value())
+	}
+}
+
+func TestSubmitAfterHistoryRecallClearsSuggestion(t *testing.T) {
+	const suggestion = "Add a test for the new path."
+	m := startSuggestionForTest(t, suggestionReady(t))
+	m = finishSuggestionForTest(t, m, suggest.Result{
+		ExitCode: 0,
+		Document: suggestionDocument(suggestion),
+	})
+	m.history.Add("previous prompt")
+
+	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(Model)
+	m.cfg.CakeBin = writeFakeCake(t, "exit 0\n")
+	next, cmd := m.submit()
+	m = next.(Model)
+	if cmd == nil || !m.runBusy() {
+		t.Fatalf("submit after recall did not start a run: running=%v cmd nil=%v", m.runBusy(), cmd == nil)
+	}
+	if m.suggestion.ghost != "" || m.suggestion.held.text != "" || m.suggestion.filledText != "" {
+		t.Fatalf("submit left suggestion state: ghost=%q held=%q filled=%q",
+			m.suggestion.ghost, m.suggestion.held.text, m.suggestion.filledText)
+	}
+	if m.suggestionPhase() != suggestionIdle {
+		t.Fatalf("suggestion phase = %v, want idle", m.suggestionPhase())
+	}
+	m.run.Cancel()
 }
 
 func TestSuggestionFillDoesNotSubmit(t *testing.T) {

@@ -462,11 +462,12 @@ after a completed turn or a clean startup resume. The suggestion is shown as dim
 ghost text in the composer, replacing the `Type a prompt…` placeholder. It is
 not real input until accepted: `Ctrl+S` inserts the suggested text into the
 composer, where it can be edited, and a second `Ctrl+S` submits it. While its
-text is unchanged, a filled suggestion is still sent as a prompt, never executed
-as a slash command; editing it restores normal command parsing. Typing hides the
-ghost until the composer is empty again, and `Ctrl+U` restores it by clearing the
-draft. History recall, tab completion, submit, a new session, a resume, and quit
-discard it. The feature is opt-in, off by default, and experimental:
+text is unchanged and still in the composer, a filled suggestion is still sent
+as a prompt, never executed as a slash command; editing it restores normal
+command parsing. Typing and up/down history recall hide the ghost until the
+composer is empty again, and `Ctrl+U` restores it by clearing the draft,
+including a recalled entry. Tab completion, submit, a new session, a resume,
+and quit discard it. The feature is opt-in, off by default, and experimental:
 suggestion quality has not been qualified.
 
 ```toml
@@ -504,7 +505,8 @@ cake-suggest-bin = "cake-suggest"
 - The suggestion is applied only when the input is still empty, the REPL is
   idle, the request is current, and the session pin is the one the request
   named. A later result cannot overwrite a draft. A shown ghost survives typing
-  while the composer has text and returns when the composer is empty again;
+  and history navigation while the composer has text and returns when the
+  composer is empty again, including after walking back to the saved draft;
   explicit draft or session actions discard it.
 - A clean startup `-resume <uuid>` replay that ends at a completed, non-errored
   turn starts one suggestion after hydration settles. A failed, canceled,
@@ -534,7 +536,9 @@ See
 [ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md),
 [ADR 036](docs/adr/036-fill-prompt-suggestions-into-the-composer-instead-of-submitting-them.md),
 and
-[ADR 037](docs/adr/037-request-a-prompt-suggestion-after-startup-hydration.md).
+[ADR 037](docs/adr/037-request-a-prompt-suggestion-after-startup-hydration.md),
+and
+[ADR 038](docs/adr/038-restore-prompt-suggestions-after-history-navigation.md).
 See
 [ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md)
 for the reasoning-effort selection.
