@@ -9,10 +9,9 @@ import (
 
 // nativeCompactionState is the REPL's view of Cake's in-run context
 // compaction, separate from compaction, which owns the opt-in between-turn
-// compactor (ADR 026). The run owns the process, so this state only renders the
+// compactor. The run owns the process, so this state only renders the
 // lifecycle and remembers the checkpoint estimates its end may need. Zero
-// values mean no operation is pending and no checkpoint is stashed. See
-// ADR 039.
+// values mean no operation is pending and no checkpoint is stashed.
 type nativeCompactionState struct {
 	// pending is set between a live compaction_start and its end. notice
 	// identifies the start row by stable identity so removing it never targets

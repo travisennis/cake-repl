@@ -8,9 +8,9 @@ read-only replay stream hydrates the local timeline before the first prompt; a
 bare `-resume` opens a picker of this directory's sessions instead, and hydrates
 nothing until one is chosen. When opted in, a completed turn over its context
 threshold is followed by one external `cake-compact` run that appends an
-in-place checkpoint to the same session (ADR 023), and a completed turn may
+in-place checkpoint to the same session, and a completed turn may
 also ask the external `cake-suggest` binary for the next prompt and show it as
-ghost text in the composer (ADR 028).
+ghost text in the composer.
 
 ## System boundary: cake is an external process
 
@@ -28,11 +28,9 @@ It communicates only through:
 - `cake --output-format stream-json replay <uuid>` for read-only transcript
   hydration,
 - `cake sessions list --json` for read-only session listing (versioned JSON
-  envelope; see
-  [`docs/adr/016`](docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)),
+  envelope),
 - `cake trust --status --json` for the read-only startup project-trust check
-  (versioned diagnostic document; see
-  [`docs/adr/035`](docs/adr/035-warn-about-untrusted-project-configuration-at-startup.md)),
+  (versioned diagnostic document),
 - `--resume <uuid>` session selection, with initial `--fork [<uuid>]` support and
   a bare `--resume` selecting the session interactively at startup,
 - `--no-session`, `--model` / `--profile` pass-through flags,
@@ -46,17 +44,13 @@ It communicates only through:
 One non-cake executable is also part of the boundary: the opt-in
 `cake-compact compact -json -threshold … <session-id>` compactor. The REPL never
 passes `-fork`, never reads or writes the session file, and decodes only the
-one-document result. See
-[`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+one-document result.
 A second opt-in external executable is the prompt suggester:
 `cake-suggest suggest -json … -- <session-id>`. It is read-only and returns one
 suggestion document; the REPL never reads a session file and never parses the
 suggester's human output. It starts alongside an automatic compaction and reads
 through cake's read-only replay stream, which tolerates the compactor's
-concurrent append. See
-[`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md)
-and
-[`docs/adr/031-run-after-turn-suggestions-alongside-compaction.md`](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md).
+concurrent append.
 
 This boundary is the project's reason to exist. Changes that cross it are out of
 scope unless the cake contract itself has changed. See
@@ -68,7 +62,7 @@ scope unless the cake contract itself has changed. See
 cmd/cake-repl/main.go    Entry point: flag parsing, validation, Bubble Tea program startup.
 cmd/cake-repl/suspend.go Terminal release/restore around an external SIGTSTP (POSIX).
 internal/config/         TOML config-file loading for REPL startup defaults.
-internal/childproc/      POSIX session boundary, shared child outcome classification and output buffers, and process-level shutdown registry (ADR 027, ADR 034).
+internal/childproc/      POSIX session boundary, shared child outcome classification and output buffers, and process-level shutdown registry.
 internal/cake/           cake-as-engine: subprocess lifecycle + stream-json decoding.
   events.go              Typed live and replay event structs and the Event interface (the wire schema).
   parser.go              ParseLine: one NDJSON line -> typed Event (forward-compatible).
@@ -86,7 +80,7 @@ internal/app/            Bubble Tea state machine (the REPL itself).
   timeline.go            Timeline owner: items, cached rendered rows, cap trim, dirty state.
   update.go              Event/key/command handling (the Update loop).
   session.go             sessionState: pure run-mode state machine.
-  compaction.go          Between-turn trigger and ceiling policy, gate, and compactor result handling (ADR 023, ADR 025).
+  compaction.go          Between-turn trigger and ceiling policy, gate, and compactor result handling.
   commands.go            Slash-command parsing + HelpText.
   completion.go          Tab completion for slash commands.
   keys.go                Key bindings.
@@ -119,8 +113,7 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   read-only session listing, so no replay runs before the first prompt. A
   session containing a context checkpoint renders one `compaction` marker at the
   record's physical position and never expands the checkpoint's retained tail
-  into duplicate timeline items. See
-  [`docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md`](docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md).
+  into duplicate timeline items.
 - **Session listing is read-only.** `cake sessions list --json` is invoked only
   from `internal/cake`, with the same working directory as a live prompt, to list
   that directory's sessions. It is informational (list and select, never
@@ -128,14 +121,10 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   on any failure rather than a fatal error. It is also a model-owned, cancellable
   operation: closing or replacing the browser and quitting cancel the in-flight
   listing, a superseded result is dropped by request identity, and `ListSessions`
-  bounds its teardown with `WaitDelay` so a stuck helper cannot hang the REPL. See
-  [`docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md`](docs/adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)
-  and
-  [`docs/adr/019-cancel-and-bound-the-read-only-session-listing.md`](docs/adr/019-cancel-and-bound-the-read-only-session-listing.md).
+  bounds its teardown with `WaitDelay` so a stuck helper cannot hang the REPL.
   The browser opens from `/sessions` and from the startup picker a bare
   `-resume` requests, which lists through this same operation and pins the
-  chosen session through the `/resume <uuid>` transition. See
-  [`docs/adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md`](docs/adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
+  chosen session through the `/resume <uuid>` transition.
 - **Project trust preflight is read-only and advisory.** At startup, one
   `cake trust --status --json` call reads cake's versioned diagnostic document
   for the configured working directory. When the result arrives, an
@@ -147,8 +136,7 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   probe failure is debug-log-only, so an older cake, a non-zero exit, malformed
   output, or a timeout cannot break startup. It is skipped when
   `CAKE_TRUST_PROJECT=1` or `CAKE_PROJECT_CONFIG=off` makes live prompts
-  independent of the project's persistent trust record. See
-  [`docs/adr/035-warn-about-untrusted-project-configuration-at-startup.md`](docs/adr/035-warn-about-untrusted-project-configuration-at-startup.md).
+  independent of the project's persistent trust record.
 - **Timeline state has one owner.** `internal/app/timeline.go` owns the
   structured items, their cached rendered rows, the render width, and the dirty
   flag. Append, insert, remove, trim, rerender, and clear are the only
@@ -175,10 +163,7 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   line segment, so a link glamour hard-wraps remains openable; the link text is
   always the URL's own rendered characters and stream content still cannot
   supply an escape. Sanitization works on a copy; `internal/app` and the debug
-  log keep the raw bytes. See
-  [`docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md`](docs/adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
-  and
-  [`docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md`](docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
+  log keep the raw bytes.
 - **Session state is a pure state machine.** `sessionState` (in `session.go`)
   decides the next run mode with no I/O, which is what makes the
   hijack-prevention behavior testable. Once a run announces a session id it
@@ -214,17 +199,14 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   CLI flags. The automatic project-local layer cannot set `cake-bin`: that key
   is ignored with a startup warning, so executable selection comes only from
   XDG config, explicit `-config`, or `-cake-bin`. Session-specific values stay
-  outside the persisted config shape. See
-  [`ADR 002`](docs/adr/002-config-file-for-repl-defaults.md) and its partial
-  supersession in [`ADR 006`](docs/adr/006-project-local-config-cannot-select-the-cake-executable.md).
+  outside the persisted config shape.
 - **One mutating cake run at a time.** Submitting while a task runs is rejected;
   the model tracks a single live `*cake.Run`. The read-only project-trust probe
   and session listing are separate bounded diagnostics; neither mutates a
   session or reads session files. The external
   compactor is separate but serialized with the live run: it starts only after
   a completed turn, and while it runs the model refuses prompts and
-  session-target changes until the child has exited and been reaped. See
-  [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md).
+  session-target changes until the child has exited and been reaped.
 - **Prompt suggestions are opt-in, post-turn, and never gate input.** After a
   completed turn that pins a session, one model-owned `cake-suggest` request may
   run through `internal/suggest`, concurrently with an automatic compaction. It
@@ -238,12 +220,7 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   rather than editable input. `Ctrl+S` submits the ghost as an ordinary prompt;
   slash-command parsing is bypassed so model output cannot execute a command.
   `-no-session` disables the feature, and the untrusted project-local config
-  layer can only disable it. See
-  [`docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md`](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
-  [`docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md`](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
-  [`docs/adr/031-run-after-turn-suggestions-alongside-compaction.md`](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md),
-  and
-  [`docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md`](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md).
+  layer can only disable it.
 - **Compaction is opt-in, between-turns, and in place.** A completed turn whose
   newest complete `turn_usage` figure reaches the configured trigger starts one
   model-owned `cake-compact` subprocess through `internal/compact`. Absolute
@@ -262,21 +239,15 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   marker, and seeds the status context from `after_tokens` as an estimate. A
   failure, cancellation, or other result keeps the session and figure and
   warns. The REPL never reads session files; `-no-session` disables the
-  feature; and the
-  untrusted project-local config layer cannot enable it, choose its executable,
-  or tune any threshold, including the absolute fields. See
-  [`docs/adr/023-compact-context-between-turns-through-an-external-compactor.md`](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
-  [`docs/adr/024-ignore-project-local-compaction-tuning.md`](docs/adr/024-ignore-project-local-compaction-tuning.md),
-  and
-  [`docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md`](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
+  feature; the untrusted project-local config layer cannot enable it, choose
+  its executable, or tune any threshold, including the absolute fields.
 - **Child processes are detached from the REPL terminal.** On POSIX, every live
   prompt, replay, session listing, project-trust probe, opt-in compaction, and
   prompt suggestion starts in its own session with
   `SysProcAttr{Setsid: true}` (one helper in `internal/childproc`), so the child
   has no controlling terminal and `/dev/tty` fails with `ENXIO`. Windows is a
   no-op and claims no equivalent boundary. Start failure is fail-closed, and
-  tools that need a terminal now fail rather than prompt over the REPL. See
-  [`ADR 027`](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
+  tools that need a terminal now fail rather than prompt over the REPL.
 - **Graceful cancellation.** Cancel sends SIGTERM to the child leader. A
   REPL-owned timer fires at the grace deadline and sends SIGKILL to the detached
   process group unless `cmd.Wait` has already reaped it; `cmd.WaitDelay` is one
@@ -286,7 +257,7 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   grace timer, and `Wait` goroutine. Reaping is terminal, so a later stop,
   continue, or group signal is a no-op. Cancellation is classified
   from whether `cmd.Cancel` successfully signaled the process and, on POSIX,
-  whether the process was signal-terminated—not from `ctx.Err()`—so a late
+  whether the process was signal-terminated—not from `ctx.Err`—so a late
   Ctrl+C cannot relabel a finished run.
 - **Unobserved-exit teardown.** `Run.Done` closes when the child is reaped,
   independently of whether its result was delivered. `main` owns a
@@ -294,8 +265,7 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   in it, so `Model.CancelRunning` and the panic path both cancel and wait on the
   same reaping signals under one deadline. A panic in `Update` or `View` returns
   no model, but `main` still shuts the registry down before exiting; a missed
-  deadline is reported and exits non-zero. See
-  [ADR 034](docs/adr/034-bound-unobserved-exit-child-teardown.md).
+  deadline is reported and exits non-zero.
 - **The terminal is handed back before the process stops.** A catchable external
   SIGTSTP is handled in `cmd/cake-repl`: the terminal is released, each tracked
   live or replay engine group is stopped with SIGSTOP, and the REPL's own group
@@ -305,8 +275,7 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   re-acquired. The read-only listing and project-trust probe are not tracked.
   Nothing in the model
   changes, so the conversation survives, and the engine is paused rather than
-  killed. Inline mode parks the suspension on the alternate screen. See
-  [`docs/adr/018-recover-terminal-ownership-around-an-external-suspend.md`](docs/adr/018-recover-terminal-ownership-around-an-external-suspend.md)
+  killed. Inline mode parks the suspension on the alternate screen.
   and [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 
 ## Related docs

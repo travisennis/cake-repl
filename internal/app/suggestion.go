@@ -158,12 +158,10 @@ func (m Model) suggestionBusy() bool {
 // an empty composer, an idle program, and a pinned session that has a completed
 // turn behind it. A clean startup hydration that ended at a completed turn is
 // the other source of that evidence. A draft always wins over a suggestion.
-//
 // Compaction is intentionally not part of the gate: the suggester reads the
 // session through cake's read-only replay stream, which tolerates a concurrent
 // append, and the two model calls overlap. A result that arrives while the
-// compacting gate still blocks submission is held for the composer. See ADR
-// 031.
+// compacting gate still blocks submission is held for the composer.
 func (m Model) canSuggest() bool {
 	if m.suggestionPhase() != suggestionIdle {
 		return false
@@ -281,7 +279,7 @@ func (m Model) finishSuggestion(msg suggestionDoneMsg) Model {
 	if m.compactionBusy() {
 		// The composer is gated until the compactor is reaped. Hold the usable
 		// result so it can appear the moment the gate opens instead of starting
-		// a second metered request afterward. See ADR 031.
+		// a second metered request afterward.
 		m.suggestion.hold(text, msg.key)
 		return m
 	}
@@ -375,7 +373,7 @@ func (m *Model) hideSuggestion() {
 // but drops filled-text provenance. A filled suggestion has left the composer,
 // so an unedited model-produced command must not regain execution merely by
 // being recalled again. The ghost is only a hint and can return; filled text is
-// real input. See ADR 038.
+// real input.
 func (m *Model) hideSuggestionForHistory() {
 	m.suggestion.filledText = ""
 	m.hideSuggestion()

@@ -1,10 +1,9 @@
 # Recipe arguments reach the shell as positional parameters ($1, $2, ...) instead
 # of being interpolated into shell source. Interpolating a variadic list re-joins
 # it with spaces and discards quoting, so `just run -cwd 'a b'` would split the
-# path and `just bench -bench 'a(b|c)$'` would break the shell. Recipes that
-# forward a variadic argument list read "$@"; `{{param}}` interpolation is
-# unaffected. The setting is global because just has no per-recipe form; the only
-# recipes that forward arguments are `bench` and `run`.
+# path. Recipes that forward a variadic argument list read "$@"; `{{param}}`
+# interpolation is unaffected. The setting is global because just has no
+# per-recipe form; the only recipe that forwards arguments is `run`.
 set positional-arguments
 
 deadcode_version := "v0.50.0"
@@ -35,7 +34,7 @@ _check-branch-name name:
             exit 1 ;; \
     esac; \
     case "${name%%/*}" in \
-        feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert) ;; \
+        feat|fix|docs|style|refactor|perf|build|ci|chore|revert) ;; \
         *) echo "ERROR: branch name must start with a commit type, for example feat/timeline-compaction" >&2; exit 1 ;; \
     esac; \
     case "$name" in \
@@ -83,22 +82,6 @@ build:
 install:
     go install -trimpath ./cmd/cake-repl
 
-test:
-    go test ./...
-
-test-race:
-    go test -race -cover ./...
-
-# Opt-in only, never part of `ci`: runs the real-cake smoke test, which spawns
-# the actual cake binary and makes a model-backed request that can cost money.
-# Set CAKE_BIN to use a cake other than the one on PATH.
-test-real-cake:
-    CAKE_REAL_SMOKE=1 go test -tags=integration -count=1 -run TestSmokeRealCake ./internal/cake/
-
-# Benchmarks only, with allocations; extra flags pass through. Never in `ci`.
-bench *args:
-    go test -run '^$' -bench . -benchmem -timeout=30m "$@" ./...
-
 fmt:
     go fmt ./...
 
@@ -121,12 +104,11 @@ vet:
 lint:
     golangci-lint run
 
-# -test keeps helpers that only tests call from being reported as unreachable.
 # deadcode always exits 0, so the recipe turns findings into a failure itself.
 deadcode:
     #!/bin/sh
     set -eu
-    out=$(deadcode -test ./...)
+    out=$(deadcode ./...)
     if [ -n "$out" ]; then
         printf '%s\n' "$out"
         echo "deadcode: unreachable functions found; land the caller or delete the code" >&2
@@ -142,7 +124,7 @@ release-check:
 
 fix: tidy fmt
 
-ci: fmt-check tidy-check vet test-race lint deadcode vuln build release-check
+ci: fmt-check tidy-check vet lint deadcode vuln build release-check
 
 verify: ci
 
@@ -161,7 +143,6 @@ install-tools-ci:
     go install golang.org/x/tools/cmd/deadcode@{{ deadcode_version }}
 
 quick:
-    go test ./...
     go vet ./...
 
 release:

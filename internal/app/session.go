@@ -3,18 +3,17 @@ package app
 import "github.com/travisennis/cake-repl/internal/cake"
 
 // sessionState tracks which cake session the next prompt should target. It is
-// a pure state machine so run-mode transitions stay testable.
-//
+// a pure state machine so run-mode transitions stay independent of the UI.
 // Two field combinations are invariants, not conventions:
-//   - A RunResume target always names the session it resumes: ResumeID is
-//     non-empty. newSessionState normalizes an empty id to RunFresh and drops a
-//     stray id from a fresh target; UseResume ignores an empty id. No
-//     transition can build an id-less resume target or a fresh one carrying an
-//     unused id.
-//   - AnnouncedID is either empty or equal to SessionID. announce sets both
-//     together. Replay hydration may set SessionID alone because a replayed id
-//     names the session but was not announced by the invocation being run, so
-//     it must never pin the next prompt.
+// - A RunResume target always names the session it resumes: ResumeID is
+// non-empty. newSessionState normalizes an empty id to RunFresh and drops a
+// stray id from a fresh target; UseResume ignores an empty id. No
+// transition can build an id-less resume target or a fresh one carrying an
+// unused id.
+// - AnnouncedID is either empty or equal to SessionID. announce sets both
+// together. Replay hydration may set SessionID alone because a replayed id
+// names the session but was not announced by the invocation being run, so
+// it must never pin the next prompt.
 type sessionState struct {
 	// generation identifies continuity of the session target. It starts at 1
 	// and advances only when the target is left, never when a run reports its
@@ -48,8 +47,7 @@ type sessionState struct {
 // newSessionState builds the initial target with generation 1. The mode and id
 // are normalized to agree: an empty resumeID names no session, so the target is
 // RunFresh, and only a RunResume target keeps an id. A zero-value sessionState
-// is still usable in pure transition tests; its first Reset or target change
-// advances it to 1.
+// is still usable; its first Reset or target change advances it to 1.
 func newSessionState(next cake.RunMode, resumeID string) sessionState {
 	if resumeID == "" {
 		next = cake.RunFresh

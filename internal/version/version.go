@@ -19,7 +19,7 @@ func Text() string {
 }
 
 // text formats build information without reading the process-wide runtime
-// metadata, so tests can supply synthetic values.
+// metadata, so callers can supply synthetic values.
 func text(info *debug.BuildInfo) string {
 	lines := []string{"cake-repl " + Binary}
 	if info == nil {

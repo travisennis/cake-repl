@@ -9,18 +9,16 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Generated hyperlinks (ADR 022).
-//
+// Generated hyperlinks.
 // Glamour hard-wraps a long assistant URL at the timeline width, so the
 // terminal sees only the fragment on one line. Wrapping each rendered line
 // segment in an OSC 8 hyperlink that names the full URL makes every fragment
 // clickable and lets the terminal's link preview show the destination.
-//
 // These sequences are generated here, after [RenderMarkdown]'s scrub, from
 // http(s) text that is already visible in the rendered output. Untrusted bytes
 // never become a link: the scrub has removed every OSC 8 that came from the
 // stream, and link text is always the URL's own rendered characters (or a line
-// fragment of them), never an unrelated markdown label (ADR 005, ADR 022).
+// fragment of them), never an unrelated markdown label.
 const (
 	hyperlinkOpenPrefix = "\x1b]8;;"
 	hyperlinkClose      = "\x1b]8;;\x1b\\"
@@ -41,7 +39,6 @@ type hyperlinkSpan struct {
 // addHyperlinks wraps each visible http(s) URL in rendered with OSC 8
 // hyperlinks. A URL hard-wrapped by glamour is linked per line segment with
 // the full destination, so any fragment opens the whole URL.
-//
 // source is the sanitized markdown that produced rendered. It is used only to
 // validate the visible URL: text on the next line joins the URL only when the
 // joined string still occurs in the source, and the finished URL must occur in
@@ -200,7 +197,6 @@ func linkSpans(plain string, start int, source string) ([]hyperlinkSpan, int) {
 // wrapped URL segment can sit behind decoration. The markdown source decides
 // which run is real instead of the rendered layout: only a run that, appended
 // to what is already visible, still occurs in the source continues the URL.
-//
 // The search is bounded by the rendered line, which glamour already wraps to the
 // terminal width, and it only tries positions that begin a run: the line start
 // or the byte after a non-URL byte such as the blockquote's decoration. Scanning
@@ -284,7 +280,6 @@ func completeURLInSource(source, url string) bool {
 // ("https://example.com") whose visible prefix a blockquote decoration splits
 // away from the rest. Looking past the marks keeps such a prefix unlinked
 // instead of generating a truncated target.
-//
 // Brackets and fragment/table marks (()#{}^|) are ambiguous the same way: a
 // closing bracket can end prose or belong to the URL, and #, |, ^, {, }, and (
 // can continue a URL in a rendered run. They therefore get the same lookahead
@@ -293,7 +288,6 @@ func completeURLInSource(source, url string) bool {
 // visible run, but the same character is legal URL text and can continue the
 // source URL. The lookahead links an emphasized URL while still refusing a
 // visible prefix of a longer URL such as ".../_bar".
-//
 // A non-ASCII rune is ambiguous: it is either prose punctuation that follows
 // the URL without a space (CJK full stops, an em dash), or a prose word or an
 // internationalized URL that cannot be told apart from a longer URL. Only

@@ -273,8 +273,7 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 	// evidence for one suggestion after the replay child is reaped. It is a
 	// suggestion-only flag: hydration must not write the live run outcome or
 	// start compaction. A replay task_start clears sawComplete, so an earlier
-	// completion cannot qualify a session whose final turn is incomplete. See
-	// ADR 037.
+	// completion cannot qualify a session whose final turn is incomplete.
 	hydratedCompletion := !msg.res.Canceled && msg.res.Err == nil && msg.res.ExitCode == 0 &&
 		!m.replay.warned && m.sawComplete && m.session.LastComplete != nil &&
 		!m.session.LastComplete.IsError

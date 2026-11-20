@@ -48,7 +48,7 @@ type Config struct {
 	// StartupPicker opens the /sessions browser as soon as the program starts,
 	// for a bare `-resume`. It asks the user to choose a session instead of
 	// naming one: nothing is hydrated and no session is pinned until a row is
-	// picked. See ADR 021.
+	// picked.
 	StartupPicker bool
 	DebugLog      io.Writer
 	// Runs tracks live and replay engine subprocesses so the suspend cycle can
@@ -63,11 +63,11 @@ type Config struct {
 	OutputLimit      int
 	MaxTimelineItems int
 	// ToolColor lets tool output keep its own ANSI color instead of rendering
-	// plain. Off by default; see ADR 009.
+	// plain. Off by default;
 	ToolColor bool
 	// Inline renders the live region below the terminal height instead of in
 	// the alternate screen, so recent terminal history stays visible above the
-	// REPL. See ADR 015.
+	// REPL.
 	Inline bool
 	// Compaction is the opt-in between-turn context compaction configuration.
 	// The zero value is disabled, so a caller that does not wire it behaves
@@ -82,7 +82,7 @@ type Config struct {
 // initialized from Config's startup flags and config file values, may be
 // changed by /model and /profile, and keeps an empty value as cake's own
 // default. It lives on Model rather than sessionState because /new, Ctrl+N, and
-// /resume preserve it. See ADR 007.
+// /resume preserve it.
 type turnSelection struct {
 	Model   string
 	Profile string
@@ -95,8 +95,7 @@ type turnSelection struct {
 // Model, Profile, and ReasoningEffort select the summary call; empty values
 // fall back to the current turn selection and cake's own reasoning default. The
 // trigger and ceiling are between-turn targets, not in-invocation caps; the
-// ceiling is policy only and is never passed to the compactor. See ADR 023,
-// ADR 025, and ADR 029.
+// ceiling is policy only and is never passed to the compactor.
 type CompactionConfig struct {
 	Enabled          bool
 	Bin              string
@@ -112,8 +111,7 @@ type CompactionConfig struct {
 // SuggestionConfig is the resolved `[suggestions]` configuration. Bin is the
 // external suggester executable. Model and Profile select the suggestion call;
 // empty values fall back to the current turn selection. ReasoningEffort is
-// passed through when set and otherwise leaves Cake's default. See ADR 028,
-// ADR 030, and ADR 032.
+// passed through when set and otherwise leaves Cake's default.
 type SuggestionConfig struct {
 	Enabled         bool
 	Bin             string
@@ -145,7 +143,7 @@ const (
 
 	// inlineViewportMax caps the timeline viewport in inline mode so the live
 	// region never grows tall enough to push the terminal's own history out of
-	// the visible window (ADR 015).
+	// the visible window.
 	inlineViewportMax = 12
 )
 
@@ -198,7 +196,7 @@ type Model struct {
 	// compactionStart is when the current compactor was launched and
 	// compactionElapsed is its whole-second age, refreshed from the spinner tick
 	// the REPL already runs while busy. Both are zero when no compaction is
-	// pending, so the status line and composer omit the age. See ADR 026.
+	// pending, so the status line and composer omit the age.
 	compactionStart   time.Time
 	compactionElapsed time.Duration
 	// compactionNotice identifies the live start notice by its stable timeline
@@ -212,15 +210,14 @@ type Model struct {
 	compactionSeq uint64
 	// native tracks Cake's in-run compaction lifecycle, which the run owns.
 	// It is deliberately separate from compaction above: the external
-	// between-turn compactor has its own notice, gate, and cancellation. See
-	// ADR 039.
+	// between-turn compactor has its own notice, gate, and cancellation.
 	native nativeCompactionState
 	// suggestion is the one read-only after-turn suggester request and its
-	// presentation (ADR 028). The state owns the request identity, cancellation,
+	// presentation. The state owns the request identity, cancellation,
 	// reaping channel, ghost text, and any result held for compaction. Its phase
 	// is derived from those fields, so a request and its presentation cannot
 	// disagree. A draft, a new turn, or a session change invalidates the request
-	// so a late result cannot overwrite the composer. See ADR 031.
+	// so a late result cannot overwrite the composer.
 	suggestion suggestionState
 
 	session      sessionState
@@ -230,12 +227,12 @@ type Model struct {
 	// toolOutputMode applies to every tool block in the timeline and to tool
 	// blocks appended later in this REPL session. It starts hidden so a session
 	// opens with one header per tool call; Ctrl+O reveals truncated and then
-	// full output. See ADR 033.
+	// full output.
 	toolOutputMode ui.ToolOutputMode
 
 	// contentChanged is set by the updates that reshape the live region's
 	// visible content (a viewport push, a composer key) and read by the settle
-	// sweep, which repaints the whole frame after it; see ADR 020.
+	// sweep, which repaints the whole frame after it;
 	contentChanged bool
 
 	// completion state for Tab cycling; zero values mean no active cycle.
@@ -256,7 +253,7 @@ type Model struct {
 	// when startup has no command of its own.
 	startupCmd tea.Cmd
 
-	// Session-listing operation state (ADR 019). The browser owns at most one
+	// Session-listing operation state. The browser owns at most one
 	// in-flight listing: sessionListSeq allocates a request identity that never
 	// repeats, sessionListReq is the identity whose result may still be applied,
 	// and sessionListCancel stops the request's helper. Closing the browser,
@@ -271,8 +268,8 @@ type Model struct {
 	// of them.
 	sessionListDone map[uint64]chan struct{}
 
-	// clipboard writes text to the system clipboard. It is a field so tests
-	// can stub out the platform helper; New defaults to the OS clipboard.
+	// clipboard writes text to the system clipboard. It is a field so the
+	// platform helper can be stubbed; New defaults to the OS clipboard.
 	clipboard func(string) error
 }
 
@@ -323,7 +320,7 @@ func New(cfg Config) Model {
 	if cfg.StartupPicker {
 		// A bare `-resume` asks for a session instead of naming one, so the picker
 		// opens in place of hydration; the picked row pins the next prompt through
-		// the same transition as /resume. See ADR 021.
+		// the same transition as /resume.
 		m, m.startupCmd = m.openSessionBrowser()
 	}
 
@@ -335,13 +332,11 @@ func New(cfg Config) Model {
 }
 
 // loadHistory reads a history file into the prompt history state machine.
-//
 // Each line starting with jsonlPrefix ("\x02") is decoded as a JSON-encoded
 // string; all other lines are treated as plain-text legacy entries. Blank
 // lines are skipped. A record whose line exceeds maxHistoryRecordBytes is
 // drained and skipped, with a content-free warning, instead of aborting the
 // load, so valid entries before and after it stay usable.
-//
 // Entries beyond maxHistoryEntries are trimmed on load and the surviving
 // entries are rewritten with the JSONL prefix, migrating legacy files forward.
 // The file is rewritten only after a complete read, and the surviving entries
@@ -379,7 +374,6 @@ func (m *Model) loadHistory(path string) {
 // jsonlPrefix is decoded as a JSON-encoded string; every other line is a
 // plain-text legacy entry, kept verbatim (including an unparseable JSONL
 // line). Blank lines are skipped.
-//
 // A line longer than maxHistoryRecordBytes is drained to its newline in
 // bounded chunks, counted in skipped, and the read resumes at the next record,
 // so one oversized record cannot hide the records after it. The reader buffer
@@ -506,7 +500,6 @@ func (m Model) Init() tea.Cmd {
 		textarea.Blink,
 		// The settle sweep starts here and each sweep arms the next, so the
 		// frame can heal from a terminal-side scroll for the program's life.
-		// See ADR 020.
 		settleSweepAtStartupCmd(),
 		m.titleCmd(),
 	}
@@ -701,11 +694,10 @@ func (m *Model) rerenderToolItems() {
 // the previous scroll offset so a single item re-render does not move the view.
 // It is a no-op unless a mutation marked the cache dirty, so one Update with a
 // burst of events costs one SetContent instead of one per event.
-//
 // A push changes the live region's visible content, so it also arms the settle
 // repaint: new timeline rows are padded to the full width, which is exactly the
 // content a terminal that measures a glyph wider than charmbracelet/x/ansi can
-// wrap, scrolling the screen under the renderer. See ADR 020.
+// wrap, scrolling the screen under the renderer.
 func (m *Model) syncViewport() {
 	if !m.timeline.takeDirty() {
 		return

@@ -31,7 +31,7 @@ workflows (`.github/workflows/`), `.goreleaser.yaml`, `.golangci.yml`, or
   cut by pushing a `v*` tag. The binary version is injected via ldflags into
   `internal/version`.
 
-## Required checks / test focus
+## Verification
 
 - After any dependency change: `just tidy-check` and `just vuln`.
 - After workflow/release-config change: `just release-check` (goreleaser check +
@@ -51,4 +51,3 @@ workflows (`.github/workflows/`), `.goreleaser.yaml`, `.golangci.yml`, or
 ## Related docs
 
 - [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) — command catalog, release steps.
-- [`testing-and-verification.md`](testing-and-verification.md) — the `just ci` gate.

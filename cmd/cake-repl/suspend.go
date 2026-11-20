@@ -13,7 +13,6 @@ import (
 // suspendCycle performs one catchable SIGTSTP suspend/resume cycle. Every step
 // is injected so the ordering contract is unit-testable without a terminal or a
 // real signal.
-//
 // Order is the contract. The terminal is released before anything stops, or the
 // shell resumes a program that still believes it owns raw mode; each detached
 // engine run is paused before the REPL's own group stops, or engine work keeps

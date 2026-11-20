@@ -45,8 +45,8 @@ existing documentation — needs only the normal documentation checks.
 A behavior-shaping edit — one that adds, removes, or reorders what an agent
 should do — additionally requires:
 
-- Name the observed failure motivating the edit, citing a session, commit, or
-  `ahm` record, in the managed task or the commit message.
+- Name the observed failure motivating the edit, citing a session or commit,
+  in the commit message.
 - State the observable behavior the edit is expected to change.
 - Verify with the narrowest fresh probe that exercises the instruction: run a
   representative task in a fresh agent session and check that the instruction

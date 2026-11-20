@@ -1,7 +1,8 @@
 package app
 
 // promptHistory holds previously submitted inputs for up/down-arrow recall.
-// It is a pure state machine so recall transitions stay testable. idx ==
+// It is a pure state machine so recall transitions stay independent of
+// rendering. idx ==
 // len(entries) means not navigating; the user's in-progress input is stashed
 // in draft when navigation starts and restored when they walk back down past
 // the newest entry.

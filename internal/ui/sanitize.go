@@ -15,14 +15,12 @@ import (
 const tabStop = 8
 
 // Sanitize makes untrusted text safe to write to the terminal.
-//
 // Timeline content originates in cake's stream: tool output is the stdout of
 // arbitrary commands and the contents of arbitrary files, so it must be
 // treated as attacker-influenceable. Left alone, it can clear the screen
 // (CSI 2J), write the user's clipboard (OSC 52), forge hyperlinks (OSC 8), or
 // silently break frame alignment, because width measurement ignores escape
 // sequences and C0 bytes that the terminal still acts on.
-//
 // Sanitize therefore removes every ANSI escape sequence, expands tabs to the
 // next eight-column stop, drops the remaining C0 and C1 control characters and
 // DEL, and replaces invalid UTF-8 with U+FFFD. Newlines are the only control
@@ -47,16 +45,14 @@ func Sanitize(s string) string {
 
 // SanitizeToolOutput is the tool-output sibling of [Sanitize]. With keepSGR
 // false it is exactly Sanitize, so the default path is unchanged.
-//
-// With keepSGR true it parses s and preserves only SGR (CSI ... m) sequences
+// With keepSGR true it parses s and preserves only SGR (CSI... m) sequences
 // whose every parameter is in the reviewed set below; every other escape
 // family — OSC, DCS, APC, and every cursor or erase CSI final — is dropped just
 // as Sanitize drops it, and the surrounding text is scrubbed identically. Color
 // only means rendition here: SGR cannot move the cursor, clear the screen,
 // write the clipboard, or forge a hyperlink, and width measurement ignores it,
-// so passthrough does not reopen the alignment bug Sanitize closes (ADR 005,
-// ADR 009).
-//
+// so passthrough does not reopen the alignment bug Sanitize closes (,
+// ).
 // Tool output is rendered inside a styled lipgloss block, and a stream-embedded
 // reset ends that style mid-line, letting the theme bleed through the rest of
 // the block. openSeq is the sequence that reopens the enclosing style (see
@@ -77,7 +73,6 @@ func SanitizeToolOutput(s string, keepSGR bool, openSeq string) string {
 // motion, erase, clipboard write, or hyperlink can ride along, and it scrubs
 // the surrounding text — including any control byte a decode step produced —
 // identically.
-//
 // openSeq is re-emitted after every kept reset so an enclosing style resumes;
 // callers with no enclosing style pass the empty string.
 func scrubKeepingSGR(s string, openSeq string) string {
@@ -123,7 +118,7 @@ func scrubKeepingSGR(s string, openSeq string) string {
 }
 
 // keepSGRSequence reports whether an escape chunk that is a well-formed SGR
-// sequence may be passed through. Only the 7-bit form (ESC [ ... m) with no
+// sequence may be passed through. Only the 7-bit form (ESC [... m) with no
 // private prefix and no intermediate byte qualifies: real tools emit the 7-bit
 // form, and an 8-bit C1 CSI (0x9b) is dropped like every other control-string
 // family so a terminal that renders it literally cannot desync the width math.
@@ -142,7 +137,6 @@ func keepSGRSequence(seq string, p *ansi.Parser) bool {
 // bounded set cake-repl is willing to pass through. It walks the flattened
 // parameter list, because the extended-color selectors (38/48/58) carry their
 // arguments as a run of values that only means anything as a group.
-//
 // The reviewed set is the rendition attributes that carry legible information:
 // intensity, italic, underline, reverse, strikethrough, their resets, the
 // basic and bright 8-color foreground and background sets, and the extended
@@ -173,7 +167,7 @@ func safeSGRParams(params ansi.Params) bool {
 
 // sgrColorArgs consumes the arguments of an extended color selector (38/48/58)
 // and returns how many values after the selector they occupied: either
-// `5 ; n` (256-color, n in 0-255) or `2 ; r ; g ; b` (truecolor, each in
+// `5; n` (256-color, n in 0-255) or `2; r; g; b` (truecolor, each in
 // 0-255). It reports false for anything else, including a selector with no or
 // malformed arguments.
 func sgrColorArgs(rest []int) (int, bool) {
@@ -222,7 +216,7 @@ func safeSGR(v int) bool {
 // isResetSequence reports whether a kept SGR sequence gives back the enclosing
 // style: a bare reset (CSI m or CSI 0 m) or the color defaults CSI 39/49 m,
 // which clear a foreground or background the theme set. A reset may also be one
-// parameter of a multi-parameter sequence (CSI 0 ; 31 m), which clears the
+// parameter of a multi-parameter sequence (CSI 0; 31 m), which clears the
 // enclosing style just the same, so any reset parameter counts; the arguments of
 // an extended-color selector are skipped, because there 0, 39, and 49 are color
 // values, not resets. The caller re-emits the enclosing style after one of these

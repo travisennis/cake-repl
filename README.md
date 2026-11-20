@@ -252,8 +252,7 @@ down. The status line and timeline only show it shortened.
   The startup `-model`/`-profile` or config values initialize the selection;
   `default` clears a value to cake's own resolution. The selection survives
   `/new`, `Ctrl+N`, and `/resume` until changed, and both commands require an
-  idle REPL. See
-  [ADR 007](docs/adr/007-model-and-profile-slash-commands-are-idle-only.md).
+  idle REPL.
 - `Ctrl+N` clears the timeline and local session state immediately. If a task
   is running, it is canceled and its remaining events are discarded. Prompt
   submission and `/new`, `/resume`, `/sessions`, `/model`, and `/profile` stay
@@ -293,8 +292,7 @@ down. The status line and timeline only show it shortened.
   independent of the project's persistent trust record. An older cake without
   the command, a non-zero exit, malformed output, or a timeout is silent apart
   from the debug log. Each worktree or canonical project root has its own
-  record, so run `cake trust` in the root the warning names. See
-  [ADR 035](docs/adr/035-warn-about-untrusted-project-configuration-at-startup.md).
+  record, so run `cake trust` in the root the warning names.
 - A bare `-resume` opens that same picker at startup, before the first prompt and
   with no hydration: nothing is replayed and no session is pinned until you pick
   a row. `Enter` pins the next prompt to the highlighted session exactly like
@@ -343,9 +341,6 @@ renders that lifecycle from the stream:
   replay outcome is still rendered. Older Cake streams with only a bare
   checkpoint keep the previous marker behavior.
 
-See
-[ADR 039](docs/adr/039-track-cake-s-native-compaction-lifecycle-in-the-timeline.md).
-
 ## Context compaction (experimental)
 
 cake-repl can compact context between prompts. After a successful turn whose
@@ -364,7 +359,7 @@ gets control back; the next prompt is the first opportunity to compact.
 in-invocation caps**. The REPL checks them only after a completed turn, from the
 newest complete `turn_usage` measurement. A single invocation can keep growing
 past both lines before Cake returns; the next boundary then compacts from that
-larger measurement. cake task 130 measured the gap offline on 2026-10-27 (see
+larger measurement. cake task 130 measured the gap offline on 2026-10-27 (
 [Measured between-turn compaction overshoot](docs/compaction-overshoot.md)):
 2,153 invocations grew by a median +40,375 tokens (p99 +311,592; max 556,317);
 16 invocations crossed 400k from below, and all 16 were still above it at their
@@ -460,12 +455,7 @@ keep-tokens = 20000
   tool loop can grow past `trigger-tokens` and `max-context-tokens` before Cake
   returns; the next prompt is the first opportunity for this path to compact,
   and the next boundary uses the larger measurement. Cake's native in-run
-  compaction is independent and may fire earlier. See
-  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
-  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md),
-  [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md),
-  [ADR 026](docs/adr/026-show-compaction-progress-in-the-repl.md), and
-  [ADR 039](docs/adr/039-track-cake-s-native-compaction-lifecycle-in-the-timeline.md).
+  compaction is independent and may fire earlier.
 
 ### Summarizer selection
 
@@ -485,8 +475,7 @@ cake's own reasoning default in effect. These keys are accepted only from XDG
 config or an explicit `-config`; the automatic project-local file ignores them
 with a startup warning because they select a metered operation's cost and
 behavior. `reasoning-effort` requires a `cake-compact` build that supports
-`-summarizer-reasoning-effort`. See
-[ADR 029](docs/adr/029-let-compaction-select-its-own-summarizer-model-and-reasoning-effort.md).
+`-summarizer-reasoning-effort`.
 
 ## Prompt suggestions (experimental)
 
@@ -562,19 +551,6 @@ cake-suggest-bin = "cake-suggest"
 - The suggester inherits the REPL's environment and runs in the same `-cwd`,
   so `CAKE_DATA_DIR` selects the same root and a relative `-cake-bin` resolves
   in that directory. There is no fallback to reading session files.
-
-See
-[ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
-[ADR 030](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
-[ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md),
-[ADR 036](docs/adr/036-fill-prompt-suggestions-into-the-composer-instead-of-submitting-them.md),
-and
-[ADR 037](docs/adr/037-request-a-prompt-suggestion-after-startup-hydration.md),
-and
-[ADR 038](docs/adr/038-restore-prompt-suggestions-after-history-navigation.md).
-See
-[ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md)
-for the reasoning-effort selection.
 
 ## Config file
 
@@ -689,36 +665,12 @@ may only disable compaction. It also applies to `suggestions.enabled = true`,
 `suggestions.cake-suggest-bin`, `suggestions.model`, `suggestions.profile`, and
 `suggestions.reasoning-effort`; the project-local layer may only disable
 suggestions.
-Trusted relative executable
-paths keep their usual resolution. A CLI flag always wins over the
-same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
+Trusted relative executable paths keep their usual resolution. A CLI flag
+always wins over the same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
 `-system-prompt` are startup-only CLI flags and are not persisted in the
 config file. `model` and `profile` remain stable config defaults; `/model` and
 `/profile` change only the current REPL session and are not written back.
-
-## Tests
-
-```bash
-go test ./...
-# or
-just test
-```
-
-Integration tests drive the subprocess runner with fake cake shell scripts
-replaying NDJSON fixtures (successful live and replay streams, malformed lines,
-non-zero exits, cancellation), so they run without a real cake binary.
-
-One opt-in smoke test does use a real cake. It needs the `integration` build
-tag and `CAKE_REAL_SMOKE=1`, and it makes a model-backed cake request that can
-cost money, so it never runs from `just test` or `just ci`:
-
-```bash
-just test-real-cake
-```
-
-For all common development commands (build, test, lint, verify, release), see
-[`CONTRIBUTING.md`](CONTRIBUTING.md#command-catalog).
 
 ## Release build
 
@@ -795,8 +747,7 @@ validation is available with `just release-check`.
   terminal's link preview shows the full destination. The sequence is generated
   after sanitization from the URL text itself, never passed through from the
   stream, and `-no-color` emits none. A URL with non-ASCII text, or one used as
-  a link label, stays plain text. See
-  [ADR 022](docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
+  a link label, stays plain text.
   The raw bytes are still recorded when `-debug-log` is set.
 - Hook events are shown only when they deny, stop, or fail; successful hook
   noise is hidden (recorded in the `-debug-log` file when one is set).
@@ -810,8 +761,7 @@ validation is available with `just release-check`.
   SSH passphrase prompt, `gh auth login`, or an editor that opens `/dev/tty` —
   therefore fail. Windows has no equivalent boundary and claims no isolation.
   Startup is fail-closed: if the child cannot be started detached, the run
-  fails rather than falling back to an unisolated child. See
-  [ADR 027](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
+  fails rather than falling back to an unisolated child.
 - A terminal hangup or an abrupt REPL death can leave a detached cake or
   compactor process running until it finishes; normal quit, Ctrl+C, and SIGTERM
   still cancel it, and an in-flight prompt suggester is canceled and reaped

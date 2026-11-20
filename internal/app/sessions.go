@@ -27,7 +27,7 @@ func (i sessionItem) FilterValue() string { return i.summary.SessionID }
 
 // newSessionItem builds one browser row. Untrusted session fields are
 // sanitized and the prompt is flattened to a single line before they reach the
-// list (ADR 005); the row is one line, so a newline would break its height.
+// list; the row is one line, so a newline would break its height.
 func newSessionItem(s cake.SessionSummary, now time.Time) sessionItem {
 	title := ui.Sanitize(ui.ShortID(s.SessionID)) + "  " + relativeTime(s.Timestamp, now)
 	if prompt := strings.Join(strings.Fields(ui.Sanitize(s.FirstPrompt)), " "); prompt != "" {
@@ -101,10 +101,6 @@ func (b sessionBrowser) selectable() bool {
 	return b.phase == browserReady
 }
 
-func (b sessionBrowser) loading() bool {
-	return b.phase == browserLoading
-}
-
 // startLoading opens or reloads the overlay. It clears any previous error
 // before the caller drops the old rows and starts a new request.
 func (b *sessionBrowser) startLoading() {
@@ -140,7 +136,7 @@ func (b *sessionBrowser) failed(err string) {
 // directory's sessions. `/sessions` and the startup picker a bare `-resume`
 // requests both come through here, so the two openings present the same title,
 // loading state, and reload: the previous listing is dropped before the reload
-// starts, so no stale row is ever selectable behind the loading body (ADR 019).
+// starts, so no stale row is ever selectable behind the loading body.
 // It returns the updated model and the listing command as a pair, so a caller
 // never reads a receiver mutated in a sibling return operand.
 func (m Model) openSessionBrowser() (Model, tea.Cmd) {

@@ -1,5 +1,4 @@
 // Package config handles loading TOML config files for cake-repl defaults.
-//
 // Merge order is: hardcoded defaults < config file < CLI flags. Config files
 // are optional; a missing file is silently skipped.
 package config
@@ -17,7 +16,6 @@ import (
 // Config represents the config file structure. Fields use TOML tags matching
 // the expected key names in the file. Zero values mean "not set" in a file
 // that was actually loaded.
-//
 // ToolColor is the exception: false is a meaningful value, not "unset", so an
 // explicit `tool-color = false` can turn off an inherited true. Its presence is
 // tracked in ToolColorSet, taken from the decoded file's TOML metadata rather
@@ -39,7 +37,6 @@ type Config struct {
 // `[compaction]` table. Enabled is false by default and is the only field whose
 // false value is meaningful, so EnabledSet records whether the file actually
 // supplied the key.
-//
 // MaxContextTokens and TriggerTokens select absolute mode when either is
 // non-zero; both must then be positive and the trigger must be below the
 // ceiling. Both are between-turn targets: the REPL checks them only after a
@@ -64,7 +61,7 @@ type Compaction struct {
 	// settings for the summary. Empty values fall back to the REPL's turn
 	// selection (for model/profile) or cake's own default (for reasoning
 	// effort). These are trusted-config only; a project-local file may not
-	// select a metered summarizer. See ADR 029.
+	// select a metered summarizer.
 	Model           string `toml:"model"`
 	Profile         string `toml:"profile"`
 	ReasoningEffort string `toml:"reasoning-effort"`
@@ -75,12 +72,10 @@ type Compaction struct {
 // whose false value is meaningful, so EnabledSet records whether the file
 // actually supplied the key. CakeSuggestBin names the external suggester; the
 // REPL only invokes it and never reads a session file itself.
-//
 // Model and Profile select the metered suggestion call. Empty values fall back
 // to the REPL's turn selection. ReasoningEffort is passed through when set; an
 // empty value leaves Cake's own reasoning default. These are trusted-config
-// only; a project-local file may not select a suggestion model or effort. See
-// ADR 030 and ADR 032.
+// only; a project-local file may not select a suggestion model or effort.
 type Suggestions struct {
 	Enabled         bool   `toml:"enabled"`
 	EnabledSet      bool   `toml:"-"`
@@ -184,7 +179,7 @@ var errMissingCompactor = errors.New("compaction.cake-compact-bin must name an e
 
 // DefaultPaths returns the XDG config path and the project-local config path.
 // The XDG path is $XDG_CONFIG_HOME/cake-repl/config.toml (falling back to
-// ~/.config/cake-repl/config.toml). The project-local path is .cake-repl.toml
+// ~/.config/cake-repl/config.toml). The project-local path is.cake-repl.toml
 // in the current directory.
 func DefaultPaths() (xdgPath, localPath string) {
 	xdg := os.Getenv("XDG_CONFIG_HOME")
@@ -214,8 +209,7 @@ func Load(path string) (*Config, error) {
 // the compactor's thresholds or summarizer selection or the suggestion model or
 // reasoning effort. ignored names each key dropped for that reason, in a stable
 // order, and reports key presence even when its value is empty. A project file
-// may still disable compaction or suggestions. See ADR 006, ADR 024, ADR 028,
-// ADR 029, ADR 030, and ADR 032.
+// may still disable compaction or suggestions.
 func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	cfg, meta, err := load(path)
 	if err != nil {
@@ -259,7 +253,7 @@ func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	}
 	// Tuning is ignored too: an untrusted file must not be able to turn an
 	// already-enabled metered operation up. Clearing the value lets the trusted
-	// layer's non-zero merge win. See ADR 024 and ADR 025.
+	// layer's non-zero merge win.
 	if definedFold(meta, "compaction", "max-context-tokens") {
 		ignored = append(ignored, "compaction.max-context-tokens")
 		cfg.Compaction.MaxContextTokens = 0

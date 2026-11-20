@@ -75,7 +75,7 @@ type TrustOptions struct {
 	Cwd      string
 	DebugLog io.Writer
 
-	// waitDelay overrides trustWaitDelay so a test can shorten the bound; zero
+	// waitDelay overrides trustWaitDelay; zero
 	// keeps the production default (see ReadTrustStatus).
 	waitDelay time.Duration
 }
@@ -102,7 +102,6 @@ type trustEnvelope struct {
 // ReadTrustStatus runs the read-only `cake trust --status --json` command for
 // opts.Cwd and returns cake's project trust decision. It never writes a trust
 // record or otherwise mutates cake state.
-//
 // Any failure — a non-zero exit, malformed JSON, or an unusable envelope — is
 // returned as an error the caller treats as non-fatal: an older cake without
 // the command must not break startup.
@@ -154,7 +153,7 @@ func ReadTrustStatus(ctx context.Context, opts TrustOptions) (TrustStatus, error
 }
 
 // decodeTrustStatus parses the diagnostic envelope. Unknown fields and a newer
-// schema_version are ignored (ADR 035). A missing state is malformed output:
+// schema_version are ignored. A missing state is malformed output:
 // guessing a default could turn an unrecognized cake response into a false
 // "trusted" or a false warning.
 func decodeTrustStatus(raw []byte) (TrustStatus, error) {

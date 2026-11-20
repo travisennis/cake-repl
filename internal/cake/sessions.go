@@ -40,7 +40,7 @@ type SessionsOptions struct {
 	Cwd      string
 	DebugLog io.Writer
 
-	// waitDelay overrides sessionsWaitDelay so a test can shorten the bound;
+	// waitDelay overrides sessionsWaitDelay;
 	// zero keeps the production default (see ListSessions).
 	waitDelay time.Duration
 }
@@ -48,7 +48,6 @@ type SessionsOptions struct {
 // sessionsEnvelope is the part of the `cake sessions list --json` envelope this
 // client reads. Only data.sessions is used: everything else, including a newer
 // schema_version, is ignored so a forward-compatible cake keeps working
-// (ADR 016).
 type sessionsEnvelope struct {
 	Data struct {
 		Sessions []struct {
@@ -61,7 +60,6 @@ type sessionsEnvelope struct {
 
 // ListSessions runs the read-only `cake sessions list --json` command and
 // returns the sessions belonging to opts.Cwd. It never mutates cake state.
-//
 // Any failure — a non-zero exit, malformed JSON, or an unreadable envelope — is
 // returned as an error the caller treats as non-fatal: the REPL shows a warning
 // and keeps accepting input.

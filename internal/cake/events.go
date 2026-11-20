@@ -152,7 +152,6 @@ func (e ReplayError) EventType() string { return "replay_error" }
 // physical position in the transcript. It describes a summary plus a retained
 // tail that replaced retired history; the REPL renders one boundary marker and
 // seeds an estimated context size from it.
-//
 // The retained tail is reduced to its record count and the summary to a
 // bounded first line, so a checkpoint never pins its retained messages,
 // reasoning, or tool content in memory. Identity, trigger, and model fields are

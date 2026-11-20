@@ -2,7 +2,7 @@
 // one-document result. It is the only place cake-repl invokes the compactor,
 // mirroring the engine boundary in internal/cake: the compactor is an external
 // process with a documented JSON contract, and the REPL never reads or writes
-// cake session files itself. See ADR 023.
+// cake session files itself.
 package compact
 
 import (
@@ -144,7 +144,6 @@ func Compact(ctx context.Context, opts Options) Result {
 	// Prefer a graceful stop so the compactor can abandon an incomplete append
 	// and cancel its summarizer; WaitDelay then forces the issue. Windows
 	// cannot deliver SIGTERM, so kill outright there.
-	//
 	// cancelRequested records whether the watcher actually signaled the child.
 	// Cancellation is classified from this flag plus the final process status,
 	// not from ctx.Err(), so a Ctrl+C that lands after a natural exit cannot

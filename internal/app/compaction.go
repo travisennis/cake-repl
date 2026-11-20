@@ -32,7 +32,7 @@ const compactionWindowFallbackPercent = 75
 // launched. The completion path holds the notice's stable identity and resolves
 // that row, so a started row never keeps reading as pending; completed and
 // replayed markers use different wording. The Ctrl+C hint is repeated in the
-// composer footer so it stays visible after the timeline scrolls. See ADR 026.
+// composer footer so it stays visible after the timeline scrolls.
 const compactionStartText = "context compaction started · Ctrl+C cancels"
 
 // compactionTrigger is one resolved trigger line: either an absolute token
@@ -189,7 +189,7 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	// turn's Update has already pushed its completion row, and no spinner tick
 	// pushes a viewport payload. Without this sync a long compaction would show
 	// a busy status line and composer but no timeline start until the result
-	// lands. See ADR 026.
+	// lands.
 	m.compactionNotice = m.appendNotice(ui.Item{Kind: ui.KindInfo, Text: compactionStartText})
 	m.syncViewport()
 	// The title picks up the compacting marker in the caller's batch. The

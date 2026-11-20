@@ -66,22 +66,6 @@ func (m Model) browserView(p presentation) string {
 	return body + "\n" + hint
 }
 
-// activityState is the composer activity label for callers that do not already
-// hold the presentation value, such as focused tests.
-func (m Model) activityState() string {
-	return m.presentationState().activityLabel()
-}
-
-// composerHint is the footer hint for callers that do not already hold the
-// presentation value.
-func (m Model) composerHint() string {
-	return m.presentationState().hint
-}
-
-func (m Model) statusLine() string {
-	return m.statusLineFor(m.presentationState())
-}
-
 func (m Model) statusLineFor(p presentation) string {
 	session := "–"
 	if m.session.SessionID != "" {
@@ -116,8 +100,7 @@ func (m Model) statusLineFor(p presentation) string {
 
 // displayModel returns the model shown in the status line: the identity cake
 // reported for the current session once received, otherwise the current turn
-// selection (initialized from the startup -model/config value). See ADR 007 and
-// ADR 014.
+// selection (initialized from the startup -model/config value).
 func (m Model) displayModel() string {
 	if m.session.Model != "" {
 		return m.session.Model

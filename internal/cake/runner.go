@@ -61,8 +61,8 @@ type Options struct {
 	Registry *Registry
 
 	afterWait func()
-	// afterStart is a test hook invoked after cmd.Start succeeds and before the
-	// pid is published, so tests can force a cancellation into that window.
+	// afterStart is an optional hook invoked after cmd.Start succeeds and before the
+	// pid is published, so a caller can force a cancellation into that window.
 	afterStart func(*Run)
 	replay     bool
 	// waitDelay overrides the grace window between Cancel's SIGTERM and the

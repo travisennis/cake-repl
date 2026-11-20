@@ -42,7 +42,7 @@ type ToolOutputMode int
 const (
 	// ToolOutputTruncated caps output at the configured output limit. It is the
 	// zero value so tool blocks that do not set a mode render the legacy view;
-	// the REPL itself starts in ToolOutputHidden. See ADR 033.
+	// the REPL itself starts in ToolOutputHidden.
 	ToolOutputTruncated ToolOutputMode = iota
 	// ToolOutputFull shows the complete raw output regardless of the limit.
 	ToolOutputFull
@@ -75,7 +75,6 @@ type ToolBlock struct {
 // RenderItem renders one timeline item at the given width and output limit.
 // Items render independently of each other, so callers can cache results per
 // item.
-//
 // Every item's text is [Sanitize]d here, before any styling, so that no path
 // out of the timeline can write attacker-controlled escape sequences to the
 // terminal. This is the single sanitization boundary: callers pass raw stream
@@ -171,7 +170,7 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 		// Sanitizing inside this branch keeps hidden mode from scanning output
 		// it is not going to show. With tool color enabled the output keeps its
 		// SGR sequences, so capture the enclosing style's opening sequence and
-		// re-emit it after every embedded reset (ADR 009).
+		// re-emit it after every embedded reset.
 		output := tool.Output
 		if keepOutputSGR(th) {
 			output = SanitizeToolOutput(output, true, styleOpen(th.ToolOutput.Width(width-2)))
@@ -215,7 +214,6 @@ func showToolDetail(name string) bool {
 // omitting it keeps the displayed text honest while bounding the cached render
 // to the retained text plus a constant per line, independent of terminal
 // width.
-//
 // The wrap call matches what lipgloss Width would do; wrapping each line in
 // the style's open and close sequences then avoids the padding. That is safe
 // for embedded SGR because cellbuf.Wrap reopens an open color on every line it
@@ -243,7 +241,7 @@ func renderFullToolOutput(style lipgloss.Style, out string, width int) string {
 }
 
 // keepOutputSGR reports whether tool output may keep its own SGR color. The
-// user opts in with -tool-color (ADR 009), and passthrough is forced off under
+// user opts in with -tool-color, and passthrough is forced off under
 // the Ascii profile so -no-color and a non-terminal stdout always get plain
 // text regardless of the flag.
 func keepOutputSGR(th Theme) bool {

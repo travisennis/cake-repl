@@ -19,14 +19,12 @@ commands or help text (`internal/app/commands.go`), key bindings
   user-facing. The cake pass-through flags must stay aligned with the cake
   contract. `-fork` applies to the initial fresh prompt; later prompts use
   the pinned session when one is reported. A bare `-resume` names no session:
-  it opens the startup session picker (see below) instead of hydrating or
-  pinning, so the two optional-value flags share one parse path. See
-  [ADR 021](../adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
+  it opens the startup session picker (below) instead of hydrating or
+  pinning, so the two optional-value flags share one parse path.
   `-sandbox` defaults to
   `workspace-write-interactive`, not cake's own `workspace-write`, because a
   REPL is interactive; an explicit empty value omits `--sandbox` so cake
-  resolves its own policy. See
-  [ADR 017](../adr/017-default-the-cake-sandbox-to-workspace-write-interactive.md).
+  resolves its own policy.
   `-version` prints the release version followed by the embedded
   `vcs.revision` and `vcs.time` when available; a dirty build is marked
   `(modified)`.
@@ -54,18 +52,13 @@ commands or help text (`internal/app/commands.go`), key bindings
   each is ignored with a warning, while `enabled = false` still applies.
   Explicit `-config` may
   select the project file; `-no-config` skips file values and warnings. Other
-  project-local keys retain their existing behavior. See
-  [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md)
-  and
-  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
+  project-local keys retain their existing behavior.
   narrowed by
-  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md) and extended
+   and extended
   to the absolute trigger by
-  [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md)
-  and to summarizer selection by
-  [ADR 029](../adr/029-let-compaction-select-its-own-summarizer-model-and-reasoning-effort.md).
-  Suggestions use the same provenance rule; see
-  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md).
+
+  and to summarizer selection by.
+  Suggestions use the same provenance rule;
   Session-specific values, including `/model`/`/profile` selections, must stay out
   of config.
 - **Slash commands.** `/help`, `/exit` `/quit` `/q`, `/new`, `/resume <uuid>`,
@@ -91,14 +84,14 @@ commands or help text (`internal/app/commands.go`), key bindings
   resumes the highlighted session, and `Esc`, `q`, or `Ctrl+C` close it.
 - **Session browser.** `/sessions` opens an idle-only overlay that replaces the
 timeline: a navigable list of this directory's past sessions from the read-only
-`cake sessions list --json` command (see
+`cake sessions list --json` command (
 [`cake-integration-and-stream-json.md`](cake-integration-and-stream-json.md)).
 A bare `-resume` opens the same browser at startup, before the first prompt and
 with no hydration: the picker is the startup form of the browser, sharing its
 listing, keys, and selection transition. It is idle by construction (a startup
 prompt submitted while it is open is consumed by the browser keys, never run),
 and the startup listing is model-owned and cancellable exactly like the one
-`/sessions` starts (ADR 019).
+`/sessions` starts.
 Each row shows a shortened session id, a relative age, and the sanitized first
 prompt; `Enter` pins the next prompt to the selected session through the same
 path as `/resume <uuid>`, and `Esc` or `q` closes the list without action. The
@@ -113,7 +106,6 @@ renders it in plain text like every other surface.
   visible timeline before the first prompt; failures show a warning and keep
   the explicit resume pin usable. A clean hydration that ends at a completed,
   non-errored turn starts one prompt suggestion when the feature is enabled
-  ([ADR 037](../adr/037-request-a-prompt-suggestion-after-startup-hydration.md));
   a failed, canceled, incomplete, or warned replay does not. A bare
   `-resume` hydrates nothing: it opens the startup session picker, pins nothing
   until a row is picked, and leaves the REPL fresh when the picker is closed. The command `main` prints on exit
@@ -141,8 +133,7 @@ renders it in plain text like every other surface.
   prompts do not depend on the project's persistent trust record. The probe
   never writes the trust
   record or runs `cake trust`. See
-  [cake-integration-and-stream-json.md](cake-integration-and-stream-json.md) and
-  [ADR 035](../adr/035-warn-about-untrusted-project-configuration-at-startup.md).
+  [cake-integration-and-stream-json.md](cake-integration-and-stream-json.md) and.
 - **Output rendering.** Timeline item kinds, status line, tool-block format, and
   markdown rendering for assistant messages. User and assistant items render as
   labeled conversation sections; user content retains a slim gutter at normal
@@ -162,7 +153,7 @@ renders it in plain text like every other surface.
   reported on the stream once available (the `[[models]]` entry name, falling
   back to the provider model ID), else the current `/model` selection
   (initialized from `-model`/config), and a new session, resume switch, or
-  `/model`/`/profile` change drops the reported identity (ADR 007, ADR 014).
+  `/model`/`/profile` change drops the reported identity.
   While the between-turn compactor runs, the state segment carries its
   whole-second
   elapsed age (`[ <spinner> compacting 12s ]`), refreshed from the spinner tick
@@ -191,7 +182,7 @@ renders it in plain text like every other surface.
   notice into the one outcome row (success marker, warning, or an explicit
   `context compaction skipped: …` row for a no-op) when the result is reaped.
   No start notice may outlive the operation. See
-  [ADR 026](../adr/026-show-compaction-progress-in-the-repl.md). The session
+. The session
   field names the id cake
   reported for the current session and carries none after a retarget until the
   new target reports one, while the next-run field names the pinned target. It
@@ -241,8 +232,7 @@ renders it in plain text like every other surface.
   markers (`(`, `)`, `#`, `{`, `}`, `^`, `|`) end the URL only when the source
   does not resume URL text after them. A URL with non-ASCII text stays plain,
   and the Ascii profile emits no hyperlinks.
-  See
-  [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
+
   Tool-block headers
   (tool name plus argument summary) wrap to the terminal width instead of
   truncating, with continuation lines indented under the argument column; long
@@ -262,19 +252,17 @@ renders it in plain text like every other surface.
   (`&#7;`, `&#27;[2J`) into exactly those controls; the rendered markdown keeps
   only the reviewed SGR that carries the theme's styling, and `-no-color`
   strips it all. Generated OSC 8 hyperlinks are added only after that scrub, in
-  the narrow form ADR 022 defines: http(s) destinations, and link text made of
+  the narrow form this guardrail defines: http(s) destinations, and link text made of
   the URL's own visible characters. This is the default and cannot be turned off
   implicitly. The one exception is the opt-in `-tool-color` (config
-  `tool-color`, default false): tool *output* blocks then keep SGR (`CSI ... m`)
+  `tool-color`, default false): tool *output* blocks then keep SGR (`CSI... m`)
   sequences whose parameters are in a reviewed set, with embedded resets
   followed by the enclosing style so the theme does not bleed; every other
   escape family and every other item kind stay stripped, and `-no-color` /
   `termenv.Ascii` forces stripping regardless. Note that cake runs tools with
   piped stdout, so only commands that force color (`git diff --color`,
   `rg --color=always`) emit SGR at all. See
-  [`session-and-security.md`](session-and-security.md),
-  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md),
-  and [ADR 009](../adr/009-opt-in-sgr-passthrough-for-tool-output.md).
+  [`session-and-security.md`](session-and-security.md).
   Tool *output* is hidden by default: a tool call shows its header and argument
   summary only. `Ctrl+O` cycles every tool block through three session-wide
   output modes: hidden (default), truncated, and full, in the cycle order
@@ -293,8 +281,7 @@ renders it in plain text like every other surface.
   cached non-tool renders and the viewport scroll offset are preserved. A
   failed tool's message lives in its output, so hidden mode hides it until the
   user cycles output on; the stream has no error flag and its text must not be
-  parsed. See
-  [ADR 033](../adr/033-default-tool-output-to-hidden.md).
+  parsed.
   `Ctrl+Y` copies the raw markdown source of the most recent `KindAssistant`
   timeline item (skipping trailing tool/completion items) to the system
   clipboard via the platform helper: `pbcopy` on macOS, `xclip`/`xsel` on
@@ -316,9 +303,8 @@ renders it in plain text like every other surface.
   `charmbracelet/x/ansi` (a text-default emoji such as U+261D is one cell to
   x/ansi and two cells to utf8proc-based terminals) can still wrap a frame taller
   than the screen for up to one sweep; the next repaint rewrites every row in
-  order, which is also the repair a resize performs. See
-  [ADR 020](../adr/020-repaint-the-frame-after-content-changes-to-heal-terminal-side-scrolls.md).
-- **Inline rendering.** `-inline` (ADR 015) omits the alternate screen and
+  order, which is also the repair a resize performs.
+- **Inline rendering.** `-inline`  omits the alternate screen and
   renders the live region below the terminal height, so recent terminal
   history stays visible above the REPL. The timeline viewport is capped
   (at most `inlineViewportMax` rows and at most half the terminal), and once
@@ -327,24 +313,22 @@ renders it in plain text like every other surface.
   prompt are adjacent. The alternate screen remains the default. Mouse
   reporting stays on, so the wheel scrolls the timeline and terminal history is
   reachable through the terminal's own scrollback keys. An external suspend
-  parks the suspension on the alternate screen (ADR 018), so the shell's own
+  parks the suspension on the alternate screen, so the shell's own
   job-control output never lands in the live region and the resumed frame is
   rewritten in place; the consequence is that shell output produced while the
   REPL is stopped is discarded on resume, and the resumed frame can sit above
   blank rows when the window grew while stopped.
 
-## Required checks / test focus
+## Verification focus
 
-- `just test` (covers `commands_test.go`, `update_test.go`, `status_test.go`,
-  `toolblock_test.go`). Add cases for new flags, commands, or render kinds.
+- `just ci` for any change to flags, commands, key bindings, or render kinds.
 - For UI/output changes, capture a terminal screenshot for the handoff with the
   [`drive-tui`](../../.agents/skills/drive-tui/SKILL.md) skill: it launches the
-  built binary in a headless tmux pane against the checked-in fake cake, so the
-  procedure is repeatable and spends no money.
+  built binary in a headless tmux pane, so the procedure is repeatable.
 - For inline-mode changes, drive the real binary in a terminal at 80x24 and
   after a resize: check that history stays visible above the region, that the
   region respects the cap, and that exit leaves the timeline region and no
-  composer rows. No test drives a terminal, so this capture is the evidence.
+  composer rows. The capture is the evidence.
   Use the `drive-tui` skill for the mechanics, and pre-fill the pane with output
   before launching so there is history above the region to check.
 - For terminal-ownership or suspend changes, drive both render modes through an
@@ -357,7 +341,7 @@ renders it in plain text like every other surface.
 ## Common failure modes
 
 - **Docs drift.** Flags and config behavior must agree across `README.md`, this
-  guardrail, `AGENTS.md`, and any relevant ADR. Slash commands and key bindings
+  guardrail, and `AGENTS.md`. Slash commands and key bindings
   must agree across `README.md`, the `HelpText` constant in `commands.go`, and
   `AGENTS.md`/routing. Update the applicable surfaces together.
 - **Color assumptions.** Don't hardcode escape codes; go through `internal/ui`
@@ -367,18 +351,13 @@ renders it in plain text like every other surface.
   session drop both, and `Ctrl+O` re-renders only tool rows. Don't bypass the
   owner.
 - **Truncation surprises.** Respect rune-safe truncation; never cut mid-rune.
-- **Mistaking a green suite for proof that output is right.** Tests call
-  `Update` and `View` directly and assert on strings; nothing drives the
-  program, a real terminal, or a real cake stream. `just test` therefore shows
-  that our own item kinds still format, not that a new event shape or a real
-  stream renders correctly. For a rendering change, the evidence is the capture
-  or the driven session named above, plus a note on what was not exercised.
+- **Mistaking a build for proof that output is right.** Nothing here drives
+  the program, a real terminal, or a real cake stream automatically. For a
+  rendering change, the evidence is the capture or the driven session named
+  above, plus a note on what was not exercised.
 
 ## Related docs
 
 - [`cake-integration-and-stream-json.md`](cake-integration-and-stream-json.md) — event source.
 - [`session-and-security.md`](session-and-security.md) — `/new` `/resume`, `-debug-log`.
-- [`../adr/002-config-file-for-repl-defaults.md`](../adr/002-config-file-for-repl-defaults.md) — config file decision.
-- [`../adr/003-tool-output-expansion-key-binding.md`](../adr/003-tool-output-expansion-key-binding.md) — tool output expansion key binding.
-- [`../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md`](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md) — terminal-escape sanitization.
 - [`../../README.md`](../../README.md) — the user-facing reference these mirror.

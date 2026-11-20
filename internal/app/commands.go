@@ -107,7 +107,7 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 // parseTurnSelectionArg parses the optional argument for /model and /profile.
 // An empty rest is the status form; otherwise exactly one name is accepted,
 // either bare or quoted. An empty quoted argument and any extra input are not
-// part of the grammar. See ADR 007.
+// part of the grammar.
 func parseTurnSelectionArg(rest string) (string, bool) {
 	rest = strings.TrimSpace(rest)
 	if rest == "" {

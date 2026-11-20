@@ -22,25 +22,21 @@ var (
 // width, respecting the current terminal color profile (so --no-color produces
 // readable plain text). Its compact style mirrors the REPL's cyan accent,
 // blue links, yellow code, and muted structural elements.
-//
 // The returned string is safe to write to the terminal even though the input
 // has already been sanitized: markdown decoding unescapes HTML character
-// references (&#7;, &#x1b;, ...), so a message can reintroduce C0 controls and
+// references (&#7;, &#x1b;,...), so a message can reintroduce C0 controls and
 // whole escape sequences after the caller's [Sanitize] pass. The decoded result
 // is therefore scrubbed again here — the Ascii profile keeps no sequences at
 // all, and a color profile keeps only the reviewed, rendition-only SGR that
-// carries the theme's styling (ADR 005, ADR 009).
-//
+// carries the theme's styling.
 // Under a color profile, visible http(s) URLs are then wrapped in generated
-// OSC 8 hyperlinks (ADR 022). Glamour hard-wraps long URLs, and a terminal can
+// OSC 8 hyperlinks. Glamour hard-wraps long URLs, and a terminal can
 // only open the fragment on one line; the generated link names the full URL on
 // every wrapped segment. The sequences are added after the scrub, from text
 // already visible in the rendered output, so untrusted bytes still cannot
 // determine a link. The Ascii profile stays byte-plain and emits none.
-//
 // A private memoization cache avoids constructing a new glamour renderer on
 // every call: the renderer is rebuilt only when width or color profile change.
-//
 // RenderMarkdown is safe for concurrent use: the cached renderer is serialized
 // through a package-level mutex from cache lookup through render completion.
 func RenderMarkdown(text string, width int) string {
@@ -92,7 +88,6 @@ func RenderMarkdown(text string, width int) string {
 
 // getRendererLocked returns a cached or newly built glamour renderer for the given
 // width and profile. It returns nil when renderer construction fails.
-//
 // The caller must hold mdMu.
 func getRendererLocked(width int, profile termenv.Profile) *glamour.TermRenderer {
 	if mdRenderer != nil && mdWidth == width && mdProfile == profile {

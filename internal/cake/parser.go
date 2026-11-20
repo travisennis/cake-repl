@@ -7,7 +7,6 @@ import (
 )
 
 // ParseLine decodes one stream-json line into a typed event.
-//
 // Unknown event types are returned as Unknown rather than an error so the
 // stream keeps flowing when cake adds new record types. Unknown fields on
 // known types are ignored by encoding/json. A nil event with a nil error is

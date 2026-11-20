@@ -11,8 +11,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   that names the file and key without echoing the executable value. XDG config,
   explicit `-config` (including the project file), and `-cake-bin` remain
   allowed sources. Key presence is matched case-insensitively to agree with the
-  TOML decoder, so `Cake-Bin` is ignored too. See
-  [ADR 006](../adr/006-project-local-config-cannot-select-the-cake-executable.md).
+  TOML decoder, so `Cake-Bin` is ignored too.
 
 - **Sandbox policy default.** Live invocations pass
   `--sandbox workspace-write-interactive` unless the user overrides `-sandbox`.
@@ -20,8 +19,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   because the REPL is interactive: `workspace-write-interactive` adds the macOS
   capabilities that let a command launch and automate other applications. An
   explicit empty `-sandbox ""` omits the flag, letting cake resolve its own
-  policy from `CAKE_SANDBOX` or its settings. See
-  [ADR 017](../adr/017-default-the-cake-sandbox-to-workspace-write-interactive.md).
+  policy from `CAKE_SANDBOX` or its settings.
 
 - **Session pinning (security boundary).** Once a session id has been
   announced, `sessionState` pins future prompts to `--resume <session-id>`.
@@ -60,9 +58,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   browser `/sessions` opens, and the pick takes the `/resume <uuid>` transition,
   so a pin appears only after the user selects a row. Closing the picker leaves
   the REPL at `RunFresh`. The startup listing is the same model-owned,
-  cancellable, `WaitDelay`-bounded operation as a `/sessions` listing (ADR 019),
-  and a failed listing is a non-fatal warning that leaves the prompt usable. See
-  [ADR 021](../adr/021-widen-resume-to-an-optional-value-that-opens-the-session-picker.md).
+  cancellable, `WaitDelay`-bounded operation as a `/sessions` listing,
+  and a failed listing is a non-fatal warning that leaves the prompt usable.
 - **Project trust preflight is read-only and advisory.** During startup, one
   `cake trust --status --json` probe inspects the configured `-cwd`. When it
   returns, an `untrusted`, `changed`, `invalid`, or unrecognized state appends
@@ -75,8 +72,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `CAKE_TRUST_PROJECT=1` or `CAKE_PROJECT_CONFIG=off` makes live prompts
   independent of the project's persistent trust record. The command uses the
   shared child boundary, a 10-second
-  context deadline, group cancellation, and the process-level registry. See
-  [ADR 035](../adr/035-warn-about-untrusted-project-configuration-at-startup.md).
+  context deadline, group cancellation, and the process-level registry.
 - **Between-turn compaction is an opt-in external operation.** The `[compaction]`
   table (disabled by default) enables `cake-compact compact -json -threshold`
   after a successfully completed turn whose newest complete `turn_usage` figure
@@ -107,18 +103,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   notice, while a no-op appends its explicit `compacted:false` skip row only
   when the start row is still there. `/clear` or the timeline cap can remove
   that row first. A failure, cancellation, or non-in-place result keeps the
-  session and figure and warns.
-  See [ADR 026](../adr/026-show-compaction-progress-in-the-repl.md). The
-  automatically loaded project-local `.cake-repl.toml` cannot enable
+  session and figure and warns. The automatically loaded project-local
+  `.cake-repl.toml` cannot enable
   compaction, select its executable, tune any threshold, including
   `max-context-tokens` and `trigger-tokens`, or select the summary with
-  `compaction.model`, `compaction.profile`, or `compaction.reasoning-effort`
-  (ADR 006, extended by
-  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md)
-  and narrowed by
-  [ADR 024](../adr/024-ignore-project-local-compaction-tuning.md); the absolute
-  trigger is
-  [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md));
+  `compaction.model`, `compaction.profile`, or `compaction.reasoning-effort`;
   it may only disable compaction. If two REPLs race, Cake's append lock
   serializes writers and the loser warns. See
   [cake-integration-and-stream-json.md](cake-integration-and-stream-json.md) for
@@ -165,12 +154,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   automatically loaded project-local config cannot enable it, select
   `cake-suggest-bin`, or select
   `suggestions.model`/`suggestions.profile`/`suggestions.reasoning-effort`; it
-  may only disable it. See
-  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
-  [ADR 030](../adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
-  [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md),
-  and
-  [ADR 032](../adr/032-let-prompt-suggestions-select-reasoning-effort.md).
+  may only disable it.
 - **Unobserved-exit shutdown.** `main` owns a process-level
   `childproc.Registry`; the app registers the live run, a startup replay that may
   still be starting, the project-trust probe, the compactor, the suggester, and
@@ -183,8 +167,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   delivering events and keeps draining stdout so cancellation can still reach
   `Wait`. A child that misses the deadline is named on stderr and makes the
   process exit non-zero. Normal quit paths continue to drain their own results.
-  See
-  [ADR 034](../adr/034-bound-unobserved-exit-child-teardown.md).
+
 - **Run-mode transitions.** `RunFresh` → (a run that announced a session id,
   at `task_start` or completion, whatever its outcome) → `RunResume`; `/new`
   resets to fresh; `Ctrl+N` resets to fresh, clears the timeline, and cancels and
@@ -224,9 +207,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `/resume`, is never written to config, and is idle-only under the active-run
   restriction above. Changing it drops the reported session model and context
   figure so the status line reflects the new selection until the next run
-  reports its own. See
-  [ADR 007](../adr/007-model-and-profile-slash-commands-are-idle-only.md) and
-  [ADR 014](../adr/014-source-the-status-line-model-from-the-cake-stream.md).
+  reports its own.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
   secrets. They go **only** to `-debug-log` (opened `0o600`; the mode applies
   at creation — an existing file's permissions are not narrowed), never to the
@@ -251,11 +232,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   (graphics-only) sequences in tool output blocks and nothing else, and is
   forced off under the Ascii profile. Separately, `ui.RenderMarkdown` generates
   its own OSC 8 hyperlinks for visible `http(s)` URLs in assistant messages,
-  after the scrub and only in the narrow form ADR 022 defines; stream content
-  still cannot supply one. See
-  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md),
-  [ADR 009](../adr/009-opt-in-sgr-passthrough-for-tool-output.md), and
-  [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
+  after the scrub and only in the narrow form this guardrail defines; stream
+  content still cannot supply one.
 - **Assistant markdown is decoded after sanitization (security boundary).**
   Glamour unescapes HTML character references while rendering, so numeric
   references such as `&#7;`, `&#13;`, or `&#27;[2J` introduce C0 controls and
@@ -267,10 +245,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   source to close this hole — glamour does not decode inside fenced code blocks
   or link destinations, so a source pass would corrupt code samples. Generated
   OSC 8 links are added after this scrub, so they cannot be confused with a
-  decoded stream sequence. See
-  [ADR 005](../adr/005-untrusted-stream-content-is-sanitized-at-the-ui-render-boundary.md)
-  and
-  [ADR 022](../adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md).
+  decoded stream sequence.
 - **Child terminal boundary (POSIX).** Every live prompt, replay, session
   listing, project-trust probe, opt-in compaction, and prompt suggestion starts
   in its own session with no controlling terminal (`SysProcAttr{Setsid: true}`
@@ -278,8 +253,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   instead of prompting over or changing the REPL. One helper serves every spawn
   site; `Replay` inherits it through `Start`. Windows is a no-op and claims no
   equivalent boundary. Start failure is fail-closed: do not add a pty fallback
-  or an opt-out. See
-  [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
+  or an opt-out.
 - **Process lifecycle.** One mutating cake run at a time, including while replay
   hydration is active. The read-only project-trust probe and session listing are
   separate bounded diagnostics; neither mutates a session or reads session
@@ -309,10 +283,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   is reaped before the process returns. Both also share the session boundary,
   so neither can reach the REPL's terminal.
   Suspend coordination does not cover them: a suspend does not stop a running
-  compactor or suggester, which are bounded by their own cancellation paths. See
-  [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md),
-  [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md),
-  and [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
+  compactor or suggester, which are bounded by their own cancellation paths.
 - **Terminal ownership across a suspend (security boundary).** The REPL owns raw
   input, the cursor, mouse reporting, and (by default) the alternate screen, so
   it must never stop or exit without giving them back. An external, catchable
@@ -333,9 +304,7 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   parks the suspension on the alternate screen so the shell's own output cannot
   land in the live region.
   Uncatchable SIGSTOP and a REPL killed while stopped are best-effort and
-  documented, never implied. See
-  [ADR 018](../adr/018-recover-terminal-ownership-around-an-external-suspend.md)
-  and [ADR 027](../adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md).
+  documented, never implied.
 - **Replay isolation.** Replay is read-only and must not alter the session run
   mode or create a new session. Its late events are discarded after `Ctrl+N`,
   and a canceled replay is drained before another cake process starts. While
@@ -347,32 +316,20 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   typed replay phase owns both states; the drain is not a live session lock, but
   no prompt or session retarget may start a cake process before it settles.
 
-## Required checks / test focus
+## Verification focus
 
-- `just test` for `session_test.go` (cover every transition, especially
-  success-pins-resume, failure-pins-resume, and failure-without-a-session-id-
-  does-not-advance) and for the retarget boundary in `internal/app`
-  (`session_test.go`, `model_test.go`, `update_test.go`): the left session's
-  identity is dropped and never displayed or exported, while `SessionData`,
-  `/session copy`, and the exit hint name the new target. Also covers
-  `cmd/cake-repl` for the suspend cycle's step order and its safe failure on an
-  unreleasable terminal.
-- `just test-race` for any `runner.go`, process-helper, registry, or
-  session-listing change. Cover `Getsid` session identity for `Start`, `Replay`,
-  and `ListSessions`; the descendant group kill including a stdout-only pipe;
-  registry lifetime; and the suspend cycle's stop/continue order.
-- For between-turn compaction, cover the config provenance and merge rules
-  (project-local cannot enable, select the executable, or tune percent or
-  absolute values), the absolute trigger line and its 75% window cap, the
-  percent fallback headroom, every disqualifying run, the gated state, in-place
-  success and estimated context, a no-op, a non-zero exit, a non-in-place
-  document, and cancellation through Ctrl+C and Ctrl+N. Include a delayed fake
-  compactor whose start notice, advancing elapsed seconds, and resolution are
-  captured at a narrow width and without color, and cover `/clear` before the
-  result. Use fake `cake-compact` scripts; never a real model call.
+- `just ci` for any change to the run-mode state machine, subprocess lifecycle,
+  compaction gating, or debug log.
+- Drive the REPL against a real `cake` and watch the transitions by hand: a
+  live turn that succeeds and one that fails both pin the session to resume; a
+  failure without a session id does not advance the target; `Ctrl+N` stops
+  applying records and rejects a prompt or retarget until the drain settles.
+- For between-turn compaction, verify the config provenance and merge rules, the
+  absolute trigger line and its 75% window cap, the percent fallback headroom,
+  the gated state, in-place success and estimated context, a no-op, a non-zero
+  exit, a non-in-place document, and cancellation through Ctrl+C and Ctrl+N.
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
-- Terminal behavior around a suspend has no unit-test surface beyond the step
-  order and mode sequences, so a change there needs the driven session in
+- Terminal behavior around a suspend needs a driven session in
   [cli-and-user-output.md](cli-and-user-output.md), in both render modes.
 
 ## Common failure modes

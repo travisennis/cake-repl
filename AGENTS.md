@@ -18,7 +18,7 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   `trust --status --json` commands; never read cake session files, parse its
   human text, or import its internals. The startup trust probe is advisory: it
   decodes only cake's versioned diagnostic document, never writes a trust
-  record, and is silent on any failure (ADR 035).
+  record, and is silent on any failure.
 - **compaction contract**: the opt-in between-turn compactor is run only through
   `internal/compact` as `cake-compact compact -json -threshold … <session-id>`,
   with exactly one threshold mode: `-threshold-tokens` for the absolute
@@ -27,10 +27,7 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   compactor is never run with `-fork`; only its one JSON document is decoded. The
   session id stays pinned; an `in_place:false` or mismatched result is rejected.
   Only trusted config (XDG or an explicit `-config`) may enable or tune it; the
-  automatic project-local layer may only disable it. See
-  [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
-  [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md), and
-  [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
+  automatic project-local layer may only disable it.
 - **suggestion contract**: the opt-in after-turn suggester is run only through
   `internal/suggest` as
   `cake-suggest suggest -json [-cake-bin …] [-model …] [-profile …]
@@ -49,21 +46,12 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   discard it. A clean startup `-resume <uuid>` hydration ending at a completed
   turn starts one suggestion. Only trusted config may enable it, select the
   executable, or tune its model or effort; the automatic project-local layer
-  may only disable it. See
-  [ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
-  [ADR 030](docs/adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
-  [ADR 031](docs/adr/031-run-after-turn-suggestions-alongside-compaction.md),
-  [ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md),
-  [ADR 036](docs/adr/036-fill-prompt-suggestions-into-the-composer-instead-of-submitting-them.md),
-  [ADR 037](docs/adr/037-request-a-prompt-suggestion-after-startup-hydration.md),
-  and
-  [ADR 038](docs/adr/038-restore-prompt-suggestions-after-history-navigation.md).
+  may only disable it.
 - **stream-json schema** (`internal/cake/events.go`): decode forward-compatibly.
-- **CLI flags and config shape**, mirrored in `README.md`, guardrails, and ADRs.
+- **CLI flags and config shape**, mirrored in `README.md` and the guardrails.
 - **Slash commands and key bindings**, mirrored in `README.md` and `HelpText`.
   `/model` and `/profile` are idle-only, apply to the next prompt, and use
-  `default` to clear. See
-  [ADR 007](docs/adr/007-model-and-profile-slash-commands-are-idle-only.md).
+  `default` to clear.
 - **Session run-mode behavior**, which prevents session hijack.
 - **Secrets**: raw stream content goes only to the debug log, written
   owner-only at creation (an existing file's permissions are not narrowed).
@@ -72,38 +60,40 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
 
 ## Operating Loop
 
-0. Run `ahm prime` before any work to prepare the worktree and get the briefing;
-   re-run it after context compaction.
-1. Classify the request before editing. If it names a task or an ADR, inspect
-   it through `ahm` before choosing implementation work; design plans and other
-   project documents are read directly. Direct code, CLI, docs, and repository
+1. Classify the request before editing. Direct code, CLI, docs, and repository
    work starts immediately.
-2. For a Pending task, run `ahm task start <id>` to begin its lifecycle.
-3. Select the route below, load only its docs, and state both before editing.
-4. Decide whether the work edits repository files. Read-only work — audits,
+2. Select the route below, load only its docs, and state both before editing.
+3. Decide whether the work edits repository files. Read-only work — audits,
    research, recommendations, backlog grooming — stays on the current branch
    with no branch or commit. If edits are needed, create the branch immediately
    before the first edit: `just branch <type>/<slug>`, or a linked worktree
-   beside another agent for parallel work. (Release prep is the exception; see
-   [Repository Rules](#repository-rules).)
-5. Preserve compatibility unless explicitly changed; edit surgically and
-   verify according to risk.
-6. Before handoff or commit after code changes, run the
-   [`preflight`](.agents/skills/preflight/SKILL.md) skill in a subagent. It owns
-   the review scale, the lens selection, the finding threshold, the escalation
-   trigger, and the fix-and-rerun loop. Consult the
-   [documentation impact matrix](docs/guardrails/documentation.md) for
-   durable-surface changes.
-7. For task-backed work, run `ahm task complete <id>` to close the task
-   lifecycle.
-
-Large or cross-cutting work requires a design plan under `docs/exec-plans/`,
-written per the [ExecPlan workflow](docs/workflow/exec-plans.md).
+   beside another agent for parallel work. (Release prep is the exception and
+   commits to `master`.)
+4. Preserve compatibility unless explicitly changed; edit surgically, then
+   build, format, and lint according to risk.
+5. There is no test suite. Do not add one.
 
 Specialized workflow docs override this file when they conflict.
 
-When choosing build, test, lint, verification, or commit-prep commands, read
+When choosing build, lint, verification, or commit-prep commands, read
 [`CONTRIBUTING.md`](CONTRIBUTING.md) — it is the canonical command catalog.
+
+## Verification: no tests
+
+This repository does not write, keep, or run tests. Do not create `_test.go`
+files, test fixtures, testdata, benchmarks, or test-only helpers. Do not run
+`go test`, coverage, or any test harness. If you encounter a test while working
+in a file, delete it rather than updating it.
+
+Verify a change with:
+
+- `just fmt-check`
+- `just vet`
+- `just lint`
+- `just deadcode`
+- `just build`
+
+Report the exact commands you ran and anything you could not run, and why.
 
 ## Workflow Routing
 
@@ -131,10 +121,6 @@ Consult:
 
 - [CLI, commands, and user output](docs/guardrails/cli-and-user-output.md), for
   flag, slash-command, key-binding, and rendering expectations.
-- [ADR 003](docs/adr/003-tool-output-expansion-key-binding.md), for the
-  tool-output expansion binding.
-- [ADR 022](docs/adr/022-generate-osc-8-hyperlinks-for-wrapped-assistant-urls.md),
-  for the generated hyperlinks that keep wrapped assistant URLs clickable.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md), for the commands that verify the change.
 
 Keep `-no-color` usable.
@@ -148,19 +134,6 @@ Consult:
 
 - [Sessions, security, and subprocess lifecycle](docs/guardrails/session-and-security.md),
   for the state machine, cancellation, and what may be written to disk.
-- [ADR 001](docs/adr/001-session-run-mode-pinned-to-resume-to-prevent-hijack.md),
-  for why run mode pins to resume.
-- [ADR 004](docs/adr/004-ctrl-n-creates-an-isolated-new-session-boundary.md), for
-  the new-session boundary.
-- [ADR 011](docs/adr/011-replay-resumed-sessions-through-cake-stream-json.md), for
-  the replay invocation and hydration decision.
-- [ADR 027](docs/adr/027-isolate-engine-subprocesses-from-the-repl-controlling-terminal.md),
-  for the engine's POSIX session boundary, cancellation group kill, and suspend
-  coordination.
-- [ADR 028](docs/adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
-  for the read-only suggester request, its composer application rules, and its
-  cancellation paths; [ADR 032](docs/adr/032-let-prompt-suggestions-select-reasoning-effort.md),
-  for the suggestion reasoning-effort selection.
 
 Preserve session-hijack prevention and never leak raw stream content.
 
@@ -172,23 +145,9 @@ Consult:
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md), for the module map, the one-way
   dependency direction, and the architectural invariants.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md), for code style and verification
-  expectations.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md), for code style.
 
 Keep `internal/ui` side-effect-free and the one-way dependency direction intact.
-
-### Tests And Verification
-
-Use for adding tests or deciding what to run.
-
-Consult:
-
-- [Testing and verification](docs/guardrails/testing-and-verification.md), for
-  test conventions and the verification ladder.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md), for the command definitions themselves.
-
-Runner tests must not require a real `cake`; run `just test-race` for the
-runner, `just ci` before handoff.
 
 ### Dependencies, Build, CI, And Release
 
@@ -213,27 +172,8 @@ Consult:
 - [Documentation](docs/guardrails/documentation.md), for the impact matrix that
   says which surfaces require which doc updates.
 
-Keep `README.md`, `HelpText`, guardrails, ADRs, and routing in sync; move
-detailed rules into the right guardrail rather than growing this file.
-
-### Tasks, ADRs, And Design Plans
-
-Use for `ahm` records, task and ADR lifecycle, durable decisions, or design
-plans.
-
-Consult:
-
-- [Task workflow](docs/workflow/tasks.md), for choosing, triaging, starting,
-  and completing tasks.
-- [ADR workflow](docs/workflow/adrs.md), for when a decision needs an ADR and
-  how to create, supersede, and index one.
-- [ExecPlan workflow](docs/workflow/exec-plans.md), for the design-plan format
-  kept under `docs/exec-plans/`.
-
-`ahm` manages only task records and ADR records: ADR records stay under
-`docs/adr/`, and task records live in the user-level store described in
-[ADR 013](docs/adr/013-store-ahm-task-records-in-the-user-level-home-store.md).
-A design plan is an ordinary project file, not an `ahm` record.
+Keep `README.md`, `HelpText`, guardrails, and routing in sync; move detailed
+rules into the right guardrail rather than growing this file.
 
 ### Agent Instructions And Skills
 
@@ -258,6 +198,8 @@ Consult:
 - Do not revert, overwrite, or clean files you did not intentionally change.
 - Inspect `git status --short` before broad edits.
 - Report relevant remaining changes before handoff.
+- Future work and unresolved questions belong in the response or the issue
+  tracker, not in new durable records.
 
 ## Handoff
 

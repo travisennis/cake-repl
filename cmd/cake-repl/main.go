@@ -26,8 +26,7 @@ import (
 // defaultSandbox is the sandbox policy cake-repl passes to cake unless the user
 // overrides it. It is deliberately not cake's own default (workspace-write): a
 // REPL is interactive, and workspace-write-interactive adds the macOS
-// capabilities that let a command launch and automate other applications. See
-// ADR 017.
+// capabilities that let a command launch and automate other applications.
 const defaultSandbox = "workspace-write-interactive"
 
 // syncWriter serializes writes to an underlying io.Writer. The debug log is
@@ -130,11 +129,10 @@ func normalizeOptionalArgs(args []string) []string {
 // validateFlags checks the mutually exclusive / incompatible flag combinations
 // and returns an error when validation fails. When showVersion is true it
 // short-circuits and returns nil so the caller handles --version separately.
-//
 // Both optional-value flags are mutually exclusive in every form, so a bare
 // -resume and a bare -fork are rejected together exactly like their
 // UUID-bearing forms; only a value that was supplied must be a UUID, because a
-// bare -resume opens the session picker instead of naming a session (ADR 021).
+// bare -resume opens the session picker instead of naming a session.
 func validateFlags(showVersion bool, resume, fork optionalString, args []string, configPath string, noConfig bool) error {
 	if showVersion {
 		return nil
@@ -188,7 +186,7 @@ func main() {
 
 // startupFlags holds the bound values of every startup flag. bindFlags registers
 // them on fs and returns the holder, so the process command line and the
-// exit-hint round-trip tests parse one shared flag surface.
+// exit hint read one shared flag surface.
 type startupFlags struct {
 	cakeBin          *string
 	resume           optionalString
@@ -341,7 +339,7 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 	if f.resume.set {
 		// A bare -resume names no session, so nothing is hydrated and nothing is
 		// pinned: the REPL opens the session picker and the picked row pins the
-		// next prompt through the /resume transition. See ADR 021.
+		// next prompt through the /resume transition.
 		if f.resume.value == "" {
 			cfg.StartupPicker = true
 		} else {
@@ -392,7 +390,7 @@ func run() (err error) {
 	}
 
 	// Track live and replay engine runs so an external suspend can pause them
-	// before the REPL stops its own process group. See ADR 027.
+	// before the REPL stops its own process group.
 	logf := suspendLogf(cfg.DebugLog)
 	runs := cake.NewRegistry(logf)
 	cfg.Runs = runs
@@ -404,7 +402,7 @@ func run() (err error) {
 
 	// Inline mode renders in the normal buffer so recent terminal history stays
 	// visible above the REPL; the alternate screen restores the terminal on exit
-	// but hides that history for the whole session (ADR 015).
+	// but hides that history for the whole session.
 	opts := []tea.ProgramOption{tea.WithMouseCellMotion()}
 	if !*f.inline {
 		opts = append(opts, tea.WithAltScreen())
@@ -413,7 +411,7 @@ func run() (err error) {
 	// A catchable external SIGTSTP stops this process without giving the
 	// terminal back, so the shell's fg resumes a REPL that still believes it
 	// owns raw mode. Release the terminal before stopping and re-own it after
-	// SIGCONT; only meaningful when this process owns a terminal. See ADR 018.
+	// SIGCONT; only meaningful when this process owns a terminal.
 	if stdoutIsTerminal() {
 		stopSuspend := watchSuspend(p, *f.inline, runs, logf)
 		defer stopSuspend()
@@ -592,7 +590,6 @@ func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[strin
 // explicitly selected read-only sandbox to the workspace-write-interactive
 // default, or letting a config file re-supply a model the run was started
 // without).
-//
 // explicit names the flags the user set at startup. An override whose effective
 // value is empty (an explicit -model "" or -sandbox "") or equal to the default
 // (an explicit -cake-bin cake) must be re-emitted, because reloading the config

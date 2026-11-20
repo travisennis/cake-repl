@@ -82,7 +82,7 @@ type pendingOperation struct {
 
 // begin starts one request. Callers start a request only after the previous
 // one has settled; a begin therefore replaces any stale zero value left by a
-// test or a zero-value Model.
+// caller or a zero-value Model.
 func (o *pendingOperation) begin(key operationKey, cancel context.CancelFunc, done <-chan struct{}) {
 	o.phase = phaseInFlight
 	o.key = key
@@ -219,7 +219,7 @@ func (m Model) admitRetarget() admission {
 }
 
 // admitSuggestion is the suggestion's admission check. It deliberately ignores
-// compaction: ADR 031 starts a suggestion alongside the compactor, and the
+// compaction: starts a suggestion alongside the compactor, and the
 // result is held until the compaction gate opens. Its refusal is never shown to
 // the user; canSuggest uses the boolean only.
 func (m Model) admitSuggestion() admission {

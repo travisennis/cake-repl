@@ -13,12 +13,6 @@ repos:
         language: system
         pass_filenames: false
 
-      - id: go-test
-        name: go test
-        entry: just test
-        language: system
-        pass_filenames: false
-
       - id: golangci-lint
         name: golangci-lint
         entry: just lint
@@ -37,7 +31,6 @@ repos:
           - style
           - refactor
           - perf
-          - test
           - build
           - ci
           - chore

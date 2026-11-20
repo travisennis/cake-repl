@@ -47,7 +47,6 @@ func IntentFromToolArgs(argsJSON string) string {
 // SummarizeToolArgs renders a concise, single-purpose summary of a tool
 // call's arguments. Tool names are matched case-insensitively; the original
 // name is left untouched by callers.
-//
 // The summary is not sanitized: decoded arguments can contain terminal control
 // sequences, and callers must pass the result through [Sanitize] before it
 // reaches the terminal. Sanitizing here instead would not work, because
@@ -151,13 +150,11 @@ func summarizeWrite(argsJSON string) string {
 // TruncateOutput limits s to roughly limit bytes, preferring to cut at a
 // line boundary, and appends a marker with the original size. A limit of 0
 // or less uses DefaultOutputLimit.
-//
 // It does not sanitize: callers pass already-[Sanitize]d text, so the reported
 // size is that of the sanitized output and the byte budget is spent on
 // characters the user can actually see. A cut that lands inside a kept SGR
 // sequence (possible only when tool color is enabled) has its dangling prefix
 // dropped, so the marker that follows is never swallowed by an open sequence.
-//
 // It trims trailing newlines before measuring, which is a display concern; see
 // [CapOutputBytes] for the ingestion variant that must not trim.
 func TruncateOutput(s string, limit int) string {
@@ -175,7 +172,6 @@ func TruncateOutput(s string, limit int) string {
 // rune-safe prefix plus the standard "… truncated (N bytes total)" marker,
 // where N is the raw byte length of s. At or below limit, s is returned
 // unchanged (byte-identical). A limit of 0 or less uses [DefaultOutputLimit].
-//
 // Unlike [TruncateOutput] it does not trim trailing newlines first, so the
 // oversized decision and the marker use s's raw bytes. That matters at
 // ingestion: a short prefix followed by megabytes of newlines is oversized by

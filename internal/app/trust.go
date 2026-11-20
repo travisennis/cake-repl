@@ -13,7 +13,7 @@ import (
 )
 
 // trustProbeTimeout bounds the startup trust-status probe. The command reads
-// and hashes project .cake files, so it is normally fast; the deadline keeps a
+// and hashes project.cake files, so it is normally fast; the deadline keeps a
 // wedged helper from leaving a startup diagnostic pending indefinitely.
 const trustProbeTimeout = 10 * time.Second
 
@@ -37,8 +37,7 @@ func projectTrustOverridden() bool {
 // configuration trust, or nil when no engine binary is configured or cake's
 // one-run trust controls have already decided the question. The probe runs off
 // the Update loop and registers with the process-level child registry while it
-// runs, so quit and the unobserved-exit path cancel and reap it (ADR 034).
-//
+// runs, so quit and the unobserved-exit path cancel and reap it.
 // The probe is advisory: its result appends one warning when cake will refuse
 // project authority, and every failure is silent apart from the debug log so an
 // older cake binary cannot break startup.

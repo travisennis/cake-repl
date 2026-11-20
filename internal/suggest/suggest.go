@@ -2,8 +2,7 @@
 // one-document result. It is the only place cake-repl invokes the suggester,
 // mirroring the engine boundary in internal/cake and the compactor boundary in
 // internal/compact: the suggester is an external process with a documented JSON
-// contract, and the REPL never reads or writes cake session files itself. See
-// ADR 028.
+// contract, and the REPL never reads or writes cake session files itself.
 package suggest
 
 import (

@@ -21,8 +21,7 @@ import (
 const maxEventsPerBatch = 10
 
 // settleDelay is the sweep interval for the settle repaint: at most one full
-// frame rewrite per interval, however many content changes land in it. See
-// ADR 020.
+// frame rewrite per interval, however many content changes land in it.
 const settleDelay = 300 * time.Millisecond
 
 // maxRetainedToolOutputBytes is the hard ceiling on how much of one tool
@@ -40,7 +39,6 @@ const maxRetainedToolOutputBytes = 1 << 20 // 1 MiB
 // mode is unchanged for realistic results), and above it the output is cut on a
 // rune boundary and appended with the standard
 // "… truncated (N bytes total)" marker, where N is the ORIGINAL raw byte count.
-//
 // The oversized decision and the marker use the result's raw bytes, and the
 // oversized branch returns a fresh, bounded copy — never a substring of the
 // original. It must not delegate to [ui.TruncateOutput], which trims trailing
@@ -124,7 +122,6 @@ type sessionsLoadedMsg struct {
 // cancellation: closing the browser, replacing the listing, or quitting cancels
 // it, and only the newest request may apply its result. The command runs off the
 // Update loop, so a slow or missing cake binary cannot block key handling.
-//
 // It returns the updated model and the command as a pair rather than mutating a
 // receiver a caller reads in a sibling return operand: that ordering is
 // unspecified by the language.
@@ -154,7 +151,7 @@ func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 }
 
 // settleSweepMsg is the periodic tick that decides whether the frame needs a
-// settle repaint; see ADR 020.
+// settle repaint;
 type settleSweepMsg struct{}
 
 // settleSweepCmd schedules the next settle sweep. Every sweep arms the one
@@ -164,7 +161,7 @@ func settleSweepCmd() tea.Cmd {
 }
 
 // settleSweepAtStartupCmd returns the first settle sweep without waiting, so
-// startup pays no timer and a test that runs Init's commands does not block.
+// startup pays no timer and running Init's commands does not block.
 // That first sweep arms the delayed chain from its handler.
 func settleSweepAtStartupCmd() tea.Cmd {
 	return func() tea.Msg { return settleSweepMsg{} }
@@ -173,7 +170,6 @@ func settleSweepAtStartupCmd() tea.Cmd {
 // settleSweep handles one sweep: when content has changed since the last
 // sweep, ask the program to rewrite the whole frame, and always arm the next
 // sweep.
-//
 // Bubble Tea's renderer rewrites only the lines whose text changed since the
 // previous frame (standard_renderer.flush compares lastRenderedLines). A
 // terminal that measures a glyph wider than charmbracelet/x/ansi does — a
@@ -184,7 +180,6 @@ func settleSweepAtStartupCmd() tea.Cmd {
 // keep whatever the scrolled screen moved into their place: that is how a run
 // left a stale composer border and a previous status line on screen in the task
 // 110 report.
-//
 // The repair is the one a resize already performs: report the current size to
 // the program, which makes the renderer drop the line cache it diffs against
 // (repaint) so the next flush rewrites every row in order. Doing that per
@@ -244,7 +239,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The spinner tick is already flowing while a task or compaction is
 			// in flight, so it also refreshes the elapsed-seconds display without
 			// starting a second timer chain. Use the tick's own time when present
-			// so a test can advance it deterministically.
+			// so the sweep can advance deterministically.
 			now := msg.Time
 			if now.IsZero() {
 				now = time.Now()
@@ -471,7 +466,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// of the same draft, so a shown ghost is hidden rather than cleared; walking
 	// back past the newest entry restores the draft and can reveal it again.
 	// Filled-text provenance is still dropped because that text left the
-	// composer. See ADR 038.
+	// composer.
 	case key.Matches(msg, m.keys.HistoryPrev):
 		if m.input.Line() == 0 {
 			if text, ok := m.history.Prev(m.input.Value()); ok {
@@ -844,7 +839,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		m.pendingCalls = map[string]*ui.ToolBlock{}
 		// The native start row is gone with the timeline. Clearing the
 		// lifecycle means a later checkpoint or end starts a fresh one, and
-		// its own end still leaves exactly one visible outcome. See ADR 039.
+		// its own end still leaves exactly one visible outcome.
 		m.native.reset()
 	}
 	return m, nil
@@ -853,8 +848,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 // selectModel stores the model for the next prompt and drops the reported
 // session identity and context figure so the status line shows the new
 // selection until the next run reports its own. The old measurement belongs to
-// the model being replaced and may carry a different window. See ADR 007 and
-// ADR 014.
+// the model being replaced and may carry a different window.
 func (m *Model) selectModel(model string) {
 	m.turn.Model = model
 	m.session.Model = ""
@@ -903,10 +897,8 @@ func (m Model) resumeSession(id string) (tea.Model, tea.Cmd) {
 // line would exceed maxHistoryRecordBytes is dropped rather than written,
 // because loadHistory could never read it back; the caller may warn on a true
 // result but must not echo the prompt text.
-//
 // Write errors (a bad path or permissions) are silently ignored so they never
 // break the REPL; only the size guard is surfaced.
-//
 // Each entry is stored as "\x02" + JSON-encoded prompt + "\n". The \x02
 // prefix unambiguously marks JSONL records so loadHistory can distinguish
 // them from legacy plain-text lines. Appending via O_APPEND is safe for
@@ -1002,7 +994,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		if replay {
 			// A later task_start means the session's final turn is not yet proven
 			// complete; an earlier task_complete must not make the startup
-			// suggestion eligible. See ADR 037.
+			// suggestion eligible.
 			m.sawComplete = false
 		}
 
@@ -1110,7 +1102,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		// status context with its own estimate, which any newer complete
 		// turn_usage replaces. A live checkpoint under a native start contributes
 		// no marker of its own and never seeds the estimate; the live end does
-		// both. See ADR 039.
+		// both.
 		if replay {
 			m.session.OnCompaction(e)
 			m.appendItem(ui.Item{
@@ -1124,7 +1116,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 	case cake.CompactionStart:
 		// A replayed start is audit metadata; the checkpoint is the one
 		// boundary marker replay shows, and rendering a start would leave an
-		// unresolved notice. See ADR 039.
+		// unresolved notice.
 		if replay {
 			m.logDebug("compaction started: " + e.Trigger)
 		} else {
@@ -1201,13 +1193,6 @@ func (m *Model) finishPendingTools() {
 		}
 		delete(m.pendingCalls, callID)
 	}
-}
-
-// finishRun applies one live-run result. It is the compatibility entry point
-// used by focused tests; production passes the result's own key through
-// finishRunMsg.
-func (m Model) finishRun(res cake.Result) (tea.Model, tea.Cmd) {
-	return m.finishRunKey(m.runOp.key, res)
 }
 
 func (m Model) finishRunMsg(msg runDoneMsg) (tea.Model, tea.Cmd) {
@@ -1287,7 +1272,7 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 	// suggester reads through cake's read-only replay stream, which tolerates
 	// the compactor's concurrent append, so it does not wait for compaction to
 	// start or finish. A result that arrives while compaction gates the composer
-	// is held until finishCompaction applies it. See ADR 031.
+	// is held until finishCompaction applies it.
 	var cmds []tea.Cmd
 	if m.completedTurn() {
 		next, cmd := m.maybeStartSuggestion()

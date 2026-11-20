@@ -31,13 +31,12 @@ type Outcome struct {
 // error (ctxErr) onto Outcome. cancelRequested says whether the caller's Cancel
 // callback successfully signaled the child; it is what separates a
 // signal-terminated cancellation from a natural crash.
-//
 // The precedence matches the engine, compactor, and suggester callers:
-//   - a clean exit is success, even if the context expired as it finished;
-//   - an ExitError is classified from its status and cancelRequested;
-//   - an interrupted wait without a status is a cancellation;
-//   - a context deadline sets TimedOut without hiding how the process ended;
-//   - anything else is a start or teardown failure.
+// - a clean exit is success, even if the context expired as it finished;
+// - an ExitError is classified from its status and cancelRequested;
+// - an interrupted wait without a status is a cancellation;
+// - a context deadline sets TimedOut without hiding how the process ended;
+// - anything else is a start or teardown failure.
 func Classify(cmd *exec.Cmd, waitErr, ctxErr error, cancelRequested bool, stderr *TailBuffer) Outcome {
 	out := Outcome{ExitCode: -1}
 	if stderr != nil {

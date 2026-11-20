@@ -1,38 +1,27 @@
 # Guardrail: documentation
 
-**Scope.** Read before changing user-facing docs, architecture docs, ADRs,
-managed-work records, or agent routing. Also use this guardrail when behavior,
-configuration, compatibility, or workflow changes require documentation updates.
+**Scope.** Read before changing user-facing docs, architecture docs, or agent
+routing. Also use this guardrail when behavior, configuration, compatibility, or
+workflow changes require documentation updates.
 
 ## Compatibility surfaces
 
 - **User reference.** `README.md` is the user-facing source for install, run,
-  flags, key bindings, slash commands, config files, and known limitations.
-  The canonical development-command catalog is owned by `CONTRIBUTING.md`;
-  `README.md` retains basic build, install, and test examples.
+  flags, key bindings, slash commands, config files, and known limitations. The
+  canonical development-command catalog is owned by `CONTRIBUTING.md`;
+  `README.md` retains basic build and install examples.
 - **Runtime help.** `internal/app/commands.go` `HelpText` mirrors slash
   commands and key bindings shown in `README.md`.
 - **Architecture and guardrails.** `ARCHITECTURE.md` documents stable module
   boundaries and invariants. `docs/guardrails/` contains workflow-specific
   agent rules; move detailed rules there instead of growing `AGENTS.md`.
-- **ADR history.** Durable technical decisions live in `docs/adr/`. Do not
-  rewrite accepted history to describe a new decision; create a new ADR unless
-  the edit is only clarification.
-- **Managed work.** `ahm` owns ADR records under `docs/adr/` and task records
-  in the user-level store described in
-  [ADR 013](../adr/013-store-ahm-task-records-in-the-user-level-home-store.md),
-  plus the generated index for each. Do not edit a generated index by hand, and
-  do not link to a task record by relative path; reference tasks by id. A design
-  plan under `docs/exec-plans/` is an ordinary project file, not an `ahm` record.
 
-## Required checks / test focus
+## Required checks
 
-- Docs-only changes: inspect rendered Markdown where practical and verify
-  generated indexes are current with `ahm status` or `ahm index` as applicable.
+- Docs-only changes: inspect rendered Markdown where practical and run
+  `gofmt`-equivalent checks only when Go files changed.
 - Docs that change CLI flags, config shape, commands, key bindings, or output:
   cross-check `README.md`, `HelpText`, `AGENTS.md`, and the relevant guardrail.
-- Docs that record a durable decision: create or update an ADR through
-  `ahm adr ...`, then make sure `docs/adr/index.md` is regenerated.
 - Code plus docs: use the verification route for the code change; `just ci` is
   the broad gate.
 
@@ -40,36 +29,27 @@ configuration, compatibility, or workflow changes require documentation updates.
 
 Use this matrix when a change touches a durable surface.
 
-| Changed surface | Required docs |
-| --- | --- |
-| CLI flags or startup behavior | `README.md`, `docs/guardrails/cli-and-user-output.md`, `AGENTS.md` compatibility surface when the category changes |
-| Slash commands or key bindings | `README.md`, `internal/app/commands.go` `HelpText`, `docs/guardrails/cli-and-user-output.md` |
-| Config file shape, paths, or precedence | `README.md`, `docs/guardrails/cli-and-user-output.md`, `ARCHITECTURE.md` if architectural, ADR when the contract is introduced or changed |
-| Persisted state or files on disk | ADR when the contract is introduced or changed, `README.md` when user-visible, relevant guardrail, `ARCHITECTURE.md` when it introduces a new storage boundary |
-| Session behavior | `README.md`, `docs/guardrails/session-and-security.md`, ADR when the durable decision changes |
-| cake invocation contract or stream-json contract | `ARCHITECTURE.md`, `docs/guardrails/cake-integration-and-stream-json.md`, ADR when the contract changes |
-| Security, logging, secrets, or subprocess lifecycle | `docs/guardrails/session-and-security.md`, `README.md` when user-visible, ADR for durable security or subprocess behavior changes |
-| Build, dependency, CI, or release behavior | `CONTRIBUTING.md` (canonical command catalog), `docs/guardrails/dependencies-build-ci-release.md`, ADR for major runtime dependencies or compatibility changes |
-| Architecture/module boundaries | `ARCHITECTURE.md`, relevant guardrail, ADR for durable boundary changes |
-| User-visible terminal output | `README.md` when behavior changes, `docs/guardrails/cli-and-user-output.md`, screenshots or manual capture when required by that guardrail |
-| Managed-work format or workflow | `AGENTS.md`, [task workflow](../workflow/tasks.md), [ADR workflow](../workflow/adrs.md), or [ExecPlan workflow](../workflow/exec-plans.md); relevant `ahm` task records |
-| Any other durable contract not listed above | ADR when the contract is introduced or changed, plus the most relevant existing row's doc requirements |
+| Changed surface                                 | Required docs                                                                                                                      |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| CLI flags or startup behavior                   | `README.md`, `docs/guardrails/cli-and-user-output.md`, `AGENTS.md` compatibility surface when the category changes                 |
+| Slash commands or key bindings                  | `README.md`, `internal/app/commands.go` `HelpText`, `docs/guardrails/cli-and-user-output.md`                                       |
+| Config file shape, paths, or precedence         | `README.md`, `docs/guardrails/cli-and-user-output.md`, `ARCHITECTURE.md` if architectural                                          |
+| Persisted state or files on disk                | `README.md` when user-visible, relevant guardrail, `ARCHITECTURE.md` when it introduces a new storage boundary                     |
+| Session behavior                                | `README.md`, `docs/guardrails/session-and-security.md`                                                                             |
+| cake invocation contract or stream-json contract | `ARCHITECTURE.md`, `docs/guardrails/cake-integration-and-stream-json.md`                                                          |
+| Security, logging, secrets, or subprocess lifecycle | `docs/guardrails/session-and-security.md`, `README.md` when user-visible                                                        |
+| Build, dependency, CI, or release behavior      | `CONTRIBUTING.md` (canonical command catalog), `docs/guardrails/dependencies-build-ci-release.md`                                  |
+| Architecture/module boundaries                  | `ARCHITECTURE.md`, relevant guardrail                                                                                              |
+| User-visible terminal output                    | `README.md` when behavior changes, `docs/guardrails/cli-and-user-output.md`, screenshots or manual capture when required by that guardrail |
+| Any other durable contract not listed above     | The most relevant existing row's doc requirements                                                                                  |
 
-When a row says "ADR when the contract changes," make the decision before code
-changes when possible. If the need is discovered after implementation, add the
-ADR before completing the task or commit, then reference it from the task.
-
-Any feature that introduces or changes a durable contract not covered by an
-existing row in this table must create or update an ADR.
-
-Skill files under `.agents/skills/` are project-owned prose; `ahm` neither
-creates nor overwrites them. Edit them when this project's review or grooming
-practice changes.
+State durable decisions in the code, the guardrail, or `ARCHITECTURE.md` where
+they belong; do not create separate decision records.
 
 ## Durable-surface checklist
 
-Before completing a task, committing, or handing off, explicitly check whether
-the change affects any durable surface:
+Before committing or handing off, explicitly check whether the change affects
+any durable surface:
 
 - CLI flags or startup behavior.
 - Config file shape, precedence, or paths.
@@ -82,44 +62,21 @@ the change affects any durable surface:
 
 ## Preflight requirements for high-impact areas
 
-For task-backed feature work, run the `preflight` skill before completing the
-task, committing, or handoff. For `area:config`, persisted behavior,
-security/session, or CLI changes, preflight Pass 1 must explicitly answer:
+For `area:config`, persisted behavior, security/session, or CLI changes, the
+`preflight` skill's first pass must explicitly answer:
 
 - Which user docs changed?
 - Which guardrails changed?
-- Is an ADR required? If not, why not?
-- Is the task record linked to the ADR or updated with the no-ADR rationale?
-
-## Task documentation notes
-
-For feature tasks, especially `area:config`, `area:session`, `area:security`,
-or any task that changes persisted behavior, include a short note in the task
-before completion:
-
-```markdown
-## Documentation / ADR Notes
-
-- User docs:
-- Guardrails:
-- ADR: required / not required because ...
-```
-
-If an ADR is required, link it from the task's implementation notes or
-documentation notes. If no ADR is required for a feature task, state the reason
-so the decision is reviewable later.
 
 ## Common failure modes
 
 - Documenting flags in `README.md` but leaving `docs/guardrails/` or
   `AGENTS.md` stale.
 - Adding a feature that changes persisted state, config shape, security
-  posture, or compatibility behavior without an ADR.
-- Editing generated indexes directly instead of changing the source record and
-  regenerating through `ahm`.
+  posture, or compatibility behavior without updating a guardrail.
 - Letting runtime `/help` drift from README slash commands and key bindings.
 - Treating `README.md` as enough for a durable behavior change that also needs
-  an ADR or guardrail update.
+  a guardrail or architecture update.
 
 ## Related docs
 

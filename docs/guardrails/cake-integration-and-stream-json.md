@@ -9,7 +9,7 @@ consumes cake events. This is the project's core external contract.
 - **cake invocation.** Live prompts run as `cake --output-format stream-json`
   with optional `--resume <uuid>`, `--no-session`, `--model` / `--profile`,
   optional repeated `--add-dir <dir>` and `--toolbox <dir>`, and a
-  `--sandbox <policy>` that defaults to `workspace-write-interactive` (ADR 017);
+  `--sandbox <policy>` that defaults to `workspace-write-interactive`;
   `--tools <names>` / `--no-tools`, `--no-skills` /
   `--skills <names>`, and `--system-prompt <path>`. An initial fresh prompt
   may additionally use `--fork [<uuid>]`; once cake reports the forked session
@@ -30,8 +30,7 @@ consumes cake events. This is the project's core external contract.
   optional model identity (`model` is the provider model ID, `model_config` the
   `[[models]]` entry name); `task_start` gains the same optional pair with
   cake#664, and `task_complete` decodes it ahead of any cake that reports it
-  there. These fields feed the status-line model under
-  [ADR 014](../adr/014-source-the-status-line-model-from-the-cake-stream.md).
+  there. These fields feed the status-line model under.
 - **Per-turn usage (`turn_usage`).** Live and replayed streams emit a
   `turn_usage` record for every main-agent provider attempt that reports usage;
   summary and compaction attempts are not streamed as context measurements. It
@@ -97,9 +96,6 @@ consumes cake events. This is the project's core external contract.
   the same `-cwd`, so `CAKE_DATA_DIR` selects the same root and a relative
   `-cake-bin` resolves in that directory; the REPL does not reimplement Cake's
   data-directory layout.
-  See [ADR 023](../adr/023-compact-context-between-turns-through-an-external-compactor.md)
-  and
-  [ADR 025](../adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md).
 - **External suggester (`internal/suggest`).** The opt-in prompt suggester is
   invoked only as
   `cake-suggest suggest -json [-cake-bin <path>] [-model <name>] [-profile <name>]
@@ -132,12 +128,7 @@ consumes cake events. This is the project's core external contract.
   `WaitDelay`, bounded stdout/stderr, `internal/childproc` isolation, and a
   content-free debug-log line. Quit and the unobserved-exit teardown drain an
   in-flight request, so its canceled child is reaped before the REPL returns.
-  It never reads or writes a session file. See
-  [ADR 028](../adr/028-offer-after-turn-prompt-suggestions-from-an-external-suggester.md),
-  [ADR 030](../adr/030-let-prompt-suggestions-select-their-own-model-and-profile.md),
-  [ADR 031](../adr/031-run-after-turn-suggestions-alongside-compaction.md),
-  and
-  [ADR 032](../adr/032-let-prompt-suggestions-select-reasoning-effort.md).
+  It never reads or writes a session file.
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams
   and the versioned `sessions list --json` and `trust --status --json`
@@ -156,10 +147,7 @@ consumes cake events. This is the project's core external contract.
   model-owned operation: closing or replacing the browser and quitting cancel it,
   a superseded result is dropped by request identity, and `ListSessions` bounds
   its teardown with `WaitDelay` so a stuck helper, or a descendant holding the
-  inherited stdout pipe, cannot hang the REPL. See
-  [ADR 016](../adr/016-allow-read-only-cake-sessions-list-for-the-session-browser.md)
-  and
-  [ADR 019](../adr/019-cancel-and-bound-the-read-only-session-listing.md).
+  inherited stdout pipe, cannot hang the REPL.
 - **Project trust preflight.** The startup probe is one read-only
   `cake trust --status --json` invocation through `internal/cake`, with the
   configured `-cake-bin`, the same `-cwd` and environment as a live prompt, a
@@ -181,56 +169,25 @@ consumes cake events. This is the project's core external contract.
   live prompt does not depend on the project's persistent trust record;
   `trust --status` always inspects the project regardless of those variables.
   Each canonical project root,
-  including a linked worktree, has its own record. See
-  [ADR 035](../adr/035-warn-about-untrusted-project-configuration-at-startup.md).
+  including a linked worktree, has its own record.
 
-## Required checks / test focus
+## Verification focus
 
-- `just test` for `internal/cake`; `just test-race` when touching `runner.go`
-  (it is concurrent: a goroutine pumps `Events` and delivers one `Result`).
-- Add table cases to `parser_test.go` for new/changed event types and to
-  `runner_test.go` (fake-cake shell scripts) for new subprocess behavior,
-  including replay success and structured failure. `replay_test.go` covers
-  timeline hydration and continued prompt execution. Runner tests also cover
-  the reaping signal (`Run.Done`) and cancellation with a full `Events` buffer,
-  so unobserved-exit shutdown cannot block on event delivery. See
-  [ADR 034](../adr/034-bound-unobserved-exit-child-teardown.md).
-- For session listing, add fake-cake cases for a valid envelope, an empty
-  `data.sessions`, malformed JSON, a non-zero exit, and an unknown
-  `schema_version`; none may be fatal. Also cover cancellation, the bounded
-  teardown when a descendant holds stdout (short `waitDelay`, finite fake helper
-  with cleanup), and the 8 MiB stdout cap.
-- For the project trust preflight, add fake-cake cases for an untrusted,
-  changed, invalid, trusted, and not-required document, an unknown
-  `schema_version`, a missing `data.state`, malformed JSON, a non-zero exit, the
-  exact `trust --status --json` argument contract, cwd, the 1 MiB stdout cap,
-  cancellation, and the bounded teardown when a descendant holds stdout. The app
-  tests must prove the warning appears at startup for an untrusted document and
-  that every probe failure is silent. Cover suppression by
-  `CAKE_TRUST_PROJECT=1` and `CAKE_PROJECT_CONFIG=off`, and registration with
-  the process-level child registry. None may require a real cake.
-- For the external compactor, add fake `cake-compact` scripts for a success
-  document, a `compacted:false` no-op, a non-zero exit with stderr, malformed
-  output, a missing binary, cancellation, and the `WaitDelay` teardown when a
-  descendant holds stdout. App tests drive the trigger, the gate, the in-place
-  success, the non-in-place rejection, and cancellation through `Ctrl+C` and
-  `Ctrl+N`; none may need a real cake or a model call.
-- For the external suggester, add fake `cake-suggest` scripts for a success
-  document, a `suggested:false` no-op, a document that omits the required
-  `suggested` field, a non-zero exit with stderr, malformed output, a missing
-  binary, a canceled context, a canceled child that exits non-zero, a
-  SIGTERM-ignoring child that the `WaitDelay` force-kills, and the `WaitDelay`
-  teardown when a descendant holds stdout. App tests drive the completed-turn
-  trigger, the `is_error` rejection, the compaction ordering, applying a result,
-  stale/wrong-session rejection, the draft-wins rule, hide/restore on typing,
-  fill-without-submit, the second-Ctrl+S submit, edited-text slash parsing,
-  the missing-field warning, startup eligibility and rejection on incomplete or
-  failed hydration, cancellation on new
-  session, the one-request gate while a child drains, quit/teardown draining
-  (including ignored keyboard input), and the teardown wait; none may need a
-  real cake or a model call.
-- Verify a real round trip if you have a `cake` binary, but never make a real
-  cake binary a test requirement.
+- `just ci` for every change.
+- The parser and runner encode cake's stream contract. Verify a change by
+  driving the REPL against a real `cake` and, when the stream shape changed,
+  exercising the affected commands by hand (`replay <uuid>`,
+  `sessions list --json`, `trust --status --json`, an external `cake-compact`,
+  or an external `cake-suggest`).
+- There is no fixture harness. When a failure mode needs a fake engine, write a
+  temporary script outside the repository and do not commit it.
+- For the trust preflight, confirm startup stays silent on a probe failure and
+  warns only for a successful document with an attention state.
+- For the external compactor and suggester, confirm each failure class is
+  contained and no request needs a model call unless you are explicitly testing
+  a live call.
+- When a change touches decoding, say in the handoff whether a real-cake round
+  trip was run or the coverage is unknown.
 
 ## Common failure modes
 
@@ -243,7 +200,7 @@ consumes cake events. This is the project's core external contract.
 - **Mislabeling cancellation.** Cancellation is derived by the shared
   `childproc.Classify` from whether `cmd.Cancel` successfully signaled the
   process (the run's cancel-requested phase) plus signal-terminated process
-  status on POSIX, not from `ctx.Err()`,
+  status on POSIX, not from `ctx.Err`,
   so a late Ctrl+C cannot relabel a finished run. Preserve that ordering.
 - **Making the trust preflight authoritative or fatal.** A probe failure, an
   older cake without `trust`, or malformed output must never block startup or
@@ -253,12 +210,11 @@ consumes cake events. This is the project's core external contract.
   (`childproc.TailBuffer`); tool output is truncated for display and retained
   with the existing per-result
   ceiling. Replay uses the same limits; don't accumulate full streams in memory.
-- **Mistaking a green suite for forward compatibility.** Every fixture under
-  `internal/cake/testdata/fixtures/` is ours, so `just test` only proves we
-  still decode the events we already know about. A record type cake added last
-  week decodes to `Unknown` by design and fails nothing. A passing suite is not
-  evidence about a newer cake: when a change touches decoding, say in the
-  handoff whether a real-cake round trip was run or the coverage is unknown.
+- **Mistaking a successful decode for forward compatibility.** A record type
+  cake added last week decodes to `Unknown` by design and fails nothing. A
+  passing manual run is not evidence about a newer cake: when a change touches
+  decoding, say in the handoff whether a real-cake round trip was run or the
+  coverage is unknown.
 - **Reading cumulative usage as context.** `task_complete.usage` sums the whole
   task, so its input count grows past any single context window. The status
   context segment reads only the newest complete `turn_usage` record's input
@@ -288,4 +244,3 @@ consumes cake events. This is the project's core external contract.
 - [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) — system boundary and invariants.
 - [`session-and-security.md`](session-and-security.md) — run-mode + secrets.
 - [`cli-and-user-output.md`](cli-and-user-output.md) — how events render.
-- [`../adr/011-replay-resumed-sessions-through-cake-stream-json.md`](../adr/011-replay-resumed-sessions-through-cake-stream-json.md) — replay decision.

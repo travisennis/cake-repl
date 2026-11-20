@@ -47,11 +47,9 @@ func (m *Model) removeNotice(id noticeID) bool {
 // whenever width is non-zero, len(rendered) == len(items). Before the first
 // layout width is zero and no rows are cached; resize renders the items that
 // accumulated while the terminal size was unknown.
-//
 // Mutations that remove entries copy the survivors into fresh slices. That
 // releases the removed payloads instead of leaving them reachable through an
 // old backing array, which is what -max-timeline-items and /clear promise
-// (ADR 010).
 type timeline struct {
 	items    []ui.Item
 	rendered []string
@@ -129,10 +127,10 @@ func (t *timeline) remove(idx int) bool {
 }
 
 // trimFront drops the first over items and rows, copying survivors so the
-// trimmed payloads are released. It returns how many entries were removed.
-func (t *timeline) trimFront(over int) int {
+// trimmed payloads are released.
+func (t *timeline) trimFront(over int) {
 	if over <= 0 || len(t.items) == 0 {
-		return 0
+		return
 	}
 	if over > len(t.items) {
 		over = len(t.items)
@@ -146,7 +144,6 @@ func (t *timeline) trimFront(over int) int {
 		t.rendered = rendered
 		t.dirty = true
 	}
-	return over
 }
 
 // rerender refreshes one item's cached row after it mutated in place.
