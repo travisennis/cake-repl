@@ -448,6 +448,118 @@ func TestParseLineCompactionBoundsSummary(t *testing.T) {
 	}
 }
 
+func TestParseLineCompactionStart(t *testing.T) {
+	line := `{"type":"compaction_start","session_id":"s-1","task_id":"t-1","checkpoint_id":"checkpoint-1","timestamp":"2026-11-20T10:00:00Z","trigger":"threshold","estimated_before_tokens":118000,"context_window":200000,"summary_instruction_version":1}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	start, ok := ev.(CompactionStart)
+	if !ok {
+		t.Fatalf("got %T, want CompactionStart", ev)
+	}
+	if start.SessionID != "s-1" || start.TaskID != "t-1" || start.CheckpointID != "checkpoint-1" || start.Timestamp != "2026-11-20T10:00:00Z" {
+		t.Errorf("record identity = %+v", start)
+	}
+	if start.Trigger != "threshold" || start.EstimatedBeforeTokens != 118000 || start.ContextWindow != 200000 || start.SummaryInstructionVersion != 1 {
+		t.Errorf("record metadata = %+v", start)
+	}
+}
+
+// A malformed optional field must not drop the start: the trigger still names
+// the operation, and the fields that decoded stay usable.
+func TestParseLineCompactionStartToleratesMalformedOptionalFields(t *testing.T) {
+	line := `{"type":"compaction_start","checkpoint_id":"checkpoint-1","trigger":"manual","estimated_before_tokens":null,"context_window":"large","summary_instruction_version":["future"],"future_field":{"nested":true}}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine returned an error for malformed optional fields: %v", err)
+	}
+	start, ok := ev.(CompactionStart)
+	if !ok {
+		t.Fatalf("got %T, want CompactionStart", ev)
+	}
+	if start.CheckpointID != "checkpoint-1" || start.Trigger != "manual" {
+		t.Errorf("well-formed fields lost: %+v", start)
+	}
+	if start.EstimatedBeforeTokens != 0 || start.ContextWindow != 0 || start.SummaryInstructionVersion != 0 {
+		t.Errorf("malformed fields decoded as %+v", start)
+	}
+}
+
+func TestParseLineCompactionEnd(t *testing.T) {
+	line := `{"type":"compaction_end","session_id":"s-1","task_id":"t-1","checkpoint_id":"checkpoint-1","timestamp":"2026-11-20T10:00:01Z","trigger":"threshold","status":"committed","estimated_before_tokens":118000,"estimated_after_tokens":24000,"basis":"measured_usage","retired_count":8,"retained_count":4,"reason":"first line\nSECOND-LINE"}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	end, ok := ev.(CompactionEnd)
+	if !ok {
+		t.Fatalf("got %T, want CompactionEnd", ev)
+	}
+	if end.SessionID != "s-1" || end.TaskID != "t-1" || end.CheckpointID != "checkpoint-1" || end.Timestamp != "2026-11-20T10:00:01Z" {
+		t.Errorf("record identity = %+v", end)
+	}
+	if end.Trigger != "threshold" || end.Status != "committed" {
+		t.Errorf("record metadata = %+v", end)
+	}
+	if end.EstimatedBeforeTokens != 118000 || end.EstimatedAfterTokens != 24000 || end.Basis != "measured_usage" {
+		t.Errorf("estimate = %+v", end)
+	}
+	if end.RetiredCount != 8 || end.RetainedCount != 4 {
+		t.Errorf("counts = %+v", end)
+	}
+	if end.Reason != "first line" {
+		t.Errorf("reason = %q, want the first line only", end.Reason)
+	}
+}
+
+// An unknown or malformed optional field must not drop the end: a skip or
+// failure is otherwise invisible.
+func TestParseLineCompactionEndToleratesMalformedOptionalFields(t *testing.T) {
+	line := `{"type":"compaction_end","checkpoint_id":"checkpoint-1","trigger":"overflow","status":"no_fit","estimated_before_tokens":"huge","estimated_after_tokens":null,"basis":["future"],"retired_count":"many","retained_count":{"not":"a count"},"reason":{"provider":"future"},"future_field":true}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine returned an error for malformed optional fields: %v", err)
+	}
+	end, ok := ev.(CompactionEnd)
+	if !ok {
+		t.Fatalf("got %T, want CompactionEnd", ev)
+	}
+	if end.CheckpointID != "checkpoint-1" || end.Trigger != "overflow" || end.Status != "no_fit" {
+		t.Errorf("well-formed fields lost: %+v", end)
+	}
+	if end.EstimatedBeforeTokens != 0 || end.EstimatedAfterTokens != 0 || end.Basis != "" {
+		t.Errorf("malformed estimate decoded as %+v", end)
+	}
+	if end.RetiredCount != 0 || end.RetainedCount != 0 || end.Reason != "" {
+		t.Errorf("malformed counts or reason decoded as %+v", end)
+	}
+}
+
+// The reason is bounded on a rune boundary to the same 1,024 bytes Cake puts
+// on the wire, so one provider message cannot be pinned by the decoded event.
+func TestParseLineCompactionEndBoundsReason(t *testing.T) {
+	reason := "a" + strings.Repeat("é", 2_000)
+	line := `{"type":"compaction_end","status":"failed","reason":` + strconv.Quote(reason) + `}`
+	ev, err := ParseLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseLine: %v", err)
+	}
+	end, ok := ev.(CompactionEnd)
+	if !ok {
+		t.Fatalf("got %T, want CompactionEnd", ev)
+	}
+	if len(end.Reason) > maxCompactionReasonBytes {
+		t.Errorf("reason length = %d bytes, want at most %d", len(end.Reason), maxCompactionReasonBytes)
+	}
+	if !utf8.ValidString(end.Reason) {
+		t.Errorf("reason was cut mid-rune: %q", end.Reason)
+	}
+	if !strings.HasPrefix(reason, end.Reason) {
+		t.Errorf("reason is not a prefix of the wire value: %q", end.Reason)
+	}
+}
+
 func TestParseLineMalformed(t *testing.T) {
 	_, err := ParseLine([]byte(`{"type":"message", busted`))
 	if err == nil {

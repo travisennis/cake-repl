@@ -238,6 +238,109 @@ func (e *Compaction) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Native compaction statuses, the closed set cake reports on compaction_end.
+// A committed operation has a checkpoint; no_op and no_fit retired nothing, and
+// failed prepared a candidate that never produced one.
+const (
+	CompactionStatusCommitted = "committed"
+	CompactionStatusNoOp      = "no_op"
+	CompactionStatusNoFit     = "no_fit"
+	CompactionStatusFailed    = "failed"
+)
+
+// maxCompactionReasonBytes bounds the skip or failure reason a decoded
+// CompactionEnd keeps. Cake bounds its own reason to the same 1,024 UTF-8
+// bytes, so the event never carries more than the wire record does.
+const maxCompactionReasonBytes = 1024
+
+// CompactionStart reports that one prepared native compaction began summary
+// generation. It is emitted only when cake has a candidate; a request below
+// the trigger, or a no-op or no-fit that never prepared one, emits no start.
+// The wire fields are type, session_id, task_id, checkpoint_id, timestamp,
+// trigger, estimated_before_tokens, optional context_window, and
+// summary_instruction_version.
+type CompactionStart struct {
+	SessionID                 string
+	TaskID                    string
+	CheckpointID              string
+	Timestamp                 string
+	Trigger                   string
+	EstimatedBeforeTokens     int
+	ContextWindow             int
+	SummaryInstructionVersion int
+}
+
+func (e CompactionStart) EventType() string { return "compaction_start" }
+
+// UnmarshalJSON decodes the record field by field so an unknown or malformed
+// optional field keeps the start instead of dropping it from the stream.
+func (e *CompactionStart) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	decodeOptionalField(fields["session_id"], &e.SessionID)
+	decodeOptionalField(fields["task_id"], &e.TaskID)
+	decodeOptionalField(fields["checkpoint_id"], &e.CheckpointID)
+	decodeOptionalField(fields["timestamp"], &e.Timestamp)
+	decodeOptionalField(fields["trigger"], &e.Trigger)
+	decodeOptionalField(fields["estimated_before_tokens"], &e.EstimatedBeforeTokens)
+	decodeOptionalField(fields["context_window"], &e.ContextWindow)
+	decodeOptionalField(fields["summary_instruction_version"], &e.SummaryInstructionVersion)
+	return nil
+}
+
+// CompactionEnd is the terminal metadata of one native compaction attempt,
+// whether or not it committed. A committed end follows its checkpoint; a
+// skip, no-fit, or failure may be the only record emitted. The wire fields are
+// type, session_id, task_id, checkpoint_id, timestamp, trigger, status, and the
+// optional estimated_before_tokens, estimated_after_tokens, basis,
+// retired_count, retained_count, and reason.
+type CompactionEnd struct {
+	SessionID             string
+	TaskID                string
+	CheckpointID          string
+	Timestamp             string
+	Trigger               string
+	Status                string
+	EstimatedBeforeTokens int
+	EstimatedAfterTokens  int
+	Basis                 string
+	RetiredCount          int
+	RetainedCount         int
+	Reason                string
+}
+
+func (e CompactionEnd) EventType() string { return "compaction_end" }
+
+// UnmarshalJSON decodes the record field by field, like the other compaction
+// events, and bounds the reason to its first line and the wire's byte cap.
+func (e *CompactionEnd) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	decodeOptionalField(fields["session_id"], &e.SessionID)
+	decodeOptionalField(fields["task_id"], &e.TaskID)
+	decodeOptionalField(fields["checkpoint_id"], &e.CheckpointID)
+	decodeOptionalField(fields["timestamp"], &e.Timestamp)
+	decodeOptionalField(fields["trigger"], &e.Trigger)
+	decodeOptionalField(fields["status"], &e.Status)
+	decodeOptionalField(fields["estimated_before_tokens"], &e.EstimatedBeforeTokens)
+	decodeOptionalField(fields["estimated_after_tokens"], &e.EstimatedAfterTokens)
+	decodeOptionalField(fields["basis"], &e.Basis)
+	decodeOptionalField(fields["retired_count"], &e.RetiredCount)
+	decodeOptionalField(fields["retained_count"], &e.RetainedCount)
+
+	var reason string
+	if decodeOptionalField(fields["reason"], &reason) {
+		e.Reason = boundedFirstLine(reason, maxCompactionReasonBytes)
+	}
+	return nil
+}
+
 // decodeOptionalField decodes one optional field, reporting whether it decoded. A
 // missing or malformed field is not an error: the event keeps decoding so one
 // unexpected value cannot break the stream.

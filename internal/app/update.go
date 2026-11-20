@@ -573,6 +573,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.runGeneration = 0
 	m.timeline.clear()
 	m.pendingCalls = map[string]*ui.ToolBlock{}
+	m.native.reset()
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "New session"})
 	if busy {
 		return m, m.titleCmd()
@@ -795,6 +796,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 	case CmdNew:
 		m.clearSuggestion()
 		m.session.Reset()
+		m.native.reset()
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt starts a fresh cake session"})
 
 	case CmdResume:
@@ -840,6 +842,10 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 		// late output appends a standalone block instead of mutating one that
 		// is no longer on the timeline.
 		m.pendingCalls = map[string]*ui.ToolBlock{}
+		// The native start row is gone with the timeline. Clearing the
+		// lifecycle means a later checkpoint or end starts a fresh one, and
+		// its own end still leaves exactly one visible outcome. See ADR 039.
+		m.native.reset()
 	}
 	return m, nil
 }
@@ -1102,15 +1108,38 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		// exactly one boundary marker: the retained tail is never expanded into
 		// duplicate messages or tool calls. A replayed checkpoint also seeds the
 		// status context with its own estimate, which any newer complete
-		// turn_usage replaces. A live compaction stream record never seeds that
-		// estimate; the live compactor result does it in finishCompaction.
+		// turn_usage replaces. A live checkpoint under a native start contributes
+		// no marker of its own and never seeds the estimate; the live end does
+		// both. See ADR 039.
 		if replay {
 			m.session.OnCompaction(e)
+			m.appendItem(ui.Item{
+				Kind: ui.KindInfo,
+				Text: compactionMarker(e.EstimatedInput.BeforeTokens, e.EstimatedInput.AfterTokens, e.RetainedCount),
+			})
+		} else {
+			m.nativeCompactionCheckpoint(e)
 		}
-		m.appendItem(ui.Item{
-			Kind: ui.KindInfo,
-			Text: compactionMarker(e.EstimatedInput.BeforeTokens, e.EstimatedInput.AfterTokens, e.RetainedCount),
-		})
+
+	case cake.CompactionStart:
+		// A replayed start is audit metadata; the checkpoint is the one
+		// boundary marker replay shows, and rendering a start would leave an
+		// unresolved notice. See ADR 039.
+		if replay {
+			m.logDebug("compaction started: " + e.Trigger)
+		} else {
+			m.nativeCompactionStart(e)
+		}
+
+	case cake.CompactionEnd:
+		// A replay committed end follows its checkpoint and adds nothing; a
+		// skip or failure may exist only as an end record, so it is shown. A
+		// live end resolves the start notice into exactly one outcome row.
+		if replay {
+			m.nativeCompactionEndReplay(e)
+		} else {
+			m.nativeCompactionEnd(e)
+		}
 
 	case cake.TaskComplete:
 		m.session.OnTaskComplete(e)
@@ -1207,6 +1236,15 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 	}
 
 	m.finishPendingTools()
+	// A native compaction start with no end is resolved before the run's own
+	// outcome row, so a start notice never stays pending after the run.
+	if m.native.pending {
+		text := "context compaction incomplete"
+		if res.Canceled {
+			text = "context compaction canceled"
+		}
+		m.settleNativeCompaction(text)
+	}
 
 	result := outcomeSuccess
 	switch {

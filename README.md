@@ -240,8 +240,9 @@ down. The status line and timeline only show it shortened.
   hydrates a session containing a `compaction` record, that checkpoint's
   `estimated_input.after_tokens` seeds the segment and is prefixed with `~`
   (`~24k/200k`) because it is cake's estimate, not a provider measurement. A
-  newer complete `turn_usage` replaces it, whether replay emits it after the
-  checkpoint or a later live turn reports it.
+  live committed native compaction seeds the same estimate from its `compaction_end`
+  after figure. A newer complete `turn_usage` replaces it, whether replay emits
+  it after the checkpoint or a later live turn reports it.
 - A run that ends before completing — canceled, a nonzero exit, a wait error, or
   a stream that closes mid-task — is still pinned to the session id it
   announced, so the next prompt continues the session the run left behind
@@ -318,6 +319,33 @@ down. The status line and timeline only show it shortened.
   run suppressed. The hint reflects the startup controls; a later `/model` or
   `/profile` change is not reflected.
 
+## Cake's native compaction
+
+Cake compacts context inside a run, before a provider request, independently of
+the external between-turn compactor described in the next section. cake-repl
+renders that lifecycle from the stream:
+
+- `compaction_start` adds one info row naming the trigger and the estimated
+  before size, for example `context compaction started · threshold, 118k before`.
+- A live checkpoint under that start adds no second row. A `committed`
+  `compaction_end` resolves the start into exactly one
+  `context compacted 118k -> 24k, 4 records retained` marker and immediately
+  updates the estimated context from the end's after figure.
+- `no_op` and `no_fit` resolve it into one `context compaction skipped: …` row,
+  and `failed` into one warning. An end-only record from a request that never
+  prepared a candidate is shown the same way, because it has no start row to
+  resolve.
+- If a run ends before the end record arrives, the start row becomes a canceled
+  or incomplete warning so it never stays pending. An unknown future status
+  becomes a generic info row instead of disappearing.
+- Replay ignores `compaction_start`, keeps the `compaction` checkpoint as the one
+  marker and estimate seed, and adds nothing for a committed end. A non-committed
+  replay outcome is still rendered. Older Cake streams with only a bare
+  checkpoint keep the previous marker behavior.
+
+See
+[ADR 039](docs/adr/039-track-cake-s-native-compaction-lifecycle-in-the-timeline.md).
+
 ## Context compaction (experimental)
 
 cake-repl can compact context between prompts. After a successful turn whose
@@ -328,6 +356,10 @@ the next prompt resumes the same session; replay still shows the raw transcript
 plus one `context compacted …` marker. The feature is opt-in, off by default,
 and experimental: summary quality has not been qualified.
 
+This between-turn path is separate from Cake's native in-run compaction above.
+A single invocation can still grow past the configured lines before cake-repl
+gets control back; the next prompt is the first opportunity to compact.
+
 `max-context-tokens` and `trigger-tokens` are **between-prompt targets, not
 in-invocation caps**. The REPL checks them only after a completed turn, from the
 newest complete `turn_usage` measurement. A single invocation can keep growing
@@ -337,8 +369,9 @@ larger measurement. cake task 130 measured the gap offline on 2026-10-27 (see
 2,153 invocations grew by a median +40,375 tokens (p99 +311,592; max 556,317);
 16 invocations crossed 400k from below, and all 16 were still above it at their
 last measured request. Active time above the line reached 38.8 minutes at 350k
-and 29.8 minutes at 400k. The planned core mechanism in tasks 034f/034g would
-compact at provider-request boundaries inside Cake; it has not landed.
+and 29.8 minutes at 400k. Cake's core native compaction now compacts at
+provider-request boundaries inside a run, so this between-turn path remains an
+independent opt-in layer, not the only way context is bounded.
 
 ```toml
 # Absolute mode: a quality ceiling and the line where compaction fires. Both
@@ -423,16 +456,16 @@ keep-tokens = 20000
   runs in the same `-cwd`, so `CAKE_DATA_DIR` selects the same root and a
   relative `-cake-bin` resolves in that directory. A missing binary or verb is a
   visible warning, and there is no fallback to writing session files.
-- Compaction only happens between prompts. A single long tool loop can grow
-  past `trigger-tokens` and `max-context-tokens` before Cake returns; the next
-  prompt is the first opportunity to compact, and the next boundary uses the
-  larger measurement. A request-boundary mechanism inside Cake is planned in
-  core tasks 034f/034g and has not landed. See
+- Compaction only happens between prompts in this external path. A single long
+  tool loop can grow past `trigger-tokens` and `max-context-tokens` before Cake
+  returns; the next prompt is the first opportunity for this path to compact,
+  and the next boundary uses the larger measurement. Cake's native in-run
+  compaction is independent and may fire earlier. See
   [ADR 023](docs/adr/023-compact-context-between-turns-through-an-external-compactor.md),
   [ADR 024](docs/adr/024-ignore-project-local-compaction-tuning.md),
   [ADR 025](docs/adr/025-add-an-absolute-context-trigger-with-a-separate-quality-ceiling.md),
-  and
-  [ADR 026](docs/adr/026-show-compaction-progress-in-the-repl.md).
+  [ADR 026](docs/adr/026-show-compaction-progress-in-the-repl.md), and
+  [ADR 039](docs/adr/039-track-cake-s-native-compaction-lifecycle-in-the-timeline.md).
 
 ### Summarizer selection
 

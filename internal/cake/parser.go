@@ -92,6 +92,20 @@ func ParseLine(line []byte) (Event, error) {
 			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
 		}
 		return ev, nil
+	case "compaction_start":
+		// Native compaction events also decode tolerantly: an unknown or
+		// malformed optional field must not drop the lifecycle record.
+		var ev CompactionStart
+		if err := json.Unmarshal(env.Raw, &ev); err != nil {
+			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
+		}
+		return ev, nil
+	case "compaction_end":
+		var ev CompactionEnd
+		if err := json.Unmarshal(env.Raw, &ev); err != nil {
+			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
+		}
+		return ev, nil
 	case "task_complete":
 		var ev TaskComplete
 		if err := json.Unmarshal(env.Raw, &ev); err != nil {

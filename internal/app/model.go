@@ -210,6 +210,11 @@ type Model struct {
 	// canceled or superseded run cannot touch the status line or context of a
 	// later one.
 	compactionSeq uint64
+	// native tracks Cake's in-run compaction lifecycle, which the run owns.
+	// It is deliberately separate from compaction above: the external
+	// between-turn compactor has its own notice, gate, and cancellation. See
+	// ADR 039.
+	native nativeCompactionState
 	// suggestion is the one read-only after-turn suggester request and its
 	// presentation (ADR 028). The state owns the request identity, cancellation,
 	// reaping channel, ghost text, and any result held for compaction. Its phase
