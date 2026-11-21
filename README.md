@@ -18,7 +18,10 @@ The status line leads with the current operation — `idle`, `running`,
 `compacting` (with the compactor's elapsed seconds while one runs),
 `stopping task`, `stopping compaction`, `loading history`,
 `stopping history`, `browsing sessions`, or `exiting` — followed by labeled
-session, next-run, model, context, and working-directory context. The model
+session, next-run, model, context, and working-directory context. While the
+external prompt suggester runs, its whole-second age follows the operation as a
+background indicator (`[ idle · suggesting 3s ]`); it never replaces the
+operation or gates input. The model
 shown is the identity cake reports on the stream once available — the
 `[[models]]` entry name, falling back to the provider model ID — and otherwise
 the current `/model` selection (initialized from `-model`/config). The context
@@ -44,7 +47,8 @@ When `[suggestions]` is enabled, a completed turn or a clean startup resume
 also runs the external `cake-suggest` binary and offers its suggested next
 prompt as dim ghost text in the composer. `Ctrl+S` inserts the suggestion into
 the composer for editing; a second `Ctrl+S` submits it. Typing hides the ghost
-until the composer is empty again.
+until the composer is empty again. While the request runs, the status line names
+it with its whole-second age (`[ idle · suggesting 3s ]`).
 
 ## Requirements
 
@@ -519,6 +523,12 @@ cake-suggest-bin = "cake-suggest"
   child is reaped before the REPL returns within the same bounded teardown,
   including the quit and SIGINT/SIGTERM paths; keyboard input is ignored while
   that exit is draining.
+- While the request runs, the status line names it beside the current operation
+  with its whole-second age, for example `[ idle · suggesting 3s ]` or
+  `[ <spinner> compacting 4s · suggesting 3s ]` when an automatic compaction
+  overlaps. The request never changes the composer state or gates input, and
+  the indicator disappears when the result lands, a draft cancels the request,
+  or the child is reaped.
 - The result is one JSON document:
   `{"suggested":true,"suggestion":"…","session_id":"…","reason":""}`. Unknown
   fields are ignored. A `suggested:false` document, a cancellation, or a result

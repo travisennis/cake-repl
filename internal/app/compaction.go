@@ -342,11 +342,12 @@ func (m *Model) refreshCompactionElapsed(now time.Time) {
 	m.compactionElapsed = elapsed.Truncate(time.Second)
 }
 
-// compactionElapsedText formats the running compactor's whole-second age for
-// the one-row status line and composer title. Whole seconds keep it short on a
-// narrow terminal and change at most once per second, however often the
-// spinner frame renders.
-func compactionElapsedText(d time.Duration) string {
+// elapsedText formats a running operation's whole-second age for the one-row
+// status line and composer title. Whole seconds keep it short on a narrow
+// terminal and change at most once per second, however often the spinner frame
+// renders. The between-turn compactor and the prompt suggester share it so both
+// background operations report their age in the same shape.
+func elapsedText(d time.Duration) string {
 	secs := int64(d / time.Second)
 	if secs < 0 {
 		secs = 0

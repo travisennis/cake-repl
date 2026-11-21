@@ -119,7 +119,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   suggester reads through Cake's read-only replay stream, which opens no lock
   and skips a trailing partial record, so the concurrent checkpoint append
   cannot corrupt the read. The request is model-owned, bounded by a 60-second
-  context timeout, and never gates prompt submission. Its `-model`/`-profile`
+  context timeout, and never gates prompt submission. While it runs, the status
+  line appends a background indicator with its whole-second age (for example
+  `idle · suggesting 3s`); the indicator never changes the composer state, and
+  it disappears when the result is reaped or a draft cancels the request. Its
+  `-model`/`-profile`
   resolve from `[suggestions]` first and then independently from the turn
   selection; its `-reasoning-effort` comes from `[suggestions]` when set and is
   otherwise omitted. Its result is applied only while the request identity, session

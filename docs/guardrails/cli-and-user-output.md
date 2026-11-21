@@ -154,10 +154,16 @@ renders it in plain text like every other surface.
   back to the provider model ID), else the current `/model` selection
   (initialized from `-model`/config), and a new session, resume switch, or
   `/model`/`/profile` change drops the reported identity.
+  While the external prompt suggester runs, the status state appends its
+  whole-second age (`[ idle · suggesting 3s ]`, or
+  `[ <spinner> compacting 4s · suggesting 3s ]` when an automatic compaction
+  overlaps). It is a background indicator only: it never replaces the
+  operational state and never changes the composer state, hint, or input gate.
   While the between-turn compactor runs, the state segment carries its
   whole-second
   elapsed age (`[ <spinner> compacting 12s ]`), refreshed from the spinner tick
-  the REPL already runs, not from a second timer. The context
+  the REPL already runs, not from a second timer; the suggester's age uses the
+  same tick. The context
   field is cake's newest complete main-agent `turn_usage` measurement, rendered
   compactly as `132k/1M` (the attempt's input tokens over the configured
   window) or as a bare `132k` when the model configures no window. Partial usage
@@ -190,6 +196,9 @@ renders it in plain text like every other surface.
   focused composer whose state is `ready`, `running`, `compacting <elapsed>`,
   `stopping task`, `stopping compaction`, `loading history`, `stopping history`,
   `browsing sessions`, or `exiting`; its borders remain visible without color.
+  An in-flight prompt suggestion is never one of those states: it is a
+  status-line background indicator, and the composer stays `ready` because the
+  request does not gate input.
   When a prompt suggestion is showing, the empty composer renders it as dim
   placeholder ghost text and the footer reads
   `Ctrl+S insert suggestion · type to hide`; the textarea value stays empty,

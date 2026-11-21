@@ -73,6 +73,9 @@ func (m Model) statusLineFor(p presentation) string {
 	}
 
 	state := p.label
+	if p.background != "" {
+		state += " · " + p.background
+	}
 	if p.activity == activityRunning || p.activity == activityCompacting {
 		state = m.spin.View() + " " + state
 	}

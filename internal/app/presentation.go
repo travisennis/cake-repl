@@ -27,6 +27,10 @@ type presentation struct {
 	hint        string
 	titleMarker string
 	browser     bool
+	// background names an in-flight operation that does not gate input and
+	// does not change the composer state, for example "suggesting 3s". The
+	// status line appends it to the operational state; an empty value omits it.
+	background string
 }
 
 // activityLabel is the composer's label. The status line uses label so idle is
@@ -42,8 +46,21 @@ func (p presentation) activityLabel() string {
 // presentationState derives every presentation surface from the typed lifecycle
 // states. Its precedence follows the admission gates: exit, browser, run,
 // replay, compaction, then the idle composer. Suggestion text is presentation,
-// not a request phase, so it only changes the idle hint.
+// not a request phase, so it only changes the idle hint; an in-flight request
+// is a background indicator that leaves the composer state alone.
 func (m Model) presentationState() presentation {
+	p := m.basePresentation()
+	if m.suggestionInFlight() {
+		p.background = "suggesting " + elapsedText(m.suggestion.elapsed)
+	}
+	return p
+}
+
+// basePresentation derives the operational state without the background
+// indicator. The suggester never changes that state: it runs while the REPL is
+// idle or compacting, and the composer stays usable, so its request is reported
+// beside the state rather than as one.
+func (m Model) basePresentation() presentation {
 	if m.exiting() {
 		return presentation{
 			activity:    activityExiting,
@@ -127,5 +144,5 @@ func (m Model) presentationState() presentation {
 // compactionStateLabel names the in-flight compactor and its whole-second age.
 // The status line and composer share it so the two surfaces cannot disagree.
 func (m Model) compactionStateLabel() string {
-	return "compacting " + compactionElapsedText(m.compactionElapsed)
+	return "compacting " + elapsedText(m.compactionElapsed)
 }

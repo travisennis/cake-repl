@@ -104,9 +104,12 @@ Markers this REPL renders: `prompt · ready` / `prompt · running` /
 `prompt · browsing sessions` / `prompt · exiting`, and the status line
 `[ idle ]` / `[ <spinner> running ]` / `[ <spinner> compacting ]` /
 `[ stopping task ]` / `[ stopping compaction ]` / `[ loading history ]` /
-`[ stopping history ]` / `[ browsing sessions ]` / `[ exiting ]`. The spinner
-glyph advances every frame, so match the stable word, not the glyph. Wait on the
-text the change is about, not on chrome.
+`[ stopping history ]` / `[ browsing sessions ]` / `[ exiting ]` /
+`[ idle · suggesting <n>s ]`. The spinner glyph advances every frame, so match
+the stable word, not the glyph. Wait on the text the change is about, not on
+chrome. The suggestion indicator requires an enabled `[suggestions]` table from
+an explicit `-config`: the standard `-no-session` isolation flag disables the
+feature, so a suggestion check also needs a temp `CAKE_DATA_DIR`.
 
 ### 4. Act
 

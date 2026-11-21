@@ -211,8 +211,11 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   completed turn that pins a session, one model-owned `cake-suggest` request may
   run through `internal/suggest`, concurrently with an automatic compaction. It
   is read-only, bounded by a context timeout, and canceled by any composer use,
-  a new session, a retarget, or quit. Its model/profile resolve from
-  `[suggestions]` first and then the turn selection; reasoning effort comes
+  a new session, a retarget, or quit. While it is in flight, the status line
+  appends its whole-second age as a background indicator (`idle · suggesting
+  3s`), refreshed from the spinner tick; the composer state and hint stay
+  unchanged because the request never gates input. Its model/profile resolve
+  from `[suggestions]` first and then the turn selection; reasoning effort comes
   from `[suggestions]` when set. A result is applied only
   while the request identity, session pin, idle state, and empty composer all
   still match; one that arrives while compaction gates the composer is held and

@@ -64,6 +64,12 @@ type suggestionState struct {
 	seq     uint64
 	ghost   string
 	held    suggestionHold
+	// start is when the in-flight child was launched and elapsed is its
+	// whole-second age, refreshed from the spinner tick the REPL already runs
+	// while an operation is busy. Both are zero when no request is in flight,
+	// so the status line never shows an age for an idle or reaped request.
+	start   time.Time
+	elapsed time.Duration
 	// filledText is the exact composer value copied from ghost by fillSuggestion.
 	// While the trimmed composer still matches it, submit bypasses slash-command
 	// parsing; an edit changes the comparison and restores normal parsing.
@@ -105,11 +111,21 @@ func (s *suggestionState) begin(generation sessionGeneration, sessionID string, 
 	s.seq++
 	key := operationKey{generation: generation, request: s.seq, sessionID: sessionID}
 	s.request.begin(key, cancel, done)
+	s.start = time.Now()
+	s.elapsed = 0
 	return key
 }
 
+// settle consumes the reaping result for key and clears the elapsed clock once
+// no request or drain is left. An unknown key leaves the operation, and its
+// clock, exactly as it was.
 func (s *suggestionState) settle(key operationKey) bool {
-	return s.request.settle(key)
+	settled := s.request.settle(key)
+	if !s.request.active() && !s.request.draining() {
+		s.start = time.Time{}
+		s.elapsed = 0
+	}
+	return settled
 }
 
 func (s *suggestionState) invalidate() {
@@ -153,6 +169,13 @@ func (m Model) suggestionBusy() bool {
 	return p == suggestionInFlight || p == suggestionDraining
 }
 
+// suggestionInFlight reports whether a suggester child is running for the
+// current request. A draining child owns a resource but its request has been
+// abandoned, so the status line must not advertise it.
+func (m Model) suggestionInFlight() bool {
+	return m.suggestionPhase() == suggestionInFlight
+}
+
 // canSuggest reports whether the REPL may start a suggestion request now. It is
 // deliberately stricter than "a turn just ended": the request starts only with
 // an empty composer, an idle program, and a pinned session that has a completed
@@ -182,6 +205,11 @@ func (m Model) canSuggest() bool {
 // maybeStartSuggestion starts one suggestion request when the REPL is eligible.
 // It returns a nil command and an unchanged model when no request is possible,
 // so callers can use it on every post-turn path without branching first.
+//
+// The caller must keep the spinner tick chain alive while the request runs,
+// because that tick refreshes the status line's elapsed age. A finished run
+// already has its tick pending; startup hydration runs no spinner and starts
+// one itself.
 func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 	if !m.canSuggest() {
 		return m, nil
@@ -333,6 +361,21 @@ func (m *Model) applyPendingSuggestion() {
 		return
 	}
 	m.showSuggestion(hold.text)
+}
+
+// refreshSuggestionElapsed records the whole-second age of the running
+// suggester. The spinner tick is the clock the REPL already runs while an
+// operation is in flight, so this adds no second timer and stops with the
+// spinner chain when the request settles.
+func (m *Model) refreshSuggestionElapsed(now time.Time) {
+	if !m.suggestionInFlight() || m.suggestion.start.IsZero() {
+		return
+	}
+	elapsed := now.Sub(m.suggestion.start)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	m.suggestion.elapsed = elapsed.Truncate(time.Second)
 }
 
 // warnSuggestion surfaces a broken suggester once per REPL process. The feature

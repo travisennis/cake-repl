@@ -230,21 +230,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if !m.runBusy() && !m.compactionBusy() {
+		// The chain stays alive while any operation with a live status
+		// indicator owns a child: a task, a compaction, or a suggestion. It is
+		// the REPL's one clock for elapsed ages, so none of them needs a
+		// second timer.
+		if !m.runBusy() && !m.compactionBusy() && !m.suggestionInFlight() {
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		// Use the tick's own time when present so the sweep can advance
+		// deterministically.
+		now := msg.Time
+		if now.IsZero() {
+			now = time.Now()
+		}
 		if m.compactionBusy() {
-			// The spinner tick is already flowing while a task or compaction is
-			// in flight, so it also refreshes the elapsed-seconds display without
-			// starting a second timer chain. Use the tick's own time when present
-			// so the sweep can advance deterministically.
-			now := msg.Time
-			if now.IsZero() {
-				now = time.Now()
-			}
 			m.refreshCompactionElapsed(now)
+		}
+		if m.suggestionInFlight() {
+			m.refreshSuggestionElapsed(now)
 		}
 		return m, cmd
 

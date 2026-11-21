@@ -38,7 +38,10 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   passed through, falling back independently to the turn selection;
   `reasoning-effort` is passed only when set. The request starts alongside an
   automatic compaction; a result that arrives while the compacting gate is
-  closed is held and applied after the compactor settles. `Ctrl+S` inserts the
+  closed is held and applied after the compactor settles. While the request is
+  in flight, the status line appends `suggesting <n>s` beside the operational
+  state, refreshed from the spinner tick the REPL already runs; the composer
+  label, hint, and input gate never change for it. `Ctrl+S` inserts the
   ghost into the composer and never submits it; a second `Ctrl+S` submits the
   filled text, which bypasses slash-command parsing only while the text remains
   in the composer unedited. Typing and history recall hide the ghost and

@@ -290,5 +290,8 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 	if suggestionCmd == nil {
 		return next, cmd
 	}
-	return next, tea.Batch(cmd, suggestionCmd)
+	// Hydration runs no task, so no spinner tick is pending for the
+	// suggestion's status-line age; start the chain here. A post-turn
+	// suggestion reuses the finished run's pending tick instead.
+	return next, tea.Batch(cmd, suggestionCmd, next.spin.Tick)
 }
