@@ -80,8 +80,10 @@ go vet ./...
   handling. `golangci-lint` config lives in `.golangci.yml`.
 - Go source and the `justfile` are comment-free. Only machine directives
   (`//go:build`, `//nolint`, `// #nosec`, shebangs, and the like) are allowed.
-  Record durable decisions in `docs/adr/`; file an issue for a workaround instead
-  of explaining it in a comment. `just comment-check` enforces this.
+  State durable decisions in the code, `README.md`, `ARCHITECTURE.md`, or the
+  owning guardrail. Do not create ADRs or separate decision records, and do not
+  file an issue for a workaround; fix it in the same change. `just
+  comment-check` enforces the comment rule.
 - Respect package boundaries (see [`ARCHITECTURE.md`](ARCHITECTURE.md)): app
   behavior in `internal/app`, cake process/event concerns in `internal/cake`,
   terminal rendering in `internal/ui`. The dependency direction is one-way.

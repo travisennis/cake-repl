@@ -41,11 +41,11 @@ Use this matrix when a change touches a durable surface.
 | Build, dependency, CI, or release behavior      | `CONTRIBUTING.md` (canonical command catalog), `docs/guardrails/dependencies-build-ci-release.md`                                  |
 | Architecture/module boundaries                  | `ARCHITECTURE.md`, relevant guardrail                                                                                              |
 | User-visible terminal output                    | `README.md` when behavior changes, `docs/guardrails/cli-and-user-output.md`, screenshots or manual capture when required by that guardrail |
-| Architecture decision                            | `docs/adr/NNN-short-title.md`, linked from `docs/adr/README.md`                                                                     |
 | Any other durable contract not listed above     | The most relevant existing row's doc requirements                                                                                  |
 
-State durable decisions in `docs/adr/`; keep the code free of prose comments
-([ADR 040](../adr/040-keep-go-source-comment-free.md)).
+State durable decisions in the code, the guardrail, or `ARCHITECTURE.md` where
+they belong; do not create separate decision records. Keep Go source and the
+`justfile` free of prose comments.
 
 ## Durable-surface checklist
 

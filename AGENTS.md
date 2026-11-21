@@ -151,9 +151,10 @@ Consult:
 - [`CONTRIBUTING.md`](CONTRIBUTING.md), for code style.
 
 Keep `internal/ui` side-effect-free and the one-way dependency direction intact.
-Keep Go source and the `justfile` comment-free; record decisions in
-[`docs/adr/`](docs/adr/README.md) and file an issue for a workaround
-([ADR 040](docs/adr/040-keep-go-source-comment-free.md)).
+Keep Go source and the `justfile` comment-free; only machine directives remain.
+Record a durable decision in the code, `README.md`, `ARCHITECTURE.md`, or the
+owning guardrail where it belongs. Do not create ADRs or separate decision
+records. Do not file a GitHub issue for a workaround; fix it in the same change.
 
 ### Dependencies, Build, CI, And Release
 
@@ -193,6 +194,10 @@ Consult:
 
 ## Repository Rules
 
+- Do not create ADRs, decision logs, or other separate decision records. State
+  durable decisions in the code, `README.md`, `ARCHITECTURE.md`, or the owning
+  guardrail. Do not use GitHub issues as a backlog: fix the work now, or ask
+  before deferring it.
 - Work happens on a feature branch: one branch per task, cut from an up-to-date
   `master`, with commits made freely on the branch; hand off the fully
   committed branch for review. Read-only work stays on the current branch.
