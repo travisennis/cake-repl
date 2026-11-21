@@ -1,17 +1,10 @@
-// Package ui renders cake-repl timeline items and chrome with lipgloss.
 package ui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Theme bundles every style the REPL renders with.
 type Theme struct {
-	// ToolColor lets tool output keep its own SGR color instead of being
-	// stripped. It is off by default and is ignored under the Ascii
-	// color profile, so the safe, plain-text behavior is what an unconfigured
-	// REPL and -no-color both get.
 	ToolColor bool
 
-	// Timeline content roles.
 	UserLabel  lipgloss.Style
 	UserText   lipgloss.Style
 	Assistant  lipgloss.Style
@@ -27,26 +20,21 @@ type Theme struct {
 	Info       lipgloss.Style
 	Debug      lipgloss.Style
 
-	// Prompt composer.
 	PromptTitle  lipgloss.Style
 	PromptBorder lipgloss.Style
 	PromptHint   lipgloss.Style
 	Placeholder  lipgloss.Style
 
-	// Status bar.
 	StatusBar       lipgloss.Style
 	StatusState     lipgloss.Style
 	StatusKey       lipgloss.Style
 	StatusValue     lipgloss.Style
 	StatusSeparator lipgloss.Style
 
-	// Shared metadata and timeline structure.
 	TimelineSeparator lipgloss.Style
 	TimelineAccent    lipgloss.Style
 }
 
-// DefaultTheme returns the standard color scheme. Styling degrades to plain
-// text automatically when the color profile is Ascii (see -no-color).
 func DefaultTheme() Theme {
 	return Theme{
 		UserLabel:         lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true),

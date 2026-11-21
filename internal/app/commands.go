@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// CommandKind identifies a slash command.
 type CommandKind int
 
 const (
@@ -21,15 +20,11 @@ const (
 	CmdSessions
 )
 
-// Command is one parsed slash command.
 type Command struct {
 	Kind CommandKind
 	Arg  string
 }
 
-// commandTable is the single source of truth for slash command names.
-// Canonical names first; aliases follow so completion prefers the canonical form.
-// Both ParseCommand and completeSlash reference this table.
 var commandTable = []struct {
 	name string
 	kind CommandKind
@@ -49,15 +44,10 @@ var commandTable = []struct {
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// IsSessionID reports whether s looks like a cake session uuid. It backs both
-// the /resume command and main's -resume flag validation.
 func IsSessionID(s string) bool {
 	return uuidRe.MatchString(s)
 }
 
-// ParseCommand parses input as a slash command. ok is false when the input is
-// not a slash command at all (a normal prompt). An error means the input
-// looked like a command but was invalid.
 func ParseCommand(input string) (cmd Command, ok bool, err error) {
 	trimmed := strings.TrimSpace(input)
 	if !strings.HasPrefix(trimmed, "/") {
@@ -104,10 +94,6 @@ func ParseCommand(input string) (cmd Command, ok bool, err error) {
 	return Command{}, true, fmt.Errorf("unknown command: %s (try /help)", name)
 }
 
-// parseTurnSelectionArg parses the optional argument for /model and /profile.
-// An empty rest is the status form; otherwise exactly one name is accepted,
-// either bare or quoted. An empty quoted argument and any extra input are not
-// part of the grammar.
 func parseTurnSelectionArg(rest string) (string, bool) {
 	rest = strings.TrimSpace(rest)
 	if rest == "" {
@@ -133,7 +119,6 @@ func parseTurnSelectionArg(rest string) (string, bool) {
 	return fields[0], true
 }
 
-// HelpText lists commands and keybindings for /help.
 const HelpText = `commands
   /help            show this help
   /exit /quit /q   exit (cancels a running task, hydration, or compaction first)

@@ -16,71 +16,32 @@ import (
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
-// maxEventsPerBatch bounds how many stream events one Update applies, so a
-// fast cake stream cannot starve the event loop (spinner, key handling).
 const maxEventsPerBatch = 10
 
-// settleDelay is the sweep interval for the settle repaint: at most one full
-// frame rewrite per interval, however many content changes land in it.
 const settleDelay = 300 * time.Millisecond
 
-// maxRetainedToolOutputBytes is the hard ceiling on how much of one tool
-// result the timeline keeps in memory. It is deliberately far above the
-// render-time output-limit (default 2000 bytes): the limit decides what is
-// drawn, while this bound decides what the session pins, so Ctrl+O full mode
-// stays useful for realistic output without letting a single oversized result
-// hold tens of MB for the life of the session. Output beyond the ceiling is
-// cut at ingest with the standard truncation marker.
-const maxRetainedToolOutputBytes = 1 << 20 // 1 MiB
+const maxRetainedToolOutputBytes = 1 << 20
 
-// capRetainedToolOutput applies the retention ceiling to one tool result at
-// ingest by delegating to [ui.CapOutputBytes], which owns both branches: at or
-// below the ceiling the output passes through byte-identical (so Ctrl+O full
-// mode is unchanged for realistic results), and above it the output is cut on a
-// rune boundary and appended with the standard
-// "… truncated (N bytes total)" marker, where N is the ORIGINAL raw byte count.
-// The oversized decision and the marker use the result's raw bytes, and the
-// oversized branch returns a fresh, bounded copy — never a substring of the
-// original. It must not delegate to [ui.TruncateOutput], which trims trailing
-// newlines before its size check and then returns the shortened string
-// directly: for a short prefix followed by megabytes of newlines that trimmed
-// result is a few-byte substring still backed by the entire original
-// allocation, so the timeline silently pinned tens of MB with no marker (task
-// 098). [ui.CapOutputBytes] keeps the newline trimming at display time.
 func capRetainedToolOutput(output string) string {
 	return ui.CapOutputBytes(output, maxRetainedToolOutputBytes)
 }
 
-// eventsMsg delivers a batch of decoded cake stream events, applied in order
-// with a single viewport sync at the end of the Update. key identifies the run
-// that produced them; a batch from a superseded session is drained but ignored.
 type eventsMsg struct {
 	key operationKey
 	evs []cake.Event
 }
 
-// runDoneMsg delivers the terminal state of one cake run. key scopes the result
-// to the run that produced it; a result for a superseded request must not settle
-// or mutate a newer one.
 type runDoneMsg struct {
 	key operationKey
 	res cake.Result
 }
 
-// clipboardResultMsg delivers the outcome of one off-loop clipboard write. It
-// deliberately carries no payload text: a result can only become the existing
-// info/error feedback, so clipboard content has no new path into a log or the
-// timeline. sessionID marks the /session copy wording (the fixed id notice)
-// versus the assistant copy, which reports the snapshotted rune count.
 type clipboardResultMsg struct {
 	sessionID bool
 	chars     int
 	err       error
 }
 
-// waitForRun pulls the next batch of events from a run, or its final result
-// once the event stream is closed. It is re-issued after every batch with the
-// same key, so every message stays scoped to the run that started it.
 func waitForRun(run *cake.Run, key operationKey) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-run.Events
@@ -88,15 +49,10 @@ func waitForRun(run *cake.Run, key operationKey) tea.Cmd {
 			return runDoneMsg{key: key, res: <-run.Result}
 		}
 		evs := []cake.Event{ev}
-		// Drain the events already queued behind the first one so a burst of K
-		// events costs one Update (and one viewport sync) instead of K. The
-		// bound keeps a single Update from starving the event loop.
 		for len(evs) < maxEventsPerBatch {
 			select {
 			case ev, ok := <-run.Events:
 				if !ok {
-					// The stream closed mid-drain; the next waitForRun delivers
-					// runDoneMsg.
 					return eventsMsg{key: key, evs: evs}
 				}
 				evs = append(evs, ev)
@@ -108,23 +64,12 @@ func waitForRun(run *cake.Run, key operationKey) tea.Cmd {
 	}
 }
 
-// sessionsLoadedMsg delivers the result of one read-only session listing. req
-// is the request identity the result belongs to; a result whose identity no
-// longer matches the active request is superseded and dropped.
 type sessionsLoadedMsg struct {
 	req      uint64
 	sessions []cake.SessionSummary
 	err      error
 }
 
-// startSessionListLoad cancels any in-flight listing and starts a fresh
-// read-only listing under a new request identity. The model owns the
-// cancellation: closing the browser, replacing the listing, or quitting cancels
-// it, and only the newest request may apply its result. The command runs off the
-// Update loop, so a slow or missing cake binary cannot block key handling.
-// It returns the updated model and the command as a pair rather than mutating a
-// receiver a caller reads in a sibling return operand: that ordering is
-// unspecified by the language.
 func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 	m.cancelSessionList()
 	m.sessionListSeq++
@@ -150,42 +95,16 @@ func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 	}
 }
 
-// settleSweepMsg is the periodic tick that decides whether the frame needs a
-// settle repaint;
 type settleSweepMsg struct{}
 
-// settleSweepCmd schedules the next settle sweep. Every sweep arms the one
-// after it, so the sweep runs for the life of the program at settleDelay.
 func settleSweepCmd() tea.Cmd {
 	return tea.Tick(settleDelay, func(time.Time) tea.Msg { return settleSweepMsg{} })
 }
 
-// settleSweepAtStartupCmd returns the first settle sweep without waiting, so
-// startup pays no timer and running Init's commands does not block.
-// That first sweep arms the delayed chain from its handler.
 func settleSweepAtStartupCmd() tea.Cmd {
 	return func() tea.Msg { return settleSweepMsg{} }
 }
 
-// settleSweep handles one sweep: when content has changed since the last
-// sweep, ask the program to rewrite the whole frame, and always arm the next
-// sweep.
-// Bubble Tea's renderer rewrites only the lines whose text changed since the
-// previous frame (standard_renderer.flush compares lastRenderedLines). A
-// terminal that measures a glyph wider than charmbracelet/x/ansi does — a
-// text-default emoji such as U+261D is one cell to x/ansi and two to
-// utf8proc-based terminals — wraps the full-width row that contains it, which
-// makes the frame one physical row taller than the screen and scrolls the whole
-// frame up by one. The renderer cannot see that scroll, so the lines it skips
-// keep whatever the scrolled screen moved into their place: that is how a run
-// left a stale composer border and a previous status line on screen in the task
-// 110 report.
-// The repair is the one a resize already performs: report the current size to
-// the program, which makes the renderer drop the line cache it diffs against
-// (repaint) so the next flush rewrites every row in order. Doing that per
-// change would rewrite the frame per event, so the sweep coalesces: whatever
-// changed inside the interval is covered by one repaint, and an idle interval
-// writes nothing at all.
 func (m Model) settleSweep() (Model, tea.Cmd) {
 	next := settleSweepCmd()
 	if !m.ready || !m.contentChanged {
@@ -198,12 +117,6 @@ func (m Model) settleSweep() (Model, tea.Cmd) {
 	return m, next
 }
 
-// repaintCmd reports the model's current size to the program. The renderer
-// treats any WindowSizeMsg as a repaint — it drops the line cache it diffs
-// against — and the model's own handler for the same message re-lays out at the
-// same size, which is a no-op apart from flushing a dirty viewport. Nothing on
-// screen changes: the message only makes the next flush rewrite every row of
-// the frame instead of the rows whose text changed.
 func (m Model) repaintCmd() tea.Cmd {
 	if m.width <= 0 || m.height <= 0 {
 		return nil
@@ -212,7 +125,6 @@ func (m Model) repaintCmd() tea.Cmd {
 	return func() tea.Msg { return tea.WindowSizeMsg{Width: w, Height: h} }
 }
 
-// Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case settleSweepMsg:
@@ -230,17 +142,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		// The chain stays alive while any operation with a live status
-		// indicator owns a child: a task, a compaction, or a suggestion. It is
-		// the REPL's one clock for elapsed ages, so none of them needs a
-		// second timer.
 		if !m.runBusy() && !m.compactionBusy() && !m.suggestionInFlight() {
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
-		// Use the tick's own time when present so the sweep can advance
-		// deterministically.
 		now := msg.Time
 		if now.IsZero() {
 			now = time.Now()
@@ -259,8 +165,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case suggestionDoneMsg:
 		next := m.finishSuggestion(msg)
 		if next.exiting() {
-			// quit() canceled the in-flight suggester and is waiting for this
-			// result to reap the child before returning the quit command.
 			return next.maybeQuit()
 		}
 		return next, nil
@@ -313,16 +217,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.maybeQuit()
 		}
 		if msg.req != m.sessionListReq {
-			// A superseded or invalidated request: its items, error, selection,
-			// and loading state must not touch the request the browser is on
-			// now.
 			return m, nil
 		}
 		m.sessionListCancel = nil
 		if msg.err != nil {
 			m.browser.failed(ui.TruncateOutput(msg.err.Error(), m.cfg.OutputLimit))
-			// A failed listing keeps the browser open, but its rows must not
-			// survive into a later successful phase.
 			m.resetSessionList()
 			return m, nil
 		}
@@ -337,8 +236,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		// Only forward wheel events to the timeline viewport; let other mouse
-		// events (clicks in the input area) fall through to the default handler.
 		if msg.Action == tea.MouseActionPress &&
 			(msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
 			var cmd tea.Cmd
@@ -350,9 +247,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm, cmd := m.handleKey(msg)
 		m = mm.(Model)
 		m.syncViewport()
-		// A key can change the composer's visible text — and with it the frame's
-		// shape — so it arms the settle repaint like a viewport push does. Cursor
-		// blinks and mouse clicks do not come through here and leave it alone.
 		m.contentChanged = true
 		return m, cmd
 	}
@@ -362,12 +256,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// quit enters the exit phase, cancels every model-owned child, and returns the
-// quit command only when every child has been reaped. Callers that cancel a
-// specific operation first append their own notice; this transition is
-// idempotent for the finish handlers that drive the drain. It returns the
-// updated model with the command, so no caller reads the model in a sibling
-// return operand whose order relative to this call is unspecified.
 func (m Model) quit() (Model, tea.Cmd) {
 	if !m.exiting() {
 		m.exitPhase = phaseDraining
@@ -384,10 +272,6 @@ func (m Model) quit() (Model, tea.Cmd) {
 	return m.afterPresentationChange()
 }
 
-// afterPresentationChange returns tea.Quit when the exit phase has finished
-// draining, or the title command for the state the transition just entered.
-// Transitions that can settle or start a drain use this so the title keeps
-// naming the operation the status line and composer show.
 func (m Model) afterPresentationChange() (Model, tea.Cmd) {
 	next, cmd := m.maybeQuit()
 	if cmd != nil {
@@ -396,9 +280,6 @@ func (m Model) afterPresentationChange() (Model, tea.Cmd) {
 	return next, next.titleCmd()
 }
 
-// maybeQuit returns tea.Quit only once every operation is idle. A resource-busy
-// run, replay, compaction, suggestion, or session listing keeps the exit in its
-// draining phase; its finish handler calls this again after settling.
 func (m Model) maybeQuit() (Model, tea.Cmd) {
 	if !m.exiting() {
 		return m, nil
@@ -412,8 +293,6 @@ func (m Model) maybeQuit() (Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.exiting() {
-		// The REPL is draining a child before it exits. A submission or session
-		// change here would start new work behind the quit.
 		return m, nil
 	}
 	if m.browser.open() {
@@ -422,16 +301,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.CancelQuit):
 		if m.runBusy() {
-			// A draining run is also re-canceled; its key stays until the reaped
-			// result settles it, so the gate cannot open early.
 			m.cancelRun()
 			return m, m.titleCmd()
 		}
 		if m.compactionBusy() {
-			// Keep the compaction gate closed until the child exits and the
-			// result is reaped, so the next prompt cannot race its session lock.
-			// The reaped result supplies the one "canceled" notice, matching a
-			// canceled run, so no second notice is added here.
 			m.cancelCompaction()
 			return m, m.titleCmd()
 		}
@@ -447,8 +320,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Reset()
 		m.suggestion.filledText = ""
 		m.layout()
-		// Clearing a draft reveals a hidden suggestion again; an in-flight request
-		// has no result to restore and still belongs to the superseded draft.
 		m.hideSuggestion()
 		return m, nil
 
@@ -466,12 +337,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.CopyLastAssistant):
 		return m.copyLastAssistant()
 
-	// Up/down recall prompt history only at the input's edge; inside a
-	// multi-line input they keep moving the cursor. Recall is a temporary view
-	// of the same draft, so a shown ghost is hidden rather than cleared; walking
-	// back past the newest entry restores the draft and can reveal it again.
-	// Filled-text provenance is still dropped because that text left the
-	// composer.
 	case key.Matches(msg, m.keys.HistoryPrev):
 		if m.input.Line() == 0 {
 			if text, ok := m.history.Prev(m.input.Value()); ok {
@@ -493,10 +358,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Any key that reaches here modifies the input — reset the completion cycle
-	// and hide a ghost suggestion before the character is inserted. Hiding keeps
-	// the ghost available until the composer is empty again; the first typed word
-	// is never appended to the suggestion.
 	m.hideSuggestion()
 	m.completionPrefix = ""
 	m.completionMatches = nil
@@ -504,30 +365,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	// A fill is model-output provenance only while the composer still holds the
-	// exact suggestion. The first real edit, including deleting back to empty,
-	// clears it so a later coincidence cannot bypass slash-command parsing.
 	if m.suggestion.filledText != "" && !m.filledSuggestion() {
 		m.suggestion.filledText = ""
 	}
-	m.layout() // input height tracks line count
+	m.layout()
 	return m, cmd
 }
 
-// handleBrowserKey routes keys while the /sessions browser is open. It returns
-// before the composer sees the message, so the hidden input cannot swallow
-// navigation. Esc, q, and Ctrl+C close the browser without action; Enter pins
-// the next prompt to the session the user can actually see selected.
 func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "ctrl+c":
 		m.closeBrowser()
 		return m, m.titleCmd()
 	case "enter":
-		// Only a row from the current successful listing is selectable: while a
-		// reload is in flight, after a failed reload, or on an empty listing the
-		// browser shows no list, so Enter is a no-op instead of resuming an
-		// invisible row from a previous visit.
 		if !m.browserSelectable() {
 			return m, nil
 		}
@@ -546,15 +396,9 @@ func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startNewSession creates an immediate visual and session-state boundary.
-// When a live run, replay, or compaction is active, its process is canceled and
-// drained normally, but its remaining events are suppressed so they cannot enter
-// or re-pin the new session.
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.clearSuggestion()
 	busy := m.runBusy() || m.replayBusy() || m.compactionBusy()
-	// Advance the generation before canceling the old children, so any result
-	// already queued still carries the old key and can only settle its drain.
 	m.session.Reset()
 	if m.runBusy() {
 		m.cancelRun()
@@ -564,9 +408,6 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	}
 	if m.replayBusy() {
 		m.cancelReplay()
-		// Keep consuming the canceled replay in the background, but suppress its
-		// records after this new-session boundary. The phase stays draining until
-		// the child is reaped, so the prompt and retarget gates stay closed.
 	}
 	m.sawComplete = false
 	m.runOutcome = outcomeNone
@@ -581,20 +422,12 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// toggleToolOutput cycles the session-wide tool output mode and re-renders
-// only tool items, reusing cached renders for every other item kind.
 func (m Model) toggleToolOutput() (tea.Model, tea.Cmd) {
 	m.toolOutputMode = m.toolOutputMode.Cycle()
 	m.rerenderToolItems()
 	return m, nil
 }
 
-// clipboardCmd runs one clipboard write off the Update loop. The caller
-// snapshots text and the writer at request time, so the copy target is exactly
-// what the user asked for — never text from a later timeline or session — and a
-// slow or stuck platform helper (atotto/clipboard waits on the helper with no
-// timeout) cannot freeze the single Update loop: cancel, quit, the spinner, and
-// stream consumption all keep flowing while the write is pending.
 func (m Model) clipboardCmd(text string, sessionID bool) tea.Cmd {
 	write := m.clipboard
 	chars := utf8.RuneCountInString(text)
@@ -603,13 +436,6 @@ func (m Model) clipboardCmd(text string, sessionID bool) tea.Cmd {
 	}
 }
 
-// copyLastAssistant snapshots the raw markdown of the most recent assistant
-// message and copies it on a command, reporting the outcome on the timeline so
-// the action always has visible feedback. The write runs off the Update loop so
-// a stuck helper cannot block the REPL. Like persistHistory it is a one-shot
-// best-effort write: a failure appends an error item instead of interrupting
-// the REPL. Finding no assistant response warns immediately and never invokes
-// the helper.
 func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 	text, ok := m.lastAssistantMarkdown()
 	if !ok {
@@ -619,13 +445,6 @@ func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 	return m, m.clipboardCmd(text, false)
 }
 
-// copySessionID copies the full cake session UUID to the system clipboard so
-// the id can be reused for -resume or -fork without leaving the REPL. The
-// status line and timeline only show it shortened; this is the on-demand way
-// to get the whole value. The id comes from SessionData, so it honors the
-// resume pin before the first task reports one. Like copyLastAssistant the
-// write runs as a command, one-shot and best-effort, with visible feedback; an
-// unknown id warns immediately and never invokes the helper.
 func (m Model) copySessionID() (tea.Model, tea.Cmd) {
 	id, _ := m.SessionData()
 	if id == "" {
@@ -635,15 +454,10 @@ func (m Model) copySessionID() (tea.Model, tea.Cmd) {
 	return m, m.clipboardCmd(id, true)
 }
 
-// handleTabComplete implements Tab key completion with cycling.
 func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
 	before := m.input.Value()
 	filled := m.suggestion.filledText
 	defer func() {
-		// ClearSuggestion drops the ghost and cancels the request, but Tab with no
-		// matching completion changes no text. Preserve the fill provenance in
-		// that case so an unedited model-produced /command still cannot run; a
-		// completion that changes the text keeps the cleared provenance.
 		if model, ok := next.(Model); ok {
 			if model.input.Value() == before && filled != "" {
 				model.suggestion.filledText = filled
@@ -651,14 +465,9 @@ func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
 			next = model
 		}
 	}()
-	// Tab is an input action; a suggestion is a one-key hint, not a prefix to
-	// complete. Dismiss it before the completer reads the (empty) input.
 	m.clearSuggestion()
 	input := m.input.Value()
 
-	// If the input changed since the last Tab press, start a fresh cycle.
-	// Compare against what the completer last set (completionMatches[completionIdx])
-	// rather than the original prefix, so that pressing Tab again advances the cycle.
 	if m.completionPrefix != "" && input != m.completionMatches[m.completionIdx] {
 		m.completionPrefix = ""
 		m.completionMatches = nil
@@ -673,19 +482,16 @@ func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
 		known = append(known, m.session.ResumeID)
 	}
 
-	// No active cycle — compute matches from scratch.
 	if m.completionPrefix == "" {
 		matches, ok := completeSlash(input, known)
 		if !ok {
 			return m, nil
 		}
 		if len(matches) == 1 {
-			// Single match: complete directly, no cycle needed.
 			m.input.SetValue(matches[0])
 			m.layout()
 			return m, nil
 		}
-		// Multiple matches: start cycling.
 		m.completionPrefix = input
 		m.completionMatches = matches
 		m.completionIdx = 0
@@ -694,10 +500,8 @@ func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
 		return m, nil
 	}
 
-	// Advance the existing cycle.
 	m.completionIdx++
 	if m.completionIdx >= len(m.completionMatches) {
-		// Wrap around: restore the original prefix and end the cycle.
 		m.input.SetValue(m.completionPrefix)
 		m.completionPrefix = ""
 		m.completionMatches = nil
@@ -713,15 +517,9 @@ func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
 
 func (m Model) submit() (tea.Model, tea.Cmd) {
 	if m.exiting() {
-		// The quit path is waiting for a child to be reaped. Never start a run or
-		// execute a command behind it.
 		return m, nil
 	}
 	text := strings.TrimSpace(m.input.Value())
-	// Ctrl+S on an empty composer inserts the ghost suggestion instead of
-	// submitting it. Acceptance is editable text; a second Ctrl+S is the submit
-	// action, and the filled-text provenance below keeps an unedited suggestion
-	// from ever becoming a slash command.
 	if text == "" && m.suggestionActive() {
 		m.fillSuggestion()
 		return m, nil
@@ -756,10 +554,6 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	return m.startRun(text)
 }
 
-// needsIdle reports whether a command may only run against an idle REPL: it
-// either targets a session, changes the next run's controls, or (for the
-// browser) drives session selection. All of them would race a running
-// subprocess.
 func needsIdle(kind CommandKind) bool {
 	return kind == CmdNew || kind == CmdResume || kind == CmdSessions ||
 		kind == CmdModel || kind == CmdProfile
@@ -838,40 +632,24 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 
 	case CmdClear:
 		m.timeline.clear()
-		// Pending calls reference tool blocks directly; clear the map so a
-		// late output appends a standalone block instead of mutating one that
-		// is no longer on the timeline.
 		m.pendingCalls = map[string]*ui.ToolBlock{}
-		// The native start row is gone with the timeline. Clearing the
-		// lifecycle means a later checkpoint or end starts a fresh one, and
-		// its own end still leaves exactly one visible outcome.
 		m.native.reset()
 	}
 	return m, nil
 }
 
-// selectModel stores the model for the next prompt and drops the reported
-// session identity and context figure so the status line shows the new
-// selection until the next run reports its own. The old measurement belongs to
-// the model being replaced and may carry a different window.
 func (m *Model) selectModel(model string) {
 	m.turn.Model = model
 	m.session.Model = ""
 	m.session.Context = nil
 }
 
-// selectProfile stores the profile for the next prompt and drops the reported
-// session identity and context figure for the same reason as selectModel: a
-// different profile can resolve a different model, so the old identity and
-// measurement no longer describe the next run.
 func (m *Model) selectProfile(profile string) {
 	m.turn.Profile = profile
 	m.session.Model = ""
 	m.session.Context = nil
 }
 
-// modelSelectionStatus renders the model the next prompt will request, using
-// the same reported-then-selection precedence as the status line.
 func (m Model) modelSelectionStatus() string {
 	if model := m.displayModel(); model != "" {
 		return "model: " + model
@@ -879,7 +657,6 @@ func (m Model) modelSelectionStatus() string {
 	return "model: (cake default)"
 }
 
-// profileSelectionStatus renders the profile the next prompt will request.
 func (m Model) profileSelectionStatus() string {
 	if m.turn.Profile != "" {
 		return "profile: " + m.turn.Profile
@@ -887,9 +664,6 @@ func (m Model) profileSelectionStatus() string {
 	return "profile: (cake default)"
 }
 
-// resumeSession points the next prompt at id and reports it, mirroring the
-// /resume command. The /sessions browser's Enter delegates here so both paths
-// share one notice and one state transition.
 func (m Model) resumeSession(id string) (tea.Model, tea.Cmd) {
 	m.clearSuggestion()
 	m.session.UseResume(id)
@@ -897,17 +671,6 @@ func (m Model) resumeSession(id string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// persistHistory appends one entry to the history file when configured and
-// reports whether the entry was too large to record. A record whose encoded
-// line would exceed maxHistoryRecordBytes is dropped rather than written,
-// because loadHistory could never read it back; the caller may warn on a true
-// result but must not echo the prompt text.
-// Write errors (a bad path or permissions) are silently ignored so they never
-// break the REPL; only the size guard is surfaced.
-// Each entry is stored as "\x02" + JSON-encoded prompt + "\n". The \x02
-// prefix unambiguously marks JSONL records so loadHistory can distinguish
-// them from legacy plain-text lines. Appending via O_APPEND is safe for
-// concurrent writers.
 func (m Model) persistHistory(text string) (oversized bool) {
 	if m.cfg.HistoryFile == "" {
 		return false
@@ -929,9 +692,6 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	if m.exiting() || m.runBusy() || m.compactionBusy() {
 		return m, nil
 	}
-	// A prompt attempt supersedes the previous completed-turn answer even if
-	// cake.Start itself fails and no run phase begins. It also ends any startup
-	// hydration eligibility.
 	m.sawComplete = false
 	m.runOutcome = outcomeNone
 	m.runGeneration = 0
@@ -969,8 +729,6 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	key := operationKey{generation: m.session.Generation(), request: m.runSeq, sessionID: resumeID}
 	m.runOp.begin(key, run.Cancel, run.Done)
 	m.run = run
-	// A fork creates one fresh session boundary. Once the process has
-	// started, future prompts must use the session pin rather than fork again.
 	m.cfg.Fork = false
 	if m.history.Add(prompt) && m.persistHistory(prompt) {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: historyTooLargeWarning()})
@@ -997,9 +755,6 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		m.session.OnModel(e.ModelConfig, e.Model)
 		m.appendItem(ui.Item{Kind: ui.KindTaskStart, Text: "task started · session " + ui.ShortID(e.SessionID)})
 		if replay {
-			// A later task_start means the session's final turn is not yet proven
-			// complete; an earlier task_complete must not make the startup
-			// suggestion eligible.
 			m.sawComplete = false
 		}
 
@@ -1008,8 +763,6 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 			if e.SessionID != "" {
 				m.session.SessionID = e.SessionID
 			}
-			// session_meta only appears in replay output; it carries the model
-			// cake resolved for the resumed session.
 			m.session.OnModel(e.ModelConfig, e.Model)
 		}
 
@@ -1024,9 +777,6 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		}
 
 	case cake.SkillActivated:
-		// Skill metadata is useful to the engine but has no dedicated timeline
-		// representation. Keep it out of user output and debug-log a compact
-		// diagnostic when configured.
 		if e.Name != "" {
 			m.logDebug("skill activated: " + e.Name)
 		}
@@ -1035,11 +785,6 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		switch e.Role {
 		case "assistant":
 			if strings.TrimSpace(e.Content) != "" {
-				// When cake emits function_call events before the assistant
-				// message (the Chat Completions backend emits tool calls
-				// before text), insert the assistant message before the
-				// pending tool calls so the text appears before the tool
-				// call in the timeline.
 				if idx := m.firstPendingToolIdx(); idx >= 0 {
 					m.insertItemAt(idx, ui.Item{Kind: ui.KindAssistant, Text: e.Content})
 				} else {
@@ -1050,16 +795,11 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 			if replay && strings.TrimSpace(e.Content) != "" {
 				m.appendItem(ui.Item{Kind: ui.KindUser, Text: e.Content})
 			}
-			// The submitted prompt is already on the timeline for live runs.
 		default:
 			m.logDebug(fmt.Sprintf("%s message: %s", e.Role, e.Content))
 		}
 
 	case cake.Reasoning:
-		// Reasoning content is deliberately not rendered: providers differ
-		// widely in what they emit (summaries, raw text, or nothing at all),
-		// so the timeline shows one coalesced "(thinking)" marker per burst
-		// of reasoning events. Any other event type ends the burst.
 		if !m.lastItemIsReasoning() {
 			m.appendItem(ui.Item{Kind: ui.KindReasoning, Text: "(thinking)"})
 		}
@@ -1095,19 +835,9 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		}
 
 	case cake.TurnUsage:
-		// A live task and a replay both report the session's context here. The
-		// status line reads the newest complete measurement; the record has no
-		// timeline representation of its own.
 		m.session.OnTurnUsage(e)
 
 	case cake.Compaction:
-		// Replay emits one compaction record at its physical position. It becomes
-		// exactly one boundary marker: the retained tail is never expanded into
-		// duplicate messages or tool calls. A replayed checkpoint also seeds the
-		// status context with its own estimate, which any newer complete
-		// turn_usage replaces. A live checkpoint under a native start contributes
-		// no marker of its own and never seeds the estimate; the live end does
-		// both.
 		if replay {
 			m.session.OnCompaction(e)
 			m.appendItem(ui.Item{
@@ -1119,9 +849,6 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		}
 
 	case cake.CompactionStart:
-		// A replayed start is audit metadata; the checkpoint is the one
-		// boundary marker replay shows, and rendering a start would leave an
-		// unresolved notice.
 		if replay {
 			m.logDebug("compaction started: " + e.Trigger)
 		} else {
@@ -1129,9 +856,6 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 		}
 
 	case cake.CompactionEnd:
-		// A replay committed end follows its checkpoint and adds nothing; a
-		// skip or failure may exist only as an end record, so it is shown. A
-		// live end resolves the start notice into exactly one outcome row.
 		if replay {
 			m.nativeCompactionEndReplay(e)
 		} else {
@@ -1176,18 +900,12 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 	}
 }
 
-// logDebug records low-value diagnostics in the debug log; they never reach
-// the timeline.
 func (m *Model) logDebug(text string) {
 	if m.cfg.DebugLog != nil {
 		fmt.Fprintf(m.cfg.DebugLog, "repl: %s\n", text)
 	}
 }
 
-// finishPendingTools marks tool calls that never received an output as done,
-// so a tool block does not keep showing "… running" once the stream has
-// ended. Live runs and startup replay both reach this state: a task ends
-// mid-call, or a replay transcript ends at a partial tail.
 func (m *Model) finishPendingTools() {
 	for callID := range m.pendingCalls {
 		tool, idx, ok := m.pendingTool(callID)
@@ -1205,17 +923,12 @@ func (m Model) finishRunMsg(msg runDoneMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.Cmd) {
-	// Settle before checking the generation: a stale result still releases the
-	// resource gate once its child is reaped. An unknown key belongs to an
-	// already-settled request and must not touch the newer one.
 	if !m.runOp.settle(key) {
 		return m.maybeQuit()
 	}
 	m.run = nil
 
 	if key.generation != m.session.Generation() {
-		// Ctrl+N advanced the target while this run drained. Its events, outcome,
-		// and pin belong before the boundary.
 		m.sawComplete = false
 		m.runOutcome = outcomeNone
 		m.runGeneration = 0
@@ -1226,8 +939,6 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 	}
 
 	m.finishPendingTools()
-	// A native compaction start with no end is resolved before the run's own
-	// outcome row, so a start notice never stays pending after the run.
 	if m.native.pending {
 		text := "context compaction incomplete"
 		if res.Canceled {
@@ -1261,11 +972,6 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 	m.runOutcome = result
 	m.runGeneration = key.generation
 
-	// Whatever ended the run — cancellation, a nonzero exit, a wait error, or
-	// a clean EOF before task_complete — a session id announced for this
-	// invocation stays resumable. Pin it so the next prompt continues the same
-	// session instead of orphaning the work. A completion already pinned
-	// through OnTaskComplete, and pinning is idempotent.
 	m.session.OnRunEnded()
 
 	m.syncViewport()
@@ -1273,11 +979,6 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 		return m.maybeQuit()
 	}
 
-	// Start both between-turn background calls from the same transition. The
-	// suggester reads through cake's read-only replay stream, which tolerates
-	// the compactor's concurrent append, so it does not wait for compaction to
-	// start or finish. A result that arrives while compaction gates the composer
-	// is held until finishCompaction applies it.
 	var cmds []tea.Cmd
 	if m.completedTurn() {
 		next, cmd := m.maybeStartSuggestion()
@@ -1286,8 +987,6 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 			cmds = append(cmds, cmd)
 		}
 	}
-	// Compact between turns, after the pin is settled and the completed turn's
-	// measurement is known. The compactor re-checks the session and may decline.
 	if m.shouldCompactAfter() {
 		next, cmd := m.startCompaction()
 		m = next
@@ -1339,9 +1038,6 @@ func (m Model) sessionInfo() string {
 	return strings.Join(lines, "\n")
 }
 
-// describeHook returns a one-line summary and whether it deserves timeline
-// visibility. Successful hook noise stays hidden; denials, errors, and
-// non-zero exits are shown.
 func describeHook(e cake.HookEvent) (string, bool) {
 	decision := e.ResolvedDecision
 	if decision == "" {
@@ -1363,20 +1059,11 @@ func describeHook(e cake.HookEvent) (string, bool) {
 		b.WriteString(": " + lines[0])
 	}
 
-	// Cake's decision vocabulary is a closed set built in hooks.rs:
-	// decision is none|deny|stop|error and resolved_decision adds allow.
-	// Only the two benign values are hidden, so an unknown future value
-	// shows up as timeline noise instead of a silently dropped denial.
 	benign := decision == "" || decision == "allow" || decision == "none"
 	failed := e.ExitCode != nil && *e.ExitCode != 0
 	return b.String(), !benign || failed
 }
 
-// compactionMarker renders the one timeline marker for a context checkpoint:
-// the estimated input reduction when cake reported one, plus how many records
-// the checkpoint retained. The retained tail's content is never shown; the
-// marker only stands where the checkpoint sits in the transcript. Replay and the
-// live compactor result share this formatter, so both notices use one wording.
 func compactionMarker(before, after, retained int) string {
 	var b strings.Builder
 	b.WriteString("context compacted")

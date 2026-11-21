@@ -18,27 +18,6 @@ var (
 	mdProfile  termenv.Profile
 )
 
-// RenderMarkdown renders markdown text to ANSI-formatted output at the given
-// width, respecting the current terminal color profile (so --no-color produces
-// readable plain text). Its compact style mirrors the REPL's cyan accent,
-// blue links, yellow code, and muted structural elements.
-// The returned string is safe to write to the terminal even though the input
-// has already been sanitized: markdown decoding unescapes HTML character
-// references (&#7;, &#x1b;,...), so a message can reintroduce C0 controls and
-// whole escape sequences after the caller's [Sanitize] pass. The decoded result
-// is therefore scrubbed again here — the Ascii profile keeps no sequences at
-// all, and a color profile keeps only the reviewed, rendition-only SGR that
-// carries the theme's styling.
-// Under a color profile, visible http(s) URLs are then wrapped in generated
-// OSC 8 hyperlinks. Glamour hard-wraps long URLs, and a terminal can
-// only open the fragment on one line; the generated link names the full URL on
-// every wrapped segment. The sequences are added after the scrub, from text
-// already visible in the rendered output, so untrusted bytes still cannot
-// determine a link. The Ascii profile stays byte-plain and emits none.
-// A private memoization cache avoids constructing a new glamour renderer on
-// every call: the renderer is rebuilt only when width or color profile change.
-// RenderMarkdown is safe for concurrent use: the cached renderer is serialized
-// through a package-level mutex from cache lookup through render completion.
 func RenderMarkdown(text string, width int) string {
 	if strings.TrimSpace(text) == "" {
 		return text
@@ -53,7 +32,6 @@ func RenderMarkdown(text string, width int) string {
 	r := getRendererLocked(width, profile)
 	if r == nil {
 		mdMu.Unlock()
-		// Fallback: plain text wrapped at width.
 		return lipgloss.NewStyle().Width(width).Render(text)
 	}
 
@@ -64,17 +42,9 @@ func RenderMarkdown(text string, width int) string {
 		return lipgloss.NewStyle().Width(width).Render(text)
 	}
 
-	// glamour wraps output in block formatting with a leading and trailing
-	// newline; strip them for consistency with other timeline item rendering.
 	out = strings.TrimPrefix(out, "\n")
 	out = strings.TrimSuffix(out, "\n")
 
-	// Scrub the decoded output before it can reach the terminal: the Ascii
-	// profile keeps no sequences at all, and a color profile keeps only the
-	// reviewed SGR that carries the theme's styling. Glamour can retain
-	// emphasis control sequences even with an Ascii profile, and it decodes
-	// character references into controls under both, so neither profile can
-	// skip this step.
 	if profile == termenv.Ascii {
 		out = Sanitize(out)
 		if strings.TrimSpace(out) == "" {
@@ -86,9 +56,6 @@ func RenderMarkdown(text string, width int) string {
 	return addHyperlinks(scrubKeepingSGR(out, ""), text)
 }
 
-// getRendererLocked returns a cached or newly built glamour renderer for the given
-// width and profile. It returns nil when renderer construction fails.
-// The caller must hold mdMu.
 func getRendererLocked(width int, profile termenv.Profile) *glamour.TermRenderer {
 	if mdRenderer != nil && mdWidth == width && mdProfile == profile {
 		return mdRenderer
@@ -109,8 +76,6 @@ func getRendererLocked(width int, profile termenv.Profile) *glamour.TermRenderer
 	return r
 }
 
-// markdownStyle keeps Glamour's mature syntax-highlighting defaults while
-// replacing its document chrome with cake-repl's compact visual language.
 func markdownStyle(profile termenv.Profile) ansi.StyleConfig {
 	if profile == termenv.Ascii {
 		style := styles.ASCIIStyleConfig

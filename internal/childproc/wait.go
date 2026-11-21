@@ -5,18 +5,11 @@ import (
 	"time"
 )
 
-// Operation is one named child operation and the channel that closes when its
-// child has been reaped. Names are for reporting only; two operations may share
-// one without collapsing into a single wait.
 type Operation struct {
 	Name string
 	Done <-chan struct{}
 }
 
-// WaitForReap waits until every done channel closes or timeout expires. It
-// returns the sorted, de-duplicated names still pending at the deadline. A nil
-// channel counts as already reaped so a zero-value operation cannot turn
-// shutdown into an unbounded wait.
 func WaitForReap(ops []Operation, timeout time.Duration) []string {
 	if len(ops) == 0 {
 		return nil
@@ -48,8 +41,6 @@ func WaitForReap(ops []Operation, timeout time.Duration) []string {
 			delete(pending, i)
 		case <-timer.C:
 			close(stop)
-			// A child can be reaped as the timer fires. Sweep once so a
-			// completed channel is not reported as timed out.
 			for i := range pending {
 				done := ops[i].Done
 				if done == nil {

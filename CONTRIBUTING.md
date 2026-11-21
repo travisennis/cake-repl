@@ -43,6 +43,9 @@ just integrate <type>/<slug>
 just quick          # go vet ./...
 just fmt            # go fmt ./...
 just fmt-check      # fail if gofmt would change files
+just comment-check  # fail on a prose comment outside the ratchet allowlist
+just comment-count  # print the current prose-comment count
+just comment-baseline # rewrite the ratchet allowlist from the current tree
 just tidy           # go mod tidy
 just tidy-check     # fail if go mod tidy would change files
 just update-deps    # go get -u ./... && go mod tidy
@@ -75,6 +78,10 @@ go vet ./...
 
 - Standard Go style: `gofmt` tabs, short package-local names, explicit error
   handling. `golangci-lint` config lives in `.golangci.yml`.
+- Go source and the `justfile` are comment-free. Only machine directives
+  (`//go:build`, `//nolint`, `// #nosec`, shebangs, and the like) are allowed.
+  Record durable decisions in `docs/adr/`; file an issue for a workaround instead
+  of explaining it in a comment. `just comment-check` enforces this.
 - Respect package boundaries (see [`ARCHITECTURE.md`](ARCHITECTURE.md)): app
   behavior in `internal/app`, cake process/event concerns in `internal/cake`,
   terminal rendering in `internal/ui`. The dependency direction is one-way.

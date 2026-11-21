@@ -151,6 +151,9 @@ Consult:
 - [`CONTRIBUTING.md`](CONTRIBUTING.md), for code style.
 
 Keep `internal/ui` side-effect-free and the one-way dependency direction intact.
+Keep Go source and the `justfile` comment-free; record decisions in
+[`docs/adr/`](docs/adr/README.md) and file an issue for a workaround
+([ADR 040](docs/adr/040-keep-go-source-comment-free.md)).
 
 ### Dependencies, Build, CI, And Release
 

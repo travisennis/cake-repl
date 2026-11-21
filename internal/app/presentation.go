@@ -1,8 +1,5 @@
 package app
 
-// activity is the operation a presentation surface names. Idle is represented
-// separately from the composer's "ready" label because the status line has
-// always called that state "idle".
 type activity uint8
 
 const (
@@ -17,25 +14,15 @@ const (
 	activityExiting
 )
 
-// presentation is the one derivation of what the REPL is doing. The title,
-// status line, composer activity label, composer hint, and view body all read
-// this value, so a state cannot name one operation on one surface and advertise
-// another operation's action on the next.
 type presentation struct {
 	activity    activity
 	label       string
 	hint        string
 	titleMarker string
 	browser     bool
-	// background names an in-flight operation that does not gate input and
-	// does not change the composer state, for example "suggesting 3s". The
-	// status line appends it to the operational state; an empty value omits it.
-	background string
+	background  string
 }
 
-// activityLabel is the composer's label. The status line uses label so idle is
-// named "idle" there and "ready" in the composer, preserving both existing
-// surfaces.
 func (p presentation) activityLabel() string {
 	if p.activity == activityReady {
 		return "ready"
@@ -43,11 +30,6 @@ func (p presentation) activityLabel() string {
 	return p.label
 }
 
-// presentationState derives every presentation surface from the typed lifecycle
-// states. Its precedence follows the admission gates: exit, browser, run,
-// replay, compaction, then the idle composer. Suggestion text is presentation,
-// not a request phase, so it only changes the idle hint; an in-flight request
-// is a background indicator that leaves the composer state alone.
 func (m Model) presentationState() presentation {
 	p := m.basePresentation()
 	if m.suggestionInFlight() {
@@ -56,10 +38,6 @@ func (m Model) presentationState() presentation {
 	return p
 }
 
-// basePresentation derives the operational state without the background
-// indicator. The suggester never changes that state: it runs while the REPL is
-// idle or compacting, and the composer stays usable, so its request is reported
-// beside the state rather than as one.
 func (m Model) basePresentation() presentation {
 	if m.exiting() {
 		return presentation{
@@ -141,8 +119,6 @@ func (m Model) basePresentation() presentation {
 	}
 }
 
-// compactionStateLabel names the in-flight compactor and its whole-second age.
-// The status line and composer share it so the two surfaces cannot disagree.
 func (m Model) compactionStateLabel() string {
 	return "compacting " + elapsedText(m.compactionElapsed)
 }

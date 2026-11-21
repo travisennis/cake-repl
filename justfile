@@ -1,9 +1,3 @@
-# Recipe arguments reach the shell as positional parameters ($1, $2, ...) instead
-# of being interpolated into shell source. Interpolating a variadic list re-joins
-# it with spaces and discards quoting, so `just run -cwd 'a b'` would split the
-# path. Recipes that forward a variadic argument list read "$@"; `{{param}}`
-# interpolation is unaffected. The setting is global because just has no
-# per-recipe form; the only recipe that forwards arguments is `run`.
 set positional-arguments
 
 deadcode_version := "v0.50.0"
@@ -11,9 +5,6 @@ golangci_lint_version := "v2.15.0"
 goreleaser_version := "v2.17.1"
 govulncheck_version := "v1.7.0"
 
-# go install puts binaries in GOBIN when set, GOPATH/bin otherwise. Resolve
-# the same directory and put it first on PATH so recipes prefer the pinned
-# tools from install-tools over anything else installed on the machine.
 gobin := `go env GOBIN`
 tool_dir := if gobin != "" { gobin } else { `go env GOPATH` / "bin" }
 export PATH := tool_dir + ":" + env_var("PATH")
@@ -21,11 +12,6 @@ export PATH := tool_dir + ":" + env_var("PATH")
 default:
     just --list
 
-# Reject branch names outside the <type>/<slug> convention.
-# just interpolates a recipe argument into shell source, so an otherwise legal
-# Git ref such as `feat/x$(...)` would execute before Git ever saw it. This
-# check keeps the accepted character set narrow enough that quoting it has
-# nothing to defend.
 _check-branch-name name:
     @name={{ quote(name) }}; \
     case "$name" in \
@@ -42,15 +28,11 @@ _check-branch-name name:
         *) echo "ERROR: branch name must be <type>/<slug>, for example feat/timeline-compaction" >&2; exit 1 ;; \
     esac
 
-# Local master is the base because it may carry unpushed commits that cutting
-# from origin/master would drop.
-# Start a task branch cut from an up-to-date master.
 branch name: (_check-branch-name name)
     @git switch master
     @git pull --ff-only
     @git switch --create {{ quote(name) }} --no-track
 
-# Rebase <name> onto master and fast-forward, keeping history linear.
 integrate name: (_check-branch-name name)
     #!/bin/sh
     set -eu
@@ -70,7 +52,6 @@ integrate name: (_check-branch-name name)
     git switch master
     git merge --ff-only "$name"
 
-# Install the .pre-commit-config.yaml hooks (pre-commit and commit-msg) with prek.
 hooks:
     @command -v prek > /dev/null || { echo "ERROR: prek is not installed; see https://github.com/j178/prek" >&2; exit 1; }
     prek install --hook-type pre-commit --hook-type commit-msg
@@ -101,10 +82,18 @@ update-deps:
 vet:
     go vet ./...
 
-lint:
+lint: comment-check
     golangci-lint run
 
-# deadcode always exits 0, so the recipe turns findings into a failure itself.
+comment-check:
+    go run ./tools/commentcheck -baseline tools/commentcheck/allowlist.txt -limit tools/commentcheck/limit.txt .
+
+comment-count:
+    go run ./tools/commentcheck -count .
+
+comment-baseline:
+    go run ./tools/commentcheck -baseline tools/commentcheck/allowlist.txt -limit tools/commentcheck/limit.txt -write-baseline .
+
 deadcode:
     #!/bin/sh
     set -eu
@@ -134,9 +123,6 @@ install-tools:
     go install golang.org/x/tools/cmd/deadcode@{{ deadcode_version }}
     go install github.com/goreleaser/goreleaser/v2@{{ goreleaser_version }}
 
-# CI variant: prebuilt binaries instead of compiling from source. goreleaser
-# comes from goreleaser-action in the workflows; govulncheck and deadcode
-# publish no prebuilt binaries but are small, quick builds.
 install-tools-ci:
     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/{{ golangci_lint_version }}/install.sh | sh -s -- -b "{{ tool_dir }}" {{ golangci_lint_version }}
     go install golang.org/x/vuln/cmd/govulncheck@{{ govulncheck_version }}

@@ -6,11 +6,6 @@ import (
 	"fmt"
 )
 
-// ParseLine decodes one stream-json line into a typed event.
-// Unknown event types are returned as Unknown rather than an error so the
-// stream keeps flowing when cake adds new record types. Unknown fields on
-// known types are ignored by encoding/json. A nil event with a nil error is
-// returned for blank lines.
 func ParseLine(line []byte) (Event, error) {
 	trimmed := bytes.TrimSpace(line)
 	if len(trimmed) == 0 {
@@ -84,16 +79,12 @@ func ParseLine(line []byte) (Event, error) {
 		}
 		return ev, nil
 	case "compaction":
-		// Compaction decodes its own fields tolerantly, so a malformed optional
-		// field keeps the record instead of turning it into a ParseError.
 		var ev Compaction
 		if err := json.Unmarshal(env.Raw, &ev); err != nil {
 			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)
 		}
 		return ev, nil
 	case "compaction_start":
-		// Native compaction events also decode tolerantly: an unknown or
-		// malformed optional field must not drop the lifecycle record.
 		var ev CompactionStart
 		if err := json.Unmarshal(env.Raw, &ev); err != nil {
 			return nil, fmt.Errorf("decoding %q event: %w", env.Type, err)

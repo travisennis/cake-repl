@@ -10,10 +10,6 @@ import (
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
-// replayPhase is the one lifecycle state for the startup replay. It covers the
-// start command, record application, the reaped result, and the post-boundary
-// drain. A replay is read-only, but it still owns a child and gates prompt
-// submission and retargeting until that child is reaped.
 type replayPhase uint8
 
 const (
@@ -22,12 +18,6 @@ const (
 	replayDraining
 )
 
-// replayState owns the startup replay request and its subprocess. The pending
-// operation supplies the phase, request key, cancellation, and reaping channel;
-// run is the handle once cake.Replay has started, and warned keeps the warning
-// path to one visible message per replay. ctx and done are the startup
-// command's handles, so an unobserved exit can stop a replay that has not
-// delivered replayStartedMsg yet.
 type replayState struct {
 	op     pendingOperation
 	seq    uint64
@@ -37,9 +27,6 @@ type replayState struct {
 	warned bool
 }
 
-// phase maps the common pending-operation lifecycle to the replay vocabulary.
-// replayLoading includes both the start command and record application: those
-// are one live request, not separate resource states.
 func (r replayState) phase() replayPhase {
 	switch {
 	case r.op.active():
@@ -51,9 +38,6 @@ func (r replayState) phase() replayPhase {
 	}
 }
 
-// begin allocates one generation-scoped replay request. A replay starts only at
-// startup, so it is the only caller and its key identifies the records and
-// result that belong to this hydration.
 func (r *replayState) begin(ctx context.Context, generation sessionGeneration, sessionID string, cancel context.CancelFunc, done chan struct{}) operationKey {
 	r.seq++
 	key := operationKey{generation: generation, request: r.seq, sessionID: sessionID}
@@ -65,9 +49,6 @@ func (r *replayState) begin(ctx context.Context, generation sessionGeneration, s
 	return key
 }
 
-// cancel stops the replay whether it is still starting or already running.
-// The pending operation keeps its key so the reaped result can settle the
-// drain and release the gate.
 func (r *replayState) cancel() {
 	r.op.cancel()
 	if r.run != nil {
@@ -83,17 +64,12 @@ func (r *replayState) doneChannel() <-chan struct{} {
 	return r.op.doneChannel()
 }
 
-// clear drops the startup-command handles after the replay has settled. warned
-// deliberately remains for the finish path that is about to classify the
-// result.
 func (r *replayState) clear() {
 	r.ctx = nil
 	r.done = nil
 	r.run = nil
 }
 
-// refusalReason names the replay gate's phase for callers that do not display
-// the refusal. The caller that does display it chooses the matching wording.
 func (r replayState) refusalReason() refusalReason {
 	if r.phase() == replayDraining {
 		return refuseReplayDraining
@@ -101,33 +77,22 @@ func (r replayState) refusalReason() refusalReason {
 	return refuseReplayLoading
 }
 
-// replayStartedMsg reports the subprocess created for startup hydration. key
-// scopes the start and its eventual stream to the request that started it.
 type replayStartedMsg struct {
 	key operationKey
 	run *cake.Run
 	err error
 }
 
-// replayEventsMsg delivers a batch of replay records in stream order. key
-// scopes the batch so a stream started before a session boundary cannot apply
-// its records after the user leaves that session.
 type replayEventsMsg struct {
 	key operationKey
 	evs []cake.Event
 }
 
-// replayDoneMsg delivers the terminal state of a replay subprocess.
 type replayDoneMsg struct {
 	key operationKey
 	res cake.Result
 }
 
-// startReplayCmd starts the read-only replay without making the live prompt
-// state look busy. The command runs outside the Update loop because starting a
-// subprocess can block briefly. The model-owned context lets an unobserved exit
-// stop a replay that has not yet delivered replayStartedMsg; done closes after
-// the child is reaped even if that message is never observed.
 func startReplayCmd(cfg Config, key operationKey, ctx context.Context, done chan struct{}) tea.Cmd {
 	if ctx == nil {
 		ctx = context.Background()
@@ -157,9 +122,6 @@ func startReplayCmd(cfg Config, key operationKey, ctx context.Context, done chan
 	}
 }
 
-// waitForReplay pulls the next batch of events from a replay run, or its final
-// result once the event stream is closed. It mirrors waitForRun but keeps
-// hydration separate from a live prompt run.
 func waitForReplay(run *cake.Run, key operationKey) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-run.Events
@@ -182,9 +144,6 @@ func waitForReplay(run *cake.Run, key operationKey) tea.Cmd {
 	}
 }
 
-// finishReplayStart handles the start of the replay subprocess. A start failure
-// is visibly non-fatal unless the request already belongs to a session the user
-// left; a start after Ctrl+N or quit is canceled and still drained.
 func (m Model) finishReplayStart(msg replayStartedMsg) (tea.Model, tea.Cmd) {
 	if m.replay.op.key != msg.key {
 		if msg.run != nil {
@@ -214,17 +173,11 @@ func (m Model) finishReplayStart(msg replayStartedMsg) (tea.Model, tea.Cmd) {
 
 	m.replay.run = msg.run
 	if m.exiting() || m.replay.phase() != replayLoading || !current {
-		// The user left or started exiting before the child handle arrived. Keep
-		// consuming it so the drain can settle, but stop applying its records.
 		msg.run.Cancel()
 	}
 	return m, waitForReplay(msg.run, msg.key)
 }
 
-// handleReplayEvents applies one batch only while hydration is live and the
-// request still belongs to the current session target. A post-boundary drain
-// continues consuming records so the child is reaped, but none may enter the
-// new timeline.
 func (m Model) handleReplayEvents(msg replayEventsMsg) (tea.Model, tea.Cmd) {
 	if m.replay.run == nil || m.replay.op.key != msg.key {
 		return m, nil
@@ -240,10 +193,6 @@ func (m Model) handleReplayEvents(msg replayEventsMsg) (tea.Model, tea.Cmd) {
 	return m, waitForReplay(m.replay.run, msg.key)
 }
 
-// finishReplay applies one replay result. The phase settles before the result is
-// classified so a canceled replay can open the gate; a result from a session
-// the user left is dropped without its records, warning, or context reaching
-// the new session.
 func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 	if !m.replay.settle(msg.key) {
 		return m.maybeQuit()
@@ -269,11 +218,6 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
 		}
 	}
-	// A clean replay that ends at a completed, non-errored turn is the startup
-	// evidence for one suggestion after the replay child is reaped. It is a
-	// suggestion-only flag: hydration must not write the live run outcome or
-	// start compaction. A replay task_start clears sawComplete, so an earlier
-	// completion cannot qualify a session whose final turn is incomplete.
 	hydratedCompletion := !msg.res.Canceled && msg.res.Err == nil && msg.res.ExitCode == 0 &&
 		!m.replay.warned && m.sawComplete && m.session.LastComplete != nil &&
 		!m.session.LastComplete.IsError
@@ -290,8 +234,5 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 	if suggestionCmd == nil {
 		return next, cmd
 	}
-	// Hydration runs no task, so no spinner tick is pending for the
-	// suggestion's status-line age; start the chain here. A post-turn
-	// suggestion reuses the finished run's pending tick instead.
 	return next, tea.Batch(cmd, suggestionCmd, next.spin.Tick)
 }

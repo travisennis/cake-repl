@@ -1,5 +1,3 @@
-// Package version reports the cake-repl binary version and embedded build
-// identity.
 package version
 
 import (
@@ -7,19 +5,13 @@ import (
 	"strings"
 )
 
-// Binary is the cake-repl binary version, overridden by release ldflags.
 var Binary = "dev"
 
-// Text returns the version line followed by the embedded VCS revision and
-// commit time when the build carries them. A dirty worktree is marked
-// "(modified)" on the revision line.
 func Text() string {
 	info, _ := debug.ReadBuildInfo()
 	return text(info)
 }
 
-// text formats build information without reading the process-wide runtime
-// metadata, so callers can supply synthetic values.
 func text(info *debug.BuildInfo) string {
 	lines := []string{"cake-repl " + Binary}
 	if info == nil {

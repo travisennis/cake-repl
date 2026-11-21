@@ -9,7 +9,6 @@ import (
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
-// View implements tea.Model.
 func (m Model) View() string {
 	if !m.ready {
 		return "starting cake-repl…"
@@ -34,17 +33,8 @@ func (m Model) View() string {
 	}, "\n")
 }
 
-// browserView renders the /sessions overlay in place of the timeline: the
-// navigable list, or a loading/empty/error body, followed by a one-line key
-// hint. It occupies the timeline's height so the composer and status line do
-// not move while the browser is open, so every state is bounded to the
-// timeline's width and height however long or multiline its text is.
 func (m Model) browserView(p presentation) string {
 	bodyHeight := browserBodyHeight(m.viewport.Height)
-	// fill pads a short text body to the full region and caps a long or
-	// multiline one; capBody only truncates, leaving the list's own layout
-	// alone. The error body is arbitrary stderr, so it must be capped, not just
-	// padded: a minimum Height alone lets it overflow and displace the chrome.
 	fill := lipgloss.NewStyle().Width(m.width).Height(bodyHeight).MaxWidth(m.width).MaxHeight(bodyHeight)
 	capBody := lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(bodyHeight)
 
@@ -101,9 +91,6 @@ func (m Model) statusLineFor(p presentation) string {
 	})
 }
 
-// displayModel returns the model shown in the status line: the identity cake
-// reported for the current session once received, otherwise the current turn
-// selection (initialized from the startup -model/config value).
 func (m Model) displayModel() string {
 	if m.session.Model != "" {
 		return m.session.Model

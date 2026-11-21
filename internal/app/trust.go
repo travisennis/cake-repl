@@ -12,35 +12,18 @@ import (
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
-// trustProbeTimeout bounds the startup trust-status probe. The command reads
-// and hashes project.cake files, so it is normally fast; the deadline keeps a
-// wedged helper from leaving a startup diagnostic pending indefinitely.
 const trustProbeTimeout = 10 * time.Second
 
-// trustStatusMsg delivers the result of the startup project-trust probe.
 type trustStatusMsg struct {
 	status cake.TrustStatus
 	err    error
 }
 
-// projectTrustOverridden reports whether cake's one-run trust controls make the
-// next prompt independent of the project's persistent trust record. `cake trust
-// --status` always inspects the project regardless of these variables, so
-// warning from its output would be false in either case. Only cake's documented
-// values count.
 func projectTrustOverridden() bool {
 	return os.Getenv("CAKE_TRUST_PROJECT") == "1" ||
 		os.Getenv("CAKE_PROJECT_CONFIG") == "off"
 }
 
-// startTrustProbeCmd returns the read-only startup probe of project
-// configuration trust, or nil when no engine binary is configured or cake's
-// one-run trust controls have already decided the question. The probe runs off
-// the Update loop and registers with the process-level child registry while it
-// runs, so quit and the unobserved-exit path cancel and reap it.
-// The probe is advisory: its result appends one warning when cake will refuse
-// project authority, and every failure is silent apart from the debug log so an
-// older cake binary cannot break startup.
 func startTrustProbeCmd(cfg Config) tea.Cmd {
 	if cfg.CakeBin == "" || projectTrustOverridden() {
 		return nil
@@ -62,11 +45,6 @@ func startTrustProbeCmd(cfg Config) tea.Cmd {
 	}
 }
 
-// handleTrustStatus applies one probe result. Success with a usable trust state
-// is silent; an untrusted, changed, invalid, or unrecognized state appends one
-// warning when the probe returns during startup. Probe failures never reach the
-// timeline: an older cake, malformed output, or timeout is a debug-log detail,
-// not a user error.
 func (m *Model) handleTrustStatus(msg trustStatusMsg) {
 	if msg.err != nil {
 		m.logDebug("trust status probe: " + msg.err.Error())
@@ -78,9 +56,6 @@ func (m *Model) handleTrustStatus(msg trustStatusMsg) {
 	m.appendItem(ui.Item{Kind: ui.KindWarning, Text: trustWarning(msg.status)})
 }
 
-// trustWarning is the one-line advisory for a project whose configuration cake
-// will not apply. Paths and keys come from cake's diagnostic document and are
-// sanitized by the render boundary like every other timeline item.
 func trustWarning(status cake.TrustStatus) string {
 	root := status.ProjectRoot
 	if root == "" {
@@ -114,9 +89,6 @@ func trustWarning(status cake.TrustStatus) string {
 	}
 }
 
-// trustAuthoritySummary names how many authority-bearing files cake reported,
-// with the first two files and their authority keys. Project-relative paths
-// keep the warning independent of where the checkout lives.
 func trustAuthoritySummary(status cake.TrustStatus) string {
 	paths := make([]string, 0, len(status.Authority))
 	keys := make(map[string][]string, len(status.Authority))
@@ -148,9 +120,6 @@ func trustAuthoritySummary(status cake.TrustStatus) string {
 		len(paths), plural(len(paths)), strings.Join(details, ", "), suffix)
 }
 
-// trustChangeSummary names how many files differ from the trusted snapshot.
-// When cake reports no change rows, it falls back to the authority summary so
-// the warning still says what needs review.
 func trustChangeSummary(status cake.TrustStatus) string {
 	if len(status.Changes) == 0 {
 		return trustAuthoritySummary(status)

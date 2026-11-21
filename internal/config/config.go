@@ -1,6 +1,3 @@
-// Package config handles loading TOML config files for cake-repl defaults.
-// Merge order is: hardcoded defaults < config file < CLI flags. Config files
-// are optional; a missing file is silently skipped.
 package config
 
 import (
@@ -13,14 +10,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config represents the config file structure. Fields use TOML tags matching
-// the expected key names in the file. Zero values mean "not set" in a file
-// that was actually loaded.
-// ToolColor is the exception: false is a meaningful value, not "unset", so an
-// explicit `tool-color = false` can turn off an inherited true. Its presence is
-// tracked in ToolColorSet, taken from the decoded file's TOML metadata rather
-// than inferred from the value. Compaction.Enabled is the same kind of value and
-// uses the same presence rule.
 type Config struct {
 	Model            string      `toml:"model"`
 	Profile          string      `toml:"profile"`
@@ -33,49 +22,21 @@ type Config struct {
 	Suggestions      Suggestions `toml:"suggestions"`
 }
 
-// Compaction holds the opt-in between-turn context compaction settings in the
-// `[compaction]` table. Enabled is false by default and is the only field whose
-// false value is meaningful, so EnabledSet records whether the file actually
-// supplied the key.
-// MaxContextTokens and TriggerTokens select absolute mode when either is
-// non-zero; both must then be positive and the trigger must be below the
-// ceiling. Both are between-turn targets: the REPL checks them only after a
-// completed turn, so a single invocation can grow past them before the next
-// prompt. When both are zero, the legacy ThresholdPercent trigger applies.
 type Compaction struct {
-	Enabled        bool   `toml:"enabled"`
-	EnabledSet     bool   `toml:"-"`
-	CakeCompactBin string `toml:"cake-compact-bin"`
-	// MaxContextTokens is the quality ceiling, not a compactor threshold. It is
-	// a between-turn target, never a live cap, and is never passed to the
-	// compactor.
-	MaxContextTokens int `toml:"max-context-tokens"`
-	// TriggerTokens is the absolute between-turn context line at which the REPL
-	// compacts. It is checked only after a completed turn.
-	TriggerTokens int `toml:"trigger-tokens"`
+	Enabled          bool   `toml:"enabled"`
+	EnabledSet       bool   `toml:"-"`
+	CakeCompactBin   string `toml:"cake-compact-bin"`
+	MaxContextTokens int    `toml:"max-context-tokens"`
+	TriggerTokens    int    `toml:"trigger-tokens"`
 
 	ThresholdPercent int `toml:"threshold-percent"`
 	KeepTokens       int `toml:"keep-tokens"`
 
-	// Model, Profile, and ReasoningEffort select the model and reasoning
-	// settings for the summary. Empty values fall back to the REPL's turn
-	// selection (for model/profile) or cake's own default (for reasoning
-	// effort). These are trusted-config only; a project-local file may not
-	// select a metered summarizer.
 	Model           string `toml:"model"`
 	Profile         string `toml:"profile"`
 	ReasoningEffort string `toml:"reasoning-effort"`
 }
 
-// Suggestions holds the opt-in after-turn prompt-suggestion settings in the
-// `[suggestions]` table. Enabled is false by default and is the only field
-// whose false value is meaningful, so EnabledSet records whether the file
-// actually supplied the key. CakeSuggestBin names the external suggester; the
-// REPL only invokes it and never reads a session file itself.
-// Model and Profile select the metered suggestion call. Empty values fall back
-// to the REPL's turn selection. ReasoningEffort is passed through when set; an
-// empty value leaves Cake's own reasoning default. These are trusted-config
-// only; a project-local file may not select a suggestion model or effort.
 type Suggestions struct {
 	Enabled         bool   `toml:"enabled"`
 	EnabledSet      bool   `toml:"-"`
@@ -86,23 +47,12 @@ type Suggestions struct {
 }
 
 const (
-	// DefaultCakeCompactBin is the compactor executable resolved on PATH when
-	// the config does not name one.
-	DefaultCakeCompactBin = "cake-compact"
-	// DefaultCakeSuggestBin is the prompt suggester executable resolved on PATH
-	// when the config does not name one.
-	DefaultCakeSuggestBin = "cake-suggest"
-	// DefaultCompactionThresholdPercent is the fallback trigger percentage when
-	// the absolute trigger fields are unset. The REPL fires five points below it
-	// after a completed turn.
+	DefaultCakeCompactBin             = "cake-compact"
+	DefaultCakeSuggestBin             = "cake-suggest"
 	DefaultCompactionThresholdPercent = 80
-	// DefaultCompactionKeepTokens is the retained-tail target; zero would let
-	// the compactor apply its own window-relative default.
-	DefaultCompactionKeepTokens = 20_000
+	DefaultCompactionKeepTokens       = 20_000
 )
 
-// DefaultCompaction returns the effective compaction defaults before any config
-// file is merged.
 func DefaultCompaction() Compaction {
 	return Compaction{
 		CakeCompactBin:   DefaultCakeCompactBin,
@@ -111,16 +61,10 @@ func DefaultCompaction() Compaction {
 	}
 }
 
-// DefaultSuggestions returns the effective suggestion defaults before any
-// config file is merged. The feature stays disabled until trusted config
-// enables it.
 func DefaultSuggestions() Suggestions {
 	return Suggestions{CakeSuggestBin: DefaultCakeSuggestBin}
 }
 
-// Validate checks the effective suggestion settings. Only an enabled feature
-// needs an executable or a valid reasoning effort; a disabled table may omit
-// both.
 func (s Suggestions) Validate() error {
 	if !s.Enabled {
 		return nil
@@ -138,10 +82,6 @@ func (s Suggestions) Validate() error {
 
 var errMissingSuggester = errors.New("suggestions.cake-suggest-bin must name an executable")
 
-// Validate checks the effective compaction settings. Only values that cannot
-// describe a trigger are rejected; zero means "use the default" and is resolved
-// before validation, except that the two absolute fields must be set together.
-// The compactor is validated only when it can run.
 func (c Compaction) Validate() error {
 	if !c.Enabled {
 		return nil
@@ -177,10 +117,6 @@ func (c Compaction) Validate() error {
 
 var errMissingCompactor = errors.New("compaction.cake-compact-bin must name an executable")
 
-// DefaultPaths returns the XDG config path and the project-local config path.
-// The XDG path is $XDG_CONFIG_HOME/cake-repl/config.toml (falling back to
-// ~/.config/cake-repl/config.toml). The project-local path is.cake-repl.toml
-// in the current directory.
 func DefaultPaths() (xdgPath, localPath string) {
 	xdg := os.Getenv("XDG_CONFIG_HOME")
 	if xdg == "" {
@@ -194,22 +130,11 @@ func DefaultPaths() (xdgPath, localPath string) {
 	return
 }
 
-// Load reads and decodes a TOML config file. A missing file returns an empty
-// Config without error, so callers can always merge the result
-// unconditionally. A file that exists but cannot be read or decoded (e.g.
-// permission errors, invalid TOML) aborts with an error.
 func Load(path string) (*Config, error) {
 	cfg, _, err := load(path)
 	return cfg, err
 }
 
-// LoadProject loads automatically discovered project defaults. A project file is
-// untrusted provenance, so it cannot select an executable, cannot enable the
-// metered, session-mutating compactor or the metered suggester, and cannot tune
-// the compactor's thresholds or summarizer selection or the suggestion model or
-// reasoning effort. ignored names each key dropped for that reason, in a stable
-// order, and reports key presence even when its value is empty. A project file
-// may still disable compaction or suggestions.
 func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 	cfg, meta, err := load(path)
 	if err != nil {
@@ -240,20 +165,15 @@ func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 		cfg.Suggestions.ReasoningEffort = ""
 	}
 	if definedFold(meta, "suggestions", "enabled") && cfg.Suggestions.Enabled {
-		// Disabling is allowed to win; enabling is not.
 		ignored = append(ignored, "suggestions.enabled")
 		cfg.Suggestions.Enabled = false
 		cfg.Suggestions.EnabledSet = false
 	}
 	if definedFold(meta, "compaction", "enabled") && cfg.Compaction.Enabled {
-		// Disabling is allowed to win; enabling is not.
 		ignored = append(ignored, "compaction.enabled")
 		cfg.Compaction.Enabled = false
 		cfg.Compaction.EnabledSet = false
 	}
-	// Tuning is ignored too: an untrusted file must not be able to turn an
-	// already-enabled metered operation up. Clearing the value lets the trusted
-	// layer's non-zero merge win.
 	if definedFold(meta, "compaction", "max-context-tokens") {
 		ignored = append(ignored, "compaction.max-context-tokens")
 		cfg.Compaction.MaxContextTokens = 0
@@ -300,12 +220,6 @@ func load(path string) (*Config, toml.MetaData, error) {
 	return cfg, meta, nil
 }
 
-// definedFold reports whether a TOML key path was supplied, matching each
-// segment case-insensitively. The decoder matches struct tags case-insensitively,
-// but MetaData.IsDefined is case-sensitive; presence checks must use the same
-// rule as decoding, or a differently spelled key could decode into the struct
-// while its presence check missed it. That matters most for the untrusted
-// project-local layer, where a missed key would survive provenance stripping.
 func definedFold(meta toml.MetaData, path ...string) bool {
 	for _, key := range meta.Keys() {
 		if len(key) != len(path) {
@@ -325,8 +239,6 @@ func definedFold(meta toml.MetaData, path ...string) bool {
 	return false
 }
 
-// Merge applies src values to dst for each non-zero field in src. dst is
-// modified in place and returned.
 func Merge(dst, src *Config) *Config {
 	if src == nil {
 		return dst
@@ -346,9 +258,6 @@ func Merge(dst, src *Config) *Config {
 	if src.CakeBin != "" {
 		dst.CakeBin = src.CakeBin
 	}
-	// tool-color is a boolean whose false value is meaningful, so it merges on
-	// key presence rather than on a non-zero value. Only a file that actually
-	// supplied the key changes the effective value; a missing key inherits dst.
 	if src.ToolColorSet {
 		dst.ToolColor = src.ToolColor
 		dst.ToolColorSet = true
@@ -358,9 +267,6 @@ func Merge(dst, src *Config) *Config {
 	return dst
 }
 
-// mergeCompaction applies a higher-priority compaction table. Non-zero values
-// override; enabled merges on key presence so an explicit false can disable an
-// inherited true.
 func mergeCompaction(dst *Compaction, src Compaction) {
 	if src.EnabledSet {
 		dst.Enabled = src.Enabled
@@ -392,8 +298,6 @@ func mergeCompaction(dst *Compaction, src Compaction) {
 	}
 }
 
-// MergeCompaction applies a config file's `[compaction]` table to a base
-// carrying the hardcoded defaults. A nil file leaves the defaults untouched.
 func MergeCompaction(base Compaction, file *Config) Compaction {
 	if file != nil {
 		mergeCompaction(&base, file.Compaction)
@@ -401,10 +305,6 @@ func MergeCompaction(base Compaction, file *Config) Compaction {
 	return base
 }
 
-// mergeSuggestions applies a higher-priority `[suggestions]` table.
-// Enabled merges on key presence so an explicit false can disable an
-// inherited true; the executable and model selection merge only when
-// non-empty.
 func mergeSuggestions(dst *Suggestions, src Suggestions) {
 	if src.EnabledSet {
 		dst.Enabled = src.Enabled
@@ -424,8 +324,6 @@ func mergeSuggestions(dst *Suggestions, src Suggestions) {
 	}
 }
 
-// MergeSuggestions applies a config file's `[suggestions]` table to a base
-// carrying the hardcoded defaults. A nil file leaves the defaults untouched.
 func MergeSuggestions(base Suggestions, file *Config) Suggestions {
 	if file != nil {
 		mergeSuggestions(&base, file.Suggestions)

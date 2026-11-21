@@ -1,6 +1,3 @@
-// Package cake provides a client for the cake CLI's stream-json output
-// format. It treats cake as an external engine: events are decoded from
-// newline-delimited JSON on stdout and exposed as typed Go values.
 package cake
 
 import (
@@ -10,13 +7,10 @@ import (
 	"unicode/utf8"
 )
 
-// Event is implemented by every decoded stream-json record.
 type Event interface {
 	EventType() string
 }
 
-// StreamEnvelope captures the type discriminator and the raw JSON of a
-// line in one pass, so the concrete event decode can reuse the raw bytes.
 type StreamEnvelope struct {
 	Type string
 	Raw  json.RawMessage
@@ -34,9 +28,6 @@ func (e *StreamEnvelope) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// TaskStart marks the beginning of one cake task. Model and ModelConfig are
-// optional; cake#664 adds them to the live stream with the same meaning as on
-// SessionMeta, and older cake binaries simply omit them.
 type TaskStart struct {
 	Type        string `json:"type"`
 	SessionID   string `json:"session_id"`
@@ -48,7 +39,6 @@ type TaskStart struct {
 
 func (e TaskStart) EventType() string { return "task_start" }
 
-// Message is one user/assistant message.
 type Message struct {
 	Type      string `json:"type"`
 	Role      string `json:"role"`
@@ -60,7 +50,6 @@ type Message struct {
 
 func (e Message) EventType() string { return "message" }
 
-// Reasoning carries model reasoning summaries when the provider emits them.
 type Reasoning struct {
 	Type      string           `json:"type"`
 	ID        string           `json:"id"`
@@ -68,16 +57,12 @@ type Reasoning struct {
 	Timestamp string           `json:"timestamp,omitempty"`
 }
 
-// ReasoningSummary accepts both the historical string array and the typed
-// summary objects emitted by newer providers. The UI intentionally does not
-// render this provider-specific content, but decoding it must not turn a
-// replay stream into a parse error.
 type ReasoningSummary []string
 
 func (s *ReasoningSummary) UnmarshalJSON(data []byte) error {
 	var values []json.RawMessage
 	if err := json.Unmarshal(data, &values); err != nil {
-		return nil // Ignore an unfamiliar provider-specific summary shape.
+		return nil
 	}
 	out := make(ReasoningSummary, 0, len(values))
 	for _, value := range values {
@@ -99,10 +84,6 @@ func (s *ReasoningSummary) UnmarshalJSON(data []byte) error {
 
 func (e Reasoning) EventType() string { return "reasoning" }
 
-// SessionMeta describes session-level metadata in a replay stream. Cwd decodes
-// cake's working_directory; Model is the provider model ID and ModelConfig is
-// the [[models]] entry name the session was created with. Fields not needed by
-// the REPL are deliberately ignored so cake can add metadata.
 type SessionMeta struct {
 	Type        string `json:"type"`
 	SessionID   string `json:"session_id"`
@@ -116,7 +97,6 @@ type SessionMeta struct {
 
 func (e SessionMeta) EventType() string { return "session_meta" }
 
-// PromptContext records context associated with one replayed prompt.
 type PromptContext struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id,omitempty"`
@@ -127,7 +107,6 @@ type PromptContext struct {
 
 func (e PromptContext) EventType() string { return "prompt_context" }
 
-// SkillActivated reports a skill that was active for a replayed task.
 type SkillActivated struct {
 	Type        string `json:"type"`
 	Name        string `json:"name,omitempty"`
@@ -137,7 +116,6 @@ type SkillActivated struct {
 
 func (e SkillActivated) EventType() string { return "skill_activated" }
 
-// ReplayError is the structured failure record emitted by cake replay.
 type ReplayError struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id"`
@@ -148,17 +126,6 @@ type ReplayError struct {
 
 func (e ReplayError) EventType() string { return "replay_error" }
 
-// Compaction is one committed context checkpoint, emitted by replay at its
-// physical position in the transcript. It describes a summary plus a retained
-// tail that replaced retired history; the REPL renders one boundary marker and
-// seeds an estimated context size from it.
-// The retained tail is reduced to its record count and the summary to a
-// bounded first line, so a checkpoint never pins its retained messages,
-// reasoning, or tool content in memory. Identity, trigger, and model fields are
-// decoded for the event contract and are not rendered; the marker and estimate
-// read only the estimate and retained count. The wire fields are type,
-// checkpoint_version, checkpoint_id, session_id, task_id, timestamp, trigger,
-// summary, retained, estimated_input, summary_instruction_version, and model.
 type Compaction struct {
 	CheckpointVersion         int
 	CheckpointID              string
@@ -173,22 +140,14 @@ type Compaction struct {
 	Model                     CompactionModel
 }
 
-// maxCompactionSummaryBytes bounds the summary line a decoded Compaction keeps.
-// The record itself can be several megabytes; the event only needs enough text
-// to stay recognizable in diagnostics, never the whole generated summary.
 const maxCompactionSummaryBytes = 200
 
-// CompactionEstimate is a checkpoint's own token estimate for the request
-// before and after it. These are estimates, not provider measurements.
-// Basis is cake's estimate basis (measured_usage or content_class).
 type CompactionEstimate struct {
 	BeforeTokens int
 	AfterTokens  int
 	Basis        string
 }
 
-// CompactionModel identifies the model a checkpoint was written under.
-// Model is the provider model ID; ModelConfig is the [[models]] entry name.
 type CompactionModel struct {
 	Model       string
 	ModelConfig string
@@ -196,11 +155,6 @@ type CompactionModel struct {
 
 func (e Compaction) EventType() string { return "compaction" }
 
-// UnmarshalJSON decodes a compaction record field by field so an unknown or
-// malformed optional field never drops the record from the stream: a field that
-// does not decode keeps its zero value and the rest of the checkpoint still
-// renders. A record that is not a JSON object is still an error, because the
-// line itself is malformed.
 func (e *Compaction) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
@@ -237,9 +191,6 @@ func (e *Compaction) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Native compaction statuses, the closed set cake reports on compaction_end.
-// A committed operation has a checkpoint; no_op and no_fit retired nothing, and
-// failed prepared a candidate that never produced one.
 const (
 	CompactionStatusCommitted = "committed"
 	CompactionStatusNoOp      = "no_op"
@@ -247,17 +198,8 @@ const (
 	CompactionStatusFailed    = "failed"
 )
 
-// maxCompactionReasonBytes bounds the skip or failure reason a decoded
-// CompactionEnd keeps. Cake bounds its own reason to the same 1,024 UTF-8
-// bytes, so the event never carries more than the wire record does.
 const maxCompactionReasonBytes = 1024
 
-// CompactionStart reports that one prepared native compaction began summary
-// generation. It is emitted only when cake has a candidate; a request below
-// the trigger, or a no-op or no-fit that never prepared one, emits no start.
-// The wire fields are type, session_id, task_id, checkpoint_id, timestamp,
-// trigger, estimated_before_tokens, optional context_window, and
-// summary_instruction_version.
 type CompactionStart struct {
 	SessionID                 string
 	TaskID                    string
@@ -271,8 +213,6 @@ type CompactionStart struct {
 
 func (e CompactionStart) EventType() string { return "compaction_start" }
 
-// UnmarshalJSON decodes the record field by field so an unknown or malformed
-// optional field keeps the start instead of dropping it from the stream.
 func (e *CompactionStart) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
@@ -290,12 +230,6 @@ func (e *CompactionStart) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// CompactionEnd is the terminal metadata of one native compaction attempt,
-// whether or not it committed. A committed end follows its checkpoint; a
-// skip, no-fit, or failure may be the only record emitted. The wire fields are
-// type, session_id, task_id, checkpoint_id, timestamp, trigger, status, and the
-// optional estimated_before_tokens, estimated_after_tokens, basis,
-// retired_count, retained_count, and reason.
 type CompactionEnd struct {
 	SessionID             string
 	TaskID                string
@@ -313,8 +247,6 @@ type CompactionEnd struct {
 
 func (e CompactionEnd) EventType() string { return "compaction_end" }
 
-// UnmarshalJSON decodes the record field by field, like the other compaction
-// events, and bounds the reason to its first line and the wire's byte cap.
 func (e *CompactionEnd) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
@@ -340,9 +272,6 @@ func (e *CompactionEnd) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// decodeOptionalField decodes one optional field, reporting whether it decoded. A
-// missing or malformed field is not an error: the event keeps decoding so one
-// unexpected value cannot break the stream.
 func decodeOptionalField(raw json.RawMessage, dst any) bool {
 	if len(raw) == 0 {
 		return false
@@ -350,8 +279,6 @@ func decodeOptionalField(raw json.RawMessage, dst any) bool {
 	return json.Unmarshal(raw, dst) == nil
 }
 
-// boundedFirstLine returns the first line of s, cut on a rune boundary to at
-// most limit bytes.
 func boundedFirstLine(s string, limit int) string {
 	if line, _, ok := strings.Cut(s, "\n"); ok {
 		s = line
@@ -366,12 +293,6 @@ func boundedFirstLine(s string, limit int) string {
 	return s[:cut]
 }
 
-// countJSONArrayElements counts the top-level elements of raw when it is a JSON
-// array, and returns 0 otherwise. It streams the array with the tokenizer and
-// discards each element instead of retaining it, so the retained tail's
-// message, reasoning, and tool payloads never stay on the decoded event.
-// Tokenization still materializes each scalar transiently, bounded by the
-// record itself.
 func countJSONArrayElements(raw json.RawMessage) int {
 	if len(raw) == 0 {
 		return 0
@@ -395,7 +316,7 @@ func countJSONArrayElements(raw json.RawMessage) int {
 					count++
 				}
 				depth++
-			default: // ']' or '}'
+			default:
 				if depth == 0 {
 					return count
 				}
@@ -409,7 +330,6 @@ func countJSONArrayElements(raw json.RawMessage) int {
 	}
 }
 
-// FunctionCall is a tool invocation requested by the model.
 type FunctionCall struct {
 	Type      string `json:"type"`
 	ID        string `json:"id"`
@@ -421,7 +341,6 @@ type FunctionCall struct {
 
 func (e FunctionCall) EventType() string { return "function_call" }
 
-// FunctionCallOutput is the result of an executed tool call.
 type FunctionCallOutput struct {
 	Type      string `json:"type"`
 	CallID    string `json:"call_id"`
@@ -431,8 +350,6 @@ type FunctionCallOutput struct {
 
 func (e FunctionCallOutput) EventType() string { return "function_call_output" }
 
-// HookEvent reports one hook execution. Only the fields needed for display
-// are decoded; everything else is ignored.
 type HookEvent struct {
 	Type             string `json:"type"`
 	Event            string `json:"event"`
@@ -448,9 +365,6 @@ type HookEvent struct {
 
 func (e HookEvent) EventType() string { return "hook_event" }
 
-// TaskComplete reports the final outcome of one cake task. Model and
-// ModelConfig are optional and decode additively so a newer cake can report the
-// resolved model identity on completion without breaking older consumers.
 type TaskComplete struct {
 	Type          string `json:"type"`
 	Subtype       string `json:"subtype"`
@@ -469,16 +383,6 @@ type TaskComplete struct {
 
 func (e TaskComplete) EventType() string { return "task_complete" }
 
-// TurnUsage is the per-attempt token accounting cake reports for one
-// main-agent provider attempt, in live and replayed streams. It is not part of
-// the task aggregate: Usage describes that attempt only, so InputTokens is the
-// prompt size the model saw for the turn and the basis for the context display.
-// Attempt and TerminalClass are omitted for a first successful attempt.
-// UsagePresence distinguishes a complete measurement from a partial one; older
-// records omit it and carry complete usage. ContextWindow and
-// RemainingContextTokens are optional: cake reports them only when the model
-// configures a window and the usage is complete. Summary and compaction
-// attempts are never streamed as context measurements.
 type TurnUsage struct {
 	Type                   string `json:"type"`
 	SessionID              string `json:"session_id,omitempty"`
@@ -498,9 +402,6 @@ type TurnUsage struct {
 
 func (e TurnUsage) EventType() string { return "turn_usage" }
 
-// Usage is cake's token accounting for one task or one provider attempt.
-// The detail blocks are provider-specific and optional; unknown keys inside
-// them are ignored like every other unknown field.
 type Usage struct {
 	InputTokens         int          `json:"input_tokens"`
 	OutputTokens        int          `json:"output_tokens"`
@@ -509,19 +410,12 @@ type Usage struct {
 	OutputTokensDetails UsageDetails `json:"output_tokens_details,omitempty"`
 }
 
-// UsageDetails carries the optional breakdown cake attaches to a usage block.
-// Which counters are populated depends on the provider, so a zero value means
-// the provider did not report that counter.
 type UsageDetails struct {
 	CachedTokens     int `json:"cached_tokens,omitempty"`
 	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
 }
 
-// Unknown preserves a record whose type is not recognized. Only the type
-// discriminator is retained; the full raw line is not copied (it is already
-// written to the debug log by the runner). The stream keeps flowing so that
-// forward-compatible decoding is cheap.
 type Unknown struct {
 	Type string
 }

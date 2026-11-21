@@ -12,42 +12,24 @@ import (
 	"github.com/travisennis/cake-repl/internal/childproc"
 )
 
-// sessionsOutputLimit bounds how many bytes of `cake sessions list --json`
-// stdout are buffered. A listing is a few fields per session, so this only
-// guards against a pathological directory: once the limit is passed the
-// remaining output is discarded and the call fails, and the caller degrades to
-// a non-fatal warning.
-const sessionsOutputLimit = 8 << 20 // 8 MiB
+const sessionsOutputLimit = 8 << 20
 
-// sessionsWaitDelay bounds how long ListSessions waits for the listing's
-// stdout/stderr pipes to close after the process exits or the context is
-// canceled. Cancellation kills the read-only helper outright (it holds no state
-// to flush), so the delay only bounds teardown: a helper that ignores
-// termination, or a descendant that inherited the stdout pipe, cannot hang the
-// call. It matches the live-run SIGTERM grace window (see runner.go).
 const sessionsWaitDelay = 3 * time.Second
 
-// SessionSummary is one session returned by `cake sessions list --json`.
 type SessionSummary struct {
 	SessionID   string
 	FirstPrompt string
 	Timestamp   time.Time
 }
 
-// SessionsOptions configures one session-listing invocation.
 type SessionsOptions struct {
 	Bin      string
 	Cwd      string
 	DebugLog io.Writer
 
-	// waitDelay overrides sessionsWaitDelay;
-	// zero keeps the production default (see ListSessions).
 	waitDelay time.Duration
 }
 
-// sessionsEnvelope is the part of the `cake sessions list --json` envelope this
-// client reads. Only data.sessions is used: everything else, including a newer
-// schema_version, is ignored so a forward-compatible cake keeps working
 type sessionsEnvelope struct {
 	Data struct {
 		Sessions []struct {
@@ -58,21 +40,12 @@ type sessionsEnvelope struct {
 	} `json:"data"`
 }
 
-// ListSessions runs the read-only `cake sessions list --json` command and
-// returns the sessions belonging to opts.Cwd. It never mutates cake state.
-// Any failure — a non-zero exit, malformed JSON, or an unreadable envelope — is
-// returned as an error the caller treats as non-fatal: the REPL shows a warning
-// and keeps accepting input.
 func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, error) {
 	cmd := exec.CommandContext(ctx, opts.Bin, "sessions", "list", "--json") // #nosec G204 -- opts.Bin intentionally comes from -cake-bin/config.
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
 	childproc.Isolate(cmd)
-	// Cancellation kills the listing's whole process group outright; a listing
-	// holds no state to flush. Treat an already-gone helper as a successful
-	// cancellation so exec does not replace the natural exit with its default
-	// kill error.
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
@@ -83,8 +56,6 @@ func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, 
 		}
 		return err
 	}
-	// Bound completion: WaitDelay stops Wait from blocking on a process that
-	// will not exit or on a pipe a descendant still holds (sessionsWaitDelay).
 	cmd.WaitDelay = opts.waitDelay
 	if cmd.WaitDelay <= 0 {
 		cmd.WaitDelay = sessionsWaitDelay
@@ -110,10 +81,6 @@ func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, 
 	return decodeSessions(raw)
 }
 
-// decodeSessions parses the listing envelope. A malformed envelope is an error;
-// within a well-formed one, an entry is skipped only when it carries no
-// session id (it could never be resumed), and an unparseable timestamp leaves
-// the zero time so one odd row cannot hide the rest of the listing.
 func decodeSessions(raw []byte) ([]SessionSummary, error) {
 	var env sessionsEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {

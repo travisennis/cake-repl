@@ -1,6 +1,3 @@
-// Command cake-repl is an interactive terminal REPL for the cake CLI. It
-// spawns one cake process per prompt with --output-format stream-json and
-// renders the event stream live.
 package main
 
 import (
@@ -23,16 +20,8 @@ import (
 	"github.com/travisennis/cake-repl/internal/version"
 )
 
-// defaultSandbox is the sandbox policy cake-repl passes to cake unless the user
-// overrides it. It is deliberately not cake's own default (workspace-write): a
-// REPL is interactive, and workspace-write-interactive adds the macOS
-// capabilities that let a command launch and automate other applications.
 const defaultSandbox = "workspace-write-interactive"
 
-// syncWriter serializes writes to an underlying io.Writer. The debug log is
-// written from both the cake runner goroutine and the Bubble Tea update
-// goroutine, so the writer that reaches both paths must be safe for concurrent
-// use rather than relying on the underlying *os.File behavior.
 type syncWriter struct {
 	mu sync.Mutex
 	w  io.Writer
@@ -44,8 +33,6 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	return s.w.Write(p)
 }
 
-// stringList collects repeated flag values in order so -add-dir can be given
-// once per directory, matching cake's repeatable --add-dir flag.
 type stringList []string
 
 func (s *stringList) String() string { return strings.Join(*s, ",") }
@@ -55,9 +42,6 @@ func (s *stringList) Set(v string) error {
 	return nil
 }
 
-// optionalString accepts an optional value after normalization. It tracks
-// whether the flag was supplied so -fork and -resume can distinguish a bare
-// flag from the flag being absent.
 type optionalString struct {
 	set   bool
 	value string
@@ -71,19 +55,10 @@ func (s *optionalString) Set(v string) error {
 	return nil
 }
 
-// IsBoolFlag lets the standard flag package accept a bare optional-value flag.
-// A separate normalization step still supports the optional UUID value.
 func (s *optionalString) IsBoolFlag() bool { return true }
 
-// optionalValueFlags names the startup flags whose value may be omitted: the
-// flag package has no optional-value form, so normalizeOptionalArgs rewrites
-// these before Parse.
 var optionalValueFlags = []string{"fork", "resume"}
 
-// isOptionalValueFlag reports whether arg names one of the optional-value flags
-// in bare form ("-fork", "--resume", and so on). Every other spelling — the
-// -flag=value form the flag package already accepts, another flag, or a
-// positional argument — is left for Parse.
 func isOptionalValueFlag(arg string) bool {
 	name, ok := strings.CutPrefix(arg, "-")
 	if !ok {
@@ -98,10 +73,6 @@ func isOptionalValueFlag(arg string) bool {
 	return false
 }
 
-// normalizeOptionalArgs turns an optional-value flag's `--flag [<uuid>]` syntax
-// into the standard flag package's `--flag=<uuid>` form. A bare --fork or
-// --resume becomes --flag=, which the bound optionalString records as supplied
-// with no value.
 func normalizeOptionalArgs(args []string) []string {
 	normalized := make([]string, 0, len(args))
 	parsingFlags := true
@@ -126,13 +97,6 @@ func normalizeOptionalArgs(args []string) []string {
 	return normalized
 }
 
-// validateFlags checks the mutually exclusive / incompatible flag combinations
-// and returns an error when validation fails. When showVersion is true it
-// short-circuits and returns nil so the caller handles --version separately.
-// Both optional-value flags are mutually exclusive in every form, so a bare
-// -resume and a bare -fork are rejected together exactly like their
-// UUID-bearing forms; only a value that was supplied must be a UUID, because a
-// bare -resume opens the session picker instead of naming a session.
 func validateFlags(showVersion bool, resume, fork optionalString, args []string, configPath string, noConfig bool) error {
 	if showVersion {
 		return nil
@@ -155,9 +119,6 @@ func validateFlags(showVersion bool, resume, fork optionalString, args []string,
 	return nil
 }
 
-// resolveCwd resolves the -cwd flag value to an absolute directory path.
-// When cwd is empty it falls back to os.Getwd. It errors when the path
-// cannot be resolved or does not exist as a directory.
 func resolveCwd(cwd string) (string, error) {
 	dir := cwd
 	if dir == "" {
@@ -184,9 +145,6 @@ func main() {
 	}
 }
 
-// startupFlags holds the bound values of every startup flag. bindFlags registers
-// them on fs and returns the holder, so the process command line and the
-// exit hint read one shared flag surface.
 type startupFlags struct {
 	cakeBin          *string
 	resume           optionalString
@@ -215,9 +173,6 @@ type startupFlags struct {
 	toolColor        *bool
 }
 
-// bindFlags registers the startup flag surface on fs. Flag names, defaults, and
-// help text are user-facing; keep them aligned with README.md and the CLI/output
-// guardrail.
 func bindFlags(fs *flag.FlagSet) *startupFlags {
 	f := &startupFlags{}
 	f.cakeBin = fs.String("cake-bin", "cake", "cake executable to run")
@@ -248,20 +203,12 @@ func bindFlags(fs *flag.FlagSet) *startupFlags {
 	return f
 }
 
-// explicitFlags reports which flags the user set on the command line, so a
-// config-file value applies only where the flag was omitted, and the exit hint
-// can re-emit an explicit override whose effective value is empty or the
-// default.
 func explicitFlags(fs *flag.FlagSet) map[string]bool {
 	explicit := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	return explicit
 }
 
-// effectiveConfig resolves bound flags and config-file defaults into the
-// effective app.Config. The merge order is hardcoded defaults < config file <
-// CLI flags; explicit names the flags the user set, and warnings receives any
-// startup advisory.
 func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writer) (app.Config, error) {
 	dir, err := resolveCwd(*f.cwd)
 	if err != nil {
@@ -295,8 +242,6 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 	}
 	applyConfigFile(&cfg, cfgFile, explicit)
 
-	// Resolve the `[compaction]` table over the hardcoded defaults. There is no
-	// CLI flag for it, so the config file (or its absence) is authoritative.
 	compaction := config.MergeCompaction(config.DefaultCompaction(), cfgFile)
 	if err := compaction.Validate(); err != nil {
 		return app.Config{}, err
@@ -317,9 +262,6 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		ReasoningEffort:  compaction.ReasoningEffort,
 	}
 
-	// Resolve the `[suggestions]` table over the hardcoded defaults. Like
-	// compaction, there is no CLI flag for it, so trusted config is
-	// authoritative and the project-local layer may only disable it.
 	suggestions := config.MergeSuggestions(config.DefaultSuggestions(), cfgFile)
 	if err := suggestions.Validate(); err != nil {
 		return app.Config{}, err
@@ -337,9 +279,6 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 	}
 
 	if f.resume.set {
-		// A bare -resume names no session, so nothing is hydrated and nothing is
-		// pinned: the REPL opens the session picker and the picked row pins the
-		// next prompt through the /resume transition.
 		if f.resume.value == "" {
 			cfg.StartupPicker = true
 		} else {
@@ -389,29 +328,17 @@ func run() (err error) {
 		cfg.DebugLog = &syncWriter{w: logFile}
 	}
 
-	// Track live and replay engine runs so an external suspend can pause them
-	// before the REPL stops its own process group.
 	logf := suspendLogf(cfg.DebugLog)
 	runs := cake.NewRegistry(logf)
 	cfg.Runs = runs
-	// Children is the process-level shutdown registry. main owns it so a panic
-	// in Update or View, which makes Bubble Tea return no model, still has a
-	// handle to every child the app started.
 	children := childproc.NewRegistry()
 	cfg.Children = children
 
-	// Inline mode renders in the normal buffer so recent terminal history stays
-	// visible above the REPL; the alternate screen restores the terminal on exit
-	// but hides that history for the whole session.
 	opts := []tea.ProgramOption{tea.WithMouseCellMotion()}
 	if !*f.inline {
 		opts = append(opts, tea.WithAltScreen())
 	}
 	p := tea.NewProgram(app.New(cfg), opts...)
-	// A catchable external SIGTSTP stops this process without giving the
-	// terminal back, so the shell's fg resumes a REPL that still believes it
-	// owns raw mode. Release the terminal before stopping and re-own it after
-	// SIGCONT; only meaningful when this process owns a terminal.
 	if stdoutIsTerminal() {
 		stopSuspend := watchSuspend(p, *f.inline, runs, logf)
 		defer stopSuspend()
@@ -430,13 +357,9 @@ func run() (err error) {
 	}
 	if ok {
 		if *f.inline {
-			// Inline mode leaves the timeline on the terminal; drop the composer
-			// rows so the shell prompt is not preceded by a stale input box.
 			eraseInlineComposer(mod.ComposerRows())
 		}
 	}
-	// The title reset does not go through the model: a panic in Update or View
-	// returns no model at all, and that exit must still drop a working marker.
 	resetTerminalTitle(cfg.Cwd)
 	if err != nil {
 		return err
@@ -450,10 +373,6 @@ func run() (err error) {
 	return nil
 }
 
-// shutdownAfterProgram cancels and reaps every child after Bubble Tea returns.
-// A panic in Update or View returns no model, so the process-level registry is
-// the only handle to the children; a returned model uses its CancelRunning path,
-// which delegates to the same registry when one is configured.
 func shutdownAfterProgram(m tea.Model, children *childproc.Registry) (app.Model, bool, error) {
 	mod, ok := m.(app.Model)
 	if ok {
@@ -462,26 +381,16 @@ func shutdownAfterProgram(m tea.Model, children *childproc.Registry) (app.Model,
 	return app.Model{}, false, children.Shutdown(app.ChildTeardownTimeout)
 }
 
-// terminalProgram is the slice of *tea.Program the suspend watcher drives. It is
-// declared once here rather than in each build-tagged file so the two never
-// drift. It is an interface so the suspend cycle's ordering can be exercised
-// without a real program.
 type terminalProgram interface {
 	ReleaseTerminal() error
 	RestoreTerminal() error
 }
 
-// engineRuns is the slice of the engine registry the suspend watcher drives. It
-// is declared here so the Unix and Windows suspend files share one signature.
 type engineRuns interface {
 	StopAll()
 	ContinueAll()
 }
 
-// suspendLogf returns the logger for terminal-lifecycle diagnostics. It writes
-// to the -debug-log writer, or discards when none was configured. The debug log
-// uses one `tag: message` line per event (`stdout:`, `exit:`), so callers pass a
-// message that starts with the `suspend:` tag.
 func suspendLogf(w io.Writer) func(string, ...any) {
 	return func(format string, args ...any) {
 		if w != nil {
@@ -490,8 +399,6 @@ func suspendLogf(w io.Writer) func(string, ...any) {
 	}
 }
 
-// loadStartupConfig enforces executable provenance at the project-local layer.
-// Explicit files remain trusted, including an explicitly selected local file.
 func loadStartupConfig(configPath string, explicitConfig, noConfig bool, warnings io.Writer) (*config.Config, error) {
 	switch {
 	case explicitConfig:
@@ -519,8 +426,6 @@ func loadStartupConfig(configPath string, explicitConfig, noConfig bool, warning
 	}
 }
 
-// projectConfigWarning explains why a key in the automatically loaded
-// project-local config was dropped. The text never echoes the configured value.
 func projectConfigWarning(key, path string) string {
 	switch key {
 	case "cake-bin":
@@ -558,7 +463,6 @@ func projectConfigWarning(key, path string) string {
 	}
 }
 
-// applyConfigFile applies file defaults only where a CLI flag was not supplied.
 func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[string]bool) {
 	if cfgFile != nil {
 		if !explicit["model"] && cfgFile.Model != "" {
@@ -582,41 +486,19 @@ func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[strin
 	}
 }
 
-// resumeCommand renders a shell-ready command that resumes sessionID with the
-// same startup controls this process ran with. Cake session controls such as
-// -sandbox, -model, and -cwd shape every cake invocation and are not recorded
-// anywhere cake exposes for replay, so a resume command that omitted them would
-// silently change the resumed run's behavior (for example, reverting an
-// explicitly selected read-only sandbox to the workspace-write-interactive
-// default, or letting a config file re-supply a model the run was started
-// without).
-// explicit names the flags the user set at startup. An override whose effective
-// value is empty (an explicit -model "" or -sandbox "") or equal to the default
-// (an explicit -cake-bin cake) must be re-emitted, because reloading the config
-// on resume would otherwise re-supply a value the original run suppressed.
 func resumeCommand(cfg app.Config, configPath string, noConfig bool, sessionID string, explicit map[string]bool) string {
 	parts := []string{"cake-repl", "-resume", shellQuote(sessionID)}
-	// addFlag always emits the name and a shell-quoted value, even when the value
-	// is empty, so an explicit empty override survives the paste; shellQuote
-	// renders "" as ''.
 	addFlag := func(name, value string) {
 		parts = append(parts, name, shellQuote(value))
 	}
-	// addControl emits a value-taking flag when the user set it explicitly or
-	// when its effective value is non-empty. A bare default stays out of the
-	// hint, so an ordinary resume stays short and still reproduces the run.
 	addControl := func(name, value string, explicitFlag bool) {
 		if explicitFlag || value != "" {
 			addFlag(name, value)
 		}
 	}
-	// The default executable name is omitted unless it was an explicit override,
-	// which must be re-emitted so a config file cannot re-select its own value.
 	if explicit["cake-bin"] || (cfg.CakeBin != "" && cfg.CakeBin != "cake") {
 		addFlag("-cake-bin", cfg.CakeBin)
 	}
-	// Config selection is part of the run: pasting a hint without -no-config
-	// would reload a config file the original run skipped.
 	if noConfig {
 		parts = append(parts, "-no-config")
 	} else {
@@ -644,9 +526,6 @@ func resumeCommand(cfg app.Config, configPath string, noConfig bool, sessionID s
 	return strings.Join(parts, " ")
 }
 
-// shellQuote wraps s in single quotes when it contains characters the shell
-// would otherwise interpret, so a pasted resume command reproduces a path or
-// value with spaces, globs, or metacharacters verbatim.
 func shellQuote(s string) string {
 	if s == "" {
 		return "''"
@@ -669,12 +548,6 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// eraseInlineComposer clears the composer rows that inline mode leaves on the
-// terminal once Bubble Tea returns. The renderer erases the status line (the
-// last frame row) on its own, so removing the composer above it leaves the
-// timeline region, the resume message, and the shell prompt adjacent. Writes
-// only to a terminal, never into redirected output, matching
-// resetTerminalTitle.
 func eraseInlineComposer(rows int) {
 	if rows <= 0 || !stdoutIsTerminal() {
 		return
@@ -682,9 +555,6 @@ func eraseInlineComposer(rows int) {
 	fmt.Fprint(os.Stdout, inlineComposerCleanup(rows))
 }
 
-// inlineComposerCleanup returns the sequence that erases the composer rows of
-// an inline-mode exit: the cursor moves up to the composer's first row and
-// everything from there down is erased.
 func inlineComposerCleanup(rows int) string {
 	if rows <= 0 {
 		return ""
@@ -692,12 +562,6 @@ func inlineComposerCleanup(rows int) string {
 	return ansi.CursorUp(rows) + ansi.EraseScreenBelow
 }
 
-// resetTerminalTitle writes the idle terminal title once the program has
-// returned. The model cannot do it for exits it never observes: Bubble Tea
-// returns on SIGINT or SIGTERM without running Update, and a panic in Update or
-// View returns no model at all, so the model's own title command never runs on
-// either path. Redirected stdout is left untouched, so the escape never lands
-// in a file or a pipe.
 func resetTerminalTitle(cwd string) {
 	if !stdoutIsTerminal() {
 		return
@@ -705,8 +569,6 @@ func resetTerminalTitle(cwd string) {
 	fmt.Fprint(os.Stdout, app.IdleTitleSequence(cwd))
 }
 
-// stdoutIsTerminal reports whether stdout is a character device, so terminal
-// control sequences are never written into redirected output.
 func stdoutIsTerminal() bool {
 	fi, err := os.Stdout.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0

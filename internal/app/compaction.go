@@ -12,51 +12,24 @@ import (
 	"github.com/travisennis/cake-repl/internal/ui"
 )
 
-// compactionTriggerHeadroomPercent is how far below the compactor's own
-// threshold the REPL starts it in percent mode. A complete turn_usage measures
-// the prompt the model saw, not the response and tool results that follow it;
-// those items land in the session before the compactor reads it. Triggering a
-// little early lets the compactor's fuller session estimate cross its real
-// threshold, while the compactor stays the authority and returns
-// compacted:false when it does not.
 const compactionTriggerHeadroomPercent = 5
 
-// compactionWindowFallbackPercent caps an absolute trigger when the model
-// window is smaller than the configured quality ceiling. It matches the
-// effective line of the default percent mode (80 - 5), so a small window still
-// leaves headroom for the response and tool results and the trigger can never
-// sit above the window.
 const compactionWindowFallbackPercent = 75
 
-// compactionStartText is the one timeline notice shown before the compactor is
-// launched. The completion path holds the notice's stable identity and resolves
-// that row, so a started row never keeps reading as pending; completed and
-// replayed markers use different wording. The Ctrl+C hint is repeated in the
-// composer footer so it stays visible after the timeline scrolls.
 const compactionStartText = "context compaction started · Ctrl+C cancels"
 
-// compactionTrigger is one resolved trigger line: either an absolute token
-// count (absolute mode) or a window percentage (the legacy fallback).
 type compactionTrigger struct {
 	absolute bool
 	tokens   int
 	percent  int
 }
 
-// compactionDoneMsg delivers the terminal state of one compactor subprocess.
-// req is the request identity; a result whose identity no longer matches is
-// superseded and must not touch the session or timeline.
 type compactionDoneMsg struct {
 	req       uint64
 	sessionID string
 	res       compact.Result
 }
 
-// shouldCompactAfter reports whether the just-finished turn leaves the current
-// session over the configured trigger. It only compacts a clean completed turn:
-// a canceled, failed, incomplete, or superseded run keeps whatever context it
-// had, and the next successful turn re-evaluates. completedTurn is the single
-// answer shared with the suggester.
 func (m Model) shouldCompactAfter() bool {
 	if !m.cfg.Compaction.Enabled || m.cfg.NoSession || m.runBusy() ||
 		m.compactionBusy() || m.exiting() || !m.completedTurn() {
@@ -80,13 +53,6 @@ func (m Model) shouldCompactAfter() bool {
 	return c.Tokens*100 >= c.Window*trigger.percent
 }
 
-// resolveCompactionTrigger resolves the configured trigger for a positive
-// window. Absolute mode requires both absolute fields and a trigger below the
-// ceiling; an incomplete absolute config disables the trigger rather than
-// silently falling back to a percentage. When the window is smaller than the
-// ceiling, the effective trigger is capped at compactionWindowFallbackPercent
-// of the window, so it never exceeds the window. Percent mode preserves the
-// five-point headroom and is the fallback when both absolute fields are unset.
 func (m Model) resolveCompactionTrigger(window int) (compactionTrigger, bool) {
 	c := m.cfg.Compaction
 	if c.MaxContextTokens != 0 || c.TriggerTokens != 0 {
@@ -113,9 +79,6 @@ func (m Model) resolveCompactionTrigger(window int) (compactionTrigger, bool) {
 	return compactionTrigger{percent: percent}, true
 }
 
-// compactionTriggerPercent is the configured threshold less the measurement
-// headroom. An unconfigured or invalid threshold disables the trigger rather
-// than guessing; main resolves the config defaults before the model is built.
 func (m Model) compactionTriggerPercent() int {
 	p := m.cfg.Compaction.ThresholdPercent
 	if p < 1 || p > 100 {
@@ -127,18 +90,8 @@ func (m Model) compactionTriggerPercent() int {
 	return 1
 }
 
-// startCompaction launches one in-place compaction as a Bubble Tea command. The
-// model-owned context is canceled by Ctrl+C, quit, and Ctrl+N; the gate stays
-// closed until the result is reaped. It returns a nil command, leaving state
-// untouched, when there is no pinned session or no resolvable trigger. The
-// caller batches the returned command with the title update, so a turn that
-// also starts a suggestion uses one title command for both.
 func (m Model) startCompaction() (Model, tea.Cmd) {
 	mode, sessionID := m.session.RunOptions()
-	// A run and a compaction are mutually exclusive: finishing the run is the
-	// only production transition that can start compaction, and no new run may
-	// start until this operation is reaped. Keep the invariant explicit here so
-	// a direct caller cannot overlap them.
 	if mode != cake.RunResume || sessionID == "" || m.runBusy() ||
 		m.compactionBusy() || m.exiting() {
 		return m, nil
@@ -180,34 +133,16 @@ func (m Model) startCompaction() (Model, tea.Cmd) {
 	}
 	run := func() tea.Msg {
 		res := compact.Compact(ctx, opts)
-		// Close before returning the result: an unobserved exit can wait for
-		// the child to be reaped even if this message is never delivered.
 		close(done)
 		return compactionDoneMsg{req: req, sessionID: sessionID, res: res}
 	}
-	// The start notice is synced here, not left for the next event: the finished
-	// turn's Update has already pushed its completion row, and no spinner tick
-	// pushes a viewport payload. Without this sync a long compaction would show
-	// a busy status line and composer but no timeline start until the result
-	// lands.
 	m.compactionNotice = m.appendNotice(ui.Item{Kind: ui.KindInfo, Text: compactionStartText})
 	m.syncViewport()
-	// The title picks up the compacting marker in the caller's batch. The
-	// spinner needs no new tick: finishRun runs while the finished turn's tick
-	// is still pending, and the handler keeps that chain alive while compacting.
 	return m, run
 }
 
-// finishCompaction applies one compactor result. In-place success keeps the
-// session pin unchanged, resolves the start notice into one shared marker, and
-// seeds the status context from the compactor's estimate. A no-op resolves the
-// start notice with an explicit skip notice; a failure, cancellation, or
-// non-in-place result keeps the session and status figure and warns.
 func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	if !m.compaction.settle(operationKey{request: msg.req}) {
-		// A result for a superseded request cannot settle the current gate. Drop
-		// any suggestion held for that old compaction so it cannot leak into the
-		// next one; a live request keeps its own held result.
 		m.suggestion.dropHeld()
 		return m.maybeQuit()
 	}
@@ -216,9 +151,6 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 
 	mode, sessionID := m.session.RunOptions()
 	if mode != cake.RunResume || sessionID != msg.sessionID {
-		// The target changed while the child was draining; its result belongs to
-		// the session the REPL left. Drop the pending start row and any suggestion
-		// held for the old session so neither can keep reading as current.
 		m.removeCompactionStart()
 		m.suggestion.dropHeld()
 		if m.exiting() {
@@ -241,18 +173,10 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	if m.exiting() {
 		return m.maybeQuit()
 	}
-	// The compactor is reaped, so the composer gate is open. A suggestion that
-	// completed while it ran has been waiting for exactly this transition; a
-	// suggestion still in flight will apply through its own result path. Do not
-	// start a new request here: the turn already made its one attempt.
 	m.applyPendingSuggestion()
 	return m, m.titleCmd()
 }
 
-// applyCompactionDocument turns one success document into the live notice and
-// estimated context. A document that did not append in place cannot be accepted:
-// its session id is not the one the next prompt is pinned to, so the REPL keeps
-// the current session and reports the mismatch instead of retargeting.
 func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) {
 	if !doc.Compacted {
 		m.logDebug("compaction: no-op: " + doc.Reason)
@@ -269,9 +193,6 @@ func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) 
 		})
 		return
 	}
-	// The compactor's document carries the window it used; when it does not, the
-	// session's last known window is kept. The estimate is marked so the status
-	// line renders it with "~".
 	m.session.OnCompactionEstimate(doc.AfterTokens, doc.Window)
 	m.finishCompactionNotice(ui.Item{
 		Kind: ui.KindInfo,
@@ -279,39 +200,23 @@ func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) 
 	})
 }
 
-// removeCompactionStart resolves the live start notice by its stable identity
-// and reports whether it was still on the timeline. Ctrl+N, /clear, or the
-// timeline cap can drop it before the result is reaped, so the completion path
-// cannot assume it is there. The handle is cleared either way, so a later result
-// cannot remove a row that has taken its place.
 func (m *Model) removeCompactionStart() bool {
 	id := m.compactionNotice
 	m.compactionNotice = 0
 	return m.removeNotice(id)
 }
 
-// finishCompactionNotice resolves the live start notice into one outcome row.
-// The row is appended at the end instead of updated in place so an action the
-// user attempted while the gate was closed (a rejected submit or /new) stays
-// before the outcome. With no start notice left, the outcome is still appended: a
-// success, failure, or cancellation must remain visible even after /clear.
 func (m *Model) finishCompactionNotice(it ui.Item) {
 	m.removeCompactionStart()
 	m.appendItem(it)
 }
 
-// skipCompactionNotice resolves the start notice when the compactor declined.
-// A no-op is expected behavior, so it stays silent when the row it would have
-// resolved is already gone; otherwise the row becomes the explicit skip.
 func (m *Model) skipCompactionNotice(it ui.Item) {
 	if m.removeCompactionStart() {
 		m.appendItem(it)
 	}
 }
 
-// compactionSkippedText names a no-op result. The compactor re-checks every
-// eligible turn, so a decline is routine; the reason is the compactor's short
-// explanation, bounded here and sanitized by the render boundary.
 func compactionSkippedText(reason string, outputLimit int) string {
 	text := "context compaction skipped"
 	if reason = strings.TrimSpace(reason); reason != "" {
@@ -320,17 +225,10 @@ func compactionSkippedText(reason string, outputLimit int) string {
 	return text
 }
 
-// compactionBusy reports whether a compactor is active or draining. The
-// pending operation owns the mechanism; this caller-side answer is the gate and
-// presentation policy: compaction remains busy until its result is reaped.
 func (m Model) compactionBusy() bool {
 	return m.compaction.active() || m.compaction.draining()
 }
 
-// refreshCompactionElapsed records the whole-second age of the running
-// compactor. The spinner tick is the clock the REPL already runs while a task or
-// compaction is in flight, so this adds no second timer and stops with the
-// spinner chain when the REPL goes idle.
 func (m *Model) refreshCompactionElapsed(now time.Time) {
 	if !m.compactionBusy() || m.compactionStart.IsZero() {
 		return
@@ -342,11 +240,6 @@ func (m *Model) refreshCompactionElapsed(now time.Time) {
 	m.compactionElapsed = elapsed.Truncate(time.Second)
 }
 
-// elapsedText formats a running operation's whole-second age for the one-row
-// status line and composer title. Whole seconds keep it short on a narrow
-// terminal and change at most once per second, however often the spinner frame
-// renders. The between-turn compactor and the prompt suggester share it so both
-// background operations report their age in the same shape.
 func elapsedText(d time.Duration) string {
 	secs := int64(d / time.Second)
 	if secs < 0 {
@@ -362,9 +255,6 @@ func elapsedText(d time.Duration) string {
 	}
 }
 
-// firstNonEmpty returns the first non-empty value. Between-turn operations use
-// it so an unset operation-specific model or profile falls back to the REPL's
-// turn selection.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -374,9 +264,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// compactionFailureText renders the one diagnostic for a failed compactor run.
-// The compactor's stderr is already bounded; the render path truncates and
-// sanitizes it for display.
 func compactionFailureText(res compact.Result, outputLimit int) string {
 	text := "context compaction failed"
 	switch {

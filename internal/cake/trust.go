@@ -13,23 +13,11 @@ import (
 )
 
 const (
-	// trustOutputLimit bounds `cake trust --status --json` stdout. The output is
-	// a diagnostic document of a few fields per authority-bearing file, so this
-	// only guards a pathological report. The whole document is kept because it
-	// is parsed from its first byte.
-	trustOutputLimit = 1 << 20 // 1 MiB
+	trustOutputLimit = 1 << 20
 
-	// trustWaitDelay bounds how long ReadTrustStatus waits for the command's
-	// stdout/stderr pipes to close after it exits or the context is canceled.
-	// The probe is read-only, so cancellation kills the helper outright; the
-	// delay only bounds a helper that ignores termination or a descendant that
-	// inherited the pipe. It matches the other read-only helper bounds.
 	trustWaitDelay = 3 * time.Second
 )
 
-// TrustState is cake's project trust decision for one project snapshot. The
-// values are cake's stable diagnostic labels; an unrecognized value is kept so
-// the caller can surface it instead of silently treating it as trusted.
 type TrustState string
 
 const (
@@ -40,20 +28,16 @@ const (
 	TrustStateInvalid     TrustState = "invalid"
 )
 
-// TrustAuthority is one authority-bearing project file from trust status.
 type TrustAuthority struct {
 	Path string
 	Keys []string
 }
 
-// TrustChange is one file that differs from the trusted snapshot.
 type TrustChange struct {
 	Path   string
 	Change string
 }
 
-// TrustStatus is the project configuration trust decision returned by
-// `cake trust --status --json`.
 type TrustStatus struct {
 	State         TrustState
 	ProjectRoot   string
@@ -62,27 +46,18 @@ type TrustStatus struct {
 	InvalidReason string
 }
 
-// NeedsAttention reports whether cake will refuse project authority or the
-// state is not one this client recognizes. Empty state is malformed and is
-// rejected during decoding, so it never reaches this method.
 func (s TrustStatus) NeedsAttention() bool {
 	return s.State != TrustStateNotRequired && s.State != TrustStateTrusted
 }
 
-// TrustOptions configures one project trust-status invocation.
 type TrustOptions struct {
 	Bin      string
 	Cwd      string
 	DebugLog io.Writer
 
-	// waitDelay overrides trustWaitDelay; zero
-	// keeps the production default (see ReadTrustStatus).
 	waitDelay time.Duration
 }
 
-// trustEnvelope is the part of the `cake trust --status --json` diagnostic
-// envelope this client reads. Everything else, including a newer
-// schema_version, is ignored so a forward-compatible cake keeps working.
 type trustEnvelope struct {
 	Data struct {
 		State         string `json:"state"`
@@ -99,22 +74,12 @@ type trustEnvelope struct {
 	} `json:"data"`
 }
 
-// ReadTrustStatus runs the read-only `cake trust --status --json` command for
-// opts.Cwd and returns cake's project trust decision. It never writes a trust
-// record or otherwise mutates cake state.
-// Any failure — a non-zero exit, malformed JSON, or an unusable envelope — is
-// returned as an error the caller treats as non-fatal: an older cake without
-// the command must not break startup.
 func ReadTrustStatus(ctx context.Context, opts TrustOptions) (TrustStatus, error) {
 	cmd := exec.CommandContext(ctx, opts.Bin, "trust", "--status", "--json") // #nosec G204 -- opts.Bin intentionally comes from -cake-bin/config.
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
 	childproc.Isolate(cmd)
-	// Cancellation kills the read-only helper's whole process group outright;
-	// it holds no state to flush. Treat an already-gone helper as a successful
-	// cancellation so exec does not replace the natural exit with its default
-	// kill error.
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
@@ -125,8 +90,6 @@ func ReadTrustStatus(ctx context.Context, opts TrustOptions) (TrustStatus, error
 		}
 		return err
 	}
-	// Bound completion: WaitDelay stops Wait from blocking on a process that
-	// will not exit or on a pipe a descendant still holds.
 	cmd.WaitDelay = opts.waitDelay
 	if cmd.WaitDelay <= 0 {
 		cmd.WaitDelay = trustWaitDelay
@@ -152,10 +115,6 @@ func ReadTrustStatus(ctx context.Context, opts TrustOptions) (TrustStatus, error
 	return decodeTrustStatus(raw)
 }
 
-// decodeTrustStatus parses the diagnostic envelope. Unknown fields and a newer
-// schema_version are ignored. A missing state is malformed output:
-// guessing a default could turn an unrecognized cake response into a false
-// "trusted" or a false warning.
 func decodeTrustStatus(raw []byte) (TrustStatus, error) {
 	var env trustEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {

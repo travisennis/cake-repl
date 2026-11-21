@@ -2,9 +2,6 @@ package app
 
 import "context"
 
-// phase is the lifecycle of one model-owned request. Completion is not a
-// phase: once a result is settled the request is idle, and the caller decides
-// what the result means.
 type phase uint8
 
 const (
@@ -13,14 +10,8 @@ const (
 	phaseDraining
 )
 
-// sessionGeneration identifies continuity of the session target. It advances
-// only when the user leaves the current target (/new, Ctrl+N, or a /resume pick
-// that actually changes the target), never when a run merely reports its own id.
 type sessionGeneration uint64
 
-// outcome is what a completed request did. It is not a lifecycle phase: a
-// phase says whether a child still holds a resource, while the outcome says
-// whether the result may drive a later action.
 type outcome uint8
 
 const (
@@ -30,11 +21,6 @@ const (
 	outcomeCanceled
 )
 
-// operationKey identifies one request. The generation scopes the request to the
-// session target it started for; request is per operation and never repeats;
-// sessionID is the target session when the request has one. A stale generation
-// suppresses application, but the caller still settles the phase so the
-// resource gate opens once the child is reaped.
 type operationKey struct {
 	generation sessionGeneration
 	request    uint64
@@ -45,9 +31,6 @@ func (k operationKey) zero() bool {
 	return k == operationKey{}
 }
 
-// admission is one capability's gate decision. A refusal carries the exact
-// text for that capability, so a prompt and a session command can share the
-// same blocking phase without sharing the user-facing wording.
 type admission struct {
 	allowed bool
 	reason  refusalReason
@@ -68,10 +51,6 @@ const (
 	refuseCompactionDraining
 )
 
-// pendingOperation owns the request identity, cancel function, and reaping
-// channel for one model-owned child. It deliberately knows nothing about input
-// gates or presentation: callers decide whether an active or draining operation
-// blocks a prompt, a session retarget, or a new request.
 type pendingOperation struct {
 	phase    phase
 	key      operationKey
@@ -80,9 +59,6 @@ type pendingOperation struct {
 	done     <-chan struct{}
 }
 
-// begin starts one request. Callers start a request only after the previous
-// one has settled; a begin therefore replaces any stale zero value left by a
-// caller or a zero-value Model.
 func (o *pendingOperation) begin(key operationKey, cancel context.CancelFunc, done <-chan struct{}) {
 	o.phase = phaseInFlight
 	o.key = key
@@ -91,9 +67,6 @@ func (o *pendingOperation) begin(key operationKey, cancel context.CancelFunc, do
 	o.done = done
 }
 
-// cancel asks the child to stop and keeps its key. A run, replay, or compaction
-// still produces an outcome after cancellation, so its result must settle the
-// operation and be classified by the caller.
 func (o *pendingOperation) cancel() {
 	if o.phase == phaseIdle {
 		return
@@ -102,9 +75,6 @@ func (o *pendingOperation) cancel() {
 	o.callCancel()
 }
 
-// invalidate asks the child to stop and moves its key out of the active slot.
-// A late suggestion or listing result may only close the drain; it can never
-// apply to the composer or browser after the user's newer action.
 func (o *pendingOperation) invalidate() {
 	if o.phase == phaseIdle {
 		return
@@ -125,10 +95,6 @@ func (o *pendingOperation) draining() bool {
 	return o.phase == phaseDraining
 }
 
-// settle consumes the reaping result for key. It reports true only for the
-// active key, whose result may still be applied; an invalidated request returns
-// false and only clears its drain. An unknown key leaves the operation exactly
-// as it was, so a superseded result cannot settle a newer request.
 func (o *pendingOperation) settle(key operationKey) bool {
 	if key.zero() {
 		return false
@@ -148,9 +114,6 @@ func (o *pendingOperation) settle(key operationKey) bool {
 	return false
 }
 
-// doneChannel returns the reaping channel while a child is active or draining,
-// or nil when the operation is idle. Shutdown waits on this channel instead of
-// the result message.
 func (o *pendingOperation) doneChannel() <-chan struct{} {
 	return o.done
 }
@@ -175,41 +138,26 @@ func (o *pendingOperation) clearReap() {
 	o.done = nil
 }
 
-// runBusy reports whether a run holds a resource that gates prompt submission
-// and session retargeting. Both an active and a draining run stay busy until its
-// result is settled.
 func (m Model) runBusy() bool {
 	return m.runOp.active() || m.runOp.draining()
 }
 
-// runActive reports whether a run is still in flight (not merely draining).
 func (m Model) runActive() bool {
 	return m.runOp.active()
 }
 
-// replayBusy reports whether startup hydration still owns a child. The replay
-// phase keeps the resource gate closed from the start command through the
-// reaped result, including after Ctrl+N stops live hydration.
 func (m Model) replayBusy() bool {
 	return m.replay.phase() != replayIdle
 }
 
-// exiting reports whether the exit phase is draining. Input is ignored from
-// that point until every child is reaped.
 func (m Model) exiting() bool {
 	return m.exitPhase == phaseDraining
 }
 
-// completedTurn is the one answer both post-turn operations use. A clean
-// completed turn is an outcomeSuccess result for the current session target;
-// canceled, failed, incomplete, or superseded runs never qualify.
 func (m Model) completedTurn() bool {
 	return m.runOutcome == outcomeSuccess && m.runGeneration == m.session.Generation()
 }
 
-// admitPrompt and admitRetarget are the two capability-specific uses of the
-// same gate. They check the same resource-busy phases but return the distinct
-// refusal wording each caller already showed.
 func (m Model) admitPrompt() admission {
 	return m.admit(false)
 }
@@ -218,10 +166,6 @@ func (m Model) admitRetarget() admission {
 	return m.admit(true)
 }
 
-// admitSuggestion is the suggestion's admission check. It deliberately ignores
-// compaction: starts a suggestion alongside the compactor, and the
-// result is held until the compaction gate opens. Its refusal is never shown to
-// the user; canSuggest uses the boolean only.
 func (m Model) admitSuggestion() admission {
 	if m.exiting() {
 		return admission{reason: refuseExiting}
