@@ -291,7 +291,8 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 
 func run() (err error) {
 	f := bindFlags(flag.CommandLine)
-	if err = flag.CommandLine.Parse(normalizeOptionalArgs(os.Args[1:])); err != nil {
+	args := normalizeOptionalArgs(os.Args[1:])
+	if err = flag.CommandLine.Parse(args); err != nil {
 		return err
 	}
 
@@ -367,7 +368,7 @@ func run() (err error) {
 	if ok {
 		if sessionID, _ := mod.SessionData(); sessionID != "" {
 			fmt.Fprintf(os.Stderr, "\nResume this session with:\n")
-			fmt.Fprintln(os.Stderr, resumeCommand(cfg, *f.configPath, *f.noConfig, sessionID, explicit))
+			fmt.Fprintln(os.Stderr, resumeCommand(args, cfg.Cwd, sessionID))
 		}
 	}
 	return nil
@@ -476,44 +477,27 @@ func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[strin
 	}
 }
 
-func resumeCommand(cfg app.Config, configPath string, noConfig bool, sessionID string, explicit map[string]bool) string {
-	parts := []string{"cake-repl", "-resume", shellQuote(sessionID)}
-	addFlag := func(name, value string) {
-		parts = append(parts, name, shellQuote(value))
-	}
-	addControl := func(name, value string, explicitFlag bool) {
-		if explicitFlag || value != "" {
-			addFlag(name, value)
+func resumeCommand(args []string, cwd, sessionID string) string {
+	parts := []string{"cake-repl"}
+	for _, arg := range args {
+		if arg == "--" {
+			break
 		}
+		if isResumeControlArg(arg) {
+			continue
+		}
+		parts = append(parts, shellQuote(arg))
 	}
-	if explicit["cake-bin"] || (cfg.CakeBin != "" && cfg.CakeBin != "cake") {
-		addFlag("-cake-bin", cfg.CakeBin)
-	}
-	if noConfig {
-		parts = append(parts, "-no-config")
-	} else {
-		addControl("-config", configPath, explicit["config"])
-	}
-	addFlag("-cwd", cfg.Cwd)
-	addControl("-model", cfg.Model, explicit["model"])
-	addControl("-profile", cfg.Profile, explicit["profile"])
-	addControl("-sandbox", cfg.Sandbox, explicit["sandbox"])
-	for _, dir := range cfg.AddDirs {
-		parts = append(parts, "-add-dir", shellQuote(dir))
-	}
-	for _, dir := range cfg.ToolboxDirs {
-		parts = append(parts, "-toolbox", shellQuote(dir))
-	}
-	addControl("-tools", cfg.Tools, explicit["tools"])
-	if cfg.NoTools {
-		parts = append(parts, "-no-tools")
-	}
-	if cfg.NoSkills {
-		parts = append(parts, "-no-skills")
-	}
-	addControl("-skills", cfg.Skills, explicit["skills"])
-	addControl("-system-prompt", cfg.SystemPrompt, explicit["system-prompt"])
+	parts = append(parts, "-cwd", shellQuote(cwd), "-resume", shellQuote(sessionID))
 	return strings.Join(parts, " ")
+}
+
+func isResumeControlArg(arg string) bool {
+	name := strings.TrimLeft(arg, "-")
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	return name == "resume" || name == "fork" || name == "cwd"
 }
 
 func shellQuote(s string) string {
