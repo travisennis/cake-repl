@@ -6,15 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"time"
 
 	"github.com/travisennis/cake-repl/internal/childproc"
 )
 
 const sessionsOutputLimit = 8 << 20
-
-const sessionsWaitDelay = 3 * time.Second
 
 type SessionSummary struct {
 	SessionID   string
@@ -26,8 +23,6 @@ type SessionsOptions struct {
 	Bin      string
 	Cwd      string
 	DebugLog io.Writer
-
-	waitDelay time.Duration
 }
 
 type sessionsEnvelope struct {
@@ -41,44 +36,36 @@ type sessionsEnvelope struct {
 }
 
 func ListSessions(ctx context.Context, opts SessionsOptions) ([]SessionSummary, error) {
-	cmd := exec.CommandContext(ctx, opts.Bin, "sessions", "list", "--json") // #nosec G204 -- opts.Bin intentionally comes from -cake-bin/config.
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
-	}
-	childproc.Isolate(cmd)
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
+	res := childproc.Execute(childproc.ExecuteOptions{
+		Context:            ctx,
+		Bin:                opts.Bin,
+		Args:               []string{"sessions", "list", "--json"},
+		Cwd:                opts.Cwd,
+		ImmediateGroupKill: true,
+		OutputLimit:        sessionsOutputLimit,
+		DebugLog:           opts.DebugLog,
+	})
+	if res.Err != nil || res.ExitCode != 0 {
+		cause := res.Err
+		switch {
+		case res.Canceled:
+			cause = errors.New("canceled")
+		case cause == nil:
+			cause = fmt.Errorf("exit status %d", res.ExitCode)
 		}
-		err := killGroup(cmd.Process.Pid)
-		if processGone(err) {
-			return nil
-		}
-		return err
-	}
-	cmd.WaitDelay = opts.waitDelay
-	if cmd.WaitDelay <= 0 {
-		cmd.WaitDelay = sessionsWaitDelay
-	}
-	stdout := childproc.NewCapWriter(sessionsOutputLimit)
-	stderr := childproc.NewTailBuffer(stderrLimit)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		msg := fmt.Sprintf("running %s sessions list: %v", opts.Bin, err)
-		if s := stderr.String(); s != "" {
-			msg += ": " + s
+		msg := fmt.Sprintf("running %s sessions list: %v", opts.Bin, cause)
+		if res.Stderr != "" {
+			msg += ": " + res.Stderr
 		}
 		return nil, errors.New(msg)
 	}
-	if stdout.Overflowed() {
+	if res.Overflowed {
 		return nil, fmt.Errorf("%s sessions list output exceeded %d bytes", opts.Bin, sessionsOutputLimit)
 	}
-	raw := stdout.Bytes()
 	if opts.DebugLog != nil {
-		fmt.Fprintf(opts.DebugLog, "sessions list: %s\n", raw)
+		fmt.Fprintf(opts.DebugLog, "sessions list: %s\n", res.Stdout)
 	}
-	return decodeSessions(raw)
+	return decodeSessions(res.Stdout)
 }
 
 func decodeSessions(raw []byte) ([]SessionSummary, error) {

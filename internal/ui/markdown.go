@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"github.com/travisennis/cake-repl/internal/ui/hyperlink"
 )
 
 var (
@@ -53,7 +54,7 @@ func RenderMarkdown(text string, width int) string {
 		return lipgloss.NewStyle().Width(width).Render(out)
 	}
 
-	return addHyperlinks(scrubKeepingSGR(out, ""), text)
+	return hyperlink.Add(scrubKeepingSGR(out, ""), text)
 }
 
 func getRendererLocked(width int, profile termenv.Profile) *glamour.TermRenderer {

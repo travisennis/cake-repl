@@ -2,20 +2,13 @@
 
 package cake
 
-import (
-	"errors"
-	"syscall"
-)
+import "syscall"
 
 func signalGroup(pgid int, sig syscall.Signal) error {
 	if pgid <= 0 {
 		return nil
 	}
 	return syscall.Kill(-pgid, sig)
-}
-
-func killGroup(pid int) error {
-	return signalGroup(pid, syscall.SIGKILL)
 }
 
 func (r *Run) Stop() error {
@@ -35,8 +28,4 @@ func (r *Run) signal(sig syscall.Signal) error {
 		return nil
 	}
 	return signalGroup(pid, sig)
-}
-
-func processGone(err error) bool {
-	return errors.Is(err, syscall.ESRCH)
 }

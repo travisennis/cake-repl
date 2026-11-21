@@ -137,7 +137,7 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 	if outputMode != ToolOutputHidden {
 		output := tool.Output
 		if keepOutputSGR(th) {
-			output = SanitizeToolOutput(output, true, styleOpen(th.ToolOutput.Width(width-2)))
+			output = SanitizeToolOutput(output, true, styleOpen(th.ToolOutput))
 		} else {
 			output = Sanitize(output)
 		}
@@ -151,7 +151,7 @@ func renderTool(th Theme, tool *ToolBlock, width int, outputLimit int, outputMod
 				out := trimPartialEscape(strings.TrimRight(output, "\n"))
 				lines = append(lines, renderFullToolOutput(th.ToolOutput, out, width-2))
 			} else {
-				lines = append(lines, indent(th.ToolOutput.Width(width-2).Render(TruncateOutput(output, outputLimit)), "  "))
+				lines = append(lines, indent(th.ToolOutput.Width(width-2).Render(TrimForDisplay(output, outputLimit)), "  "))
 			}
 		}
 	}
@@ -168,24 +168,12 @@ func showToolDetail(name string) bool {
 }
 
 func renderFullToolOutput(style lipgloss.Style, out string, width int) string {
-	wrapped := cellbuf.Wrap(out, width, "")
-	open, close := styleSequences(style)
-	var b strings.Builder
-	b.Grow(len(wrapped) + (len(open)+len(close)+2)*(strings.Count(wrapped, "\n")+1))
-	for {
-		line, rest, more := strings.Cut(wrapped, "\n")
-		if line != "" {
-			b.WriteString("  ")
-			b.WriteString(open)
-			b.WriteString(line)
-			b.WriteString(close)
-		}
-		if !more {
-			return b.String()
-		}
-		b.WriteByte('\n')
-		wrapped = rest
+	if width < 1 {
+		width = 1
 	}
+	open, close := styleSequences(style)
+	wrapped := cellbuf.Wrap(out, width, "")
+	return open + indent(wrapped, "  ") + close
 }
 
 func keepOutputSGR(th Theme) bool {

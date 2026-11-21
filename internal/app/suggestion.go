@@ -222,7 +222,6 @@ func (m *Model) showSuggestion(text string) {
 	m.suggestion.dropHeld()
 	m.writeSuggestionGhost(text)
 	m.layout()
-	m.contentChanged = true
 }
 
 func (m *Model) writeSuggestionGhost(text string) {
@@ -233,7 +232,6 @@ func (m *Model) writeSuggestionGhost(text string) {
 	}
 	if m.input.Placeholder != placeholder {
 		m.input.Placeholder = placeholder
-		m.contentChanged = true
 	}
 }
 
@@ -298,10 +296,11 @@ func (m *Model) fillSuggestion() {
 		return
 	}
 	m.clearSuggestion()
-	m.input.SetValue(text)
+	if m.setComposerValue(text) {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: composerTruncationWarning()})
+	}
 	m.suggestion.filledText = text
 	m.layout()
-	m.contentChanged = true
 }
 
 func (m Model) filledSuggestion() bool {
@@ -337,9 +336,9 @@ func suggestionFailureText(res suggest.Result, outputLimit int) string {
 	text := "prompt suggestion unavailable"
 	switch {
 	case res.Err != nil:
-		text += ": " + ui.TruncateOutput(res.Err.Error(), outputLimit)
+		text += ": " + ui.TrimForDisplay(res.Err.Error(), outputLimit)
 	case res.Stderr != "":
-		text += ": " + ui.TruncateOutput(res.Stderr, outputLimit)
+		text += ": " + ui.TrimForDisplay(res.Stderr, outputLimit)
 	case res.ExitCode >= 0:
 		text += fmt.Sprintf(" (exit code %d)", res.ExitCode)
 	}

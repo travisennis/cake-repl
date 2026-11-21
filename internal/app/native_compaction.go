@@ -138,7 +138,7 @@ func (m *Model) removeNativeNotice() {
 func nativeCompactionFailedText(reason string, outputLimit int) string {
 	text := "context compaction failed"
 	if reason = strings.TrimSpace(reason); reason != "" {
-		text += ": " + ui.TruncateOutput(reason, outputLimit)
+		text += ": " + ui.TrimForDisplay(reason, outputLimit)
 	}
 	return text
 }

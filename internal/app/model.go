@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -88,10 +87,13 @@ const (
 	maxHistoryEntries        = 1000
 	jsonlPrefix              = "\x02"
 	maxHistoryRecordBytes    = 1 << 20
+	maxComposerLines         = 1000
+	maxComposerBytes         = 1 << 20
 
 	defaultInputPlaceholder = "Type a prompt…"
 
-	inlineViewportMax = 12
+	inlineViewportMax  = 12
+	frameSafetyColumns = 2
 )
 
 type Model struct {
@@ -134,8 +136,6 @@ type Model struct {
 	pendingCalls   map[string]*ui.ToolBlock
 	toolOutputMode ui.ToolOutputMode
 
-	contentChanged bool
-
 	completionPrefix  string
 	completionMatches []string
 	completionIdx     int
@@ -149,8 +149,6 @@ type Model struct {
 	sessionListReq    uint64
 	sessionListCancel context.CancelFunc
 	sessionListDone   map[uint64]chan struct{}
-
-	clipboard func(string) error
 }
 
 func New(cfg Config) Model {
@@ -163,7 +161,7 @@ func New(cfg Config) Model {
 	input.BlurredStyle.Placeholder = th.Placeholder
 	input.ShowLineNumbers = false
 	input.CharLimit = 0
-	input.MaxHeight = 0
+	input.MaxHeight = maxComposerLines
 	input.SetHeight(minInputHeight)
 	input.Focus()
 
@@ -179,7 +177,6 @@ func New(cfg Config) Model {
 		sessionList:     newSessionList(),
 		sessionListDone: map[uint64]chan struct{}{},
 		pendingCalls:    map[string]*ui.ToolBlock{},
-		clipboard:       clipboard.WriteAll,
 		toolOutputMode:  ui.ToolOutputHidden,
 		session:         newSessionState(cfg.InitialMode, cfg.ResumeID),
 		turn:            turnSelection{Model: cfg.Model, Profile: cfg.Profile},
@@ -317,7 +314,6 @@ func (m Model) SessionData() (sessionID, cwd string) {
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		textarea.Blink,
-		settleSweepAtStartupCmd(),
 		m.titleCmd(),
 	}
 	if cmd := startTrustProbeCmd(m.cfg); cmd != nil {
@@ -449,7 +445,6 @@ func (m *Model) syncViewport() {
 	if !m.timeline.takeDirty() {
 		return
 	}
-	m.contentChanged = true
 	atBottom := m.viewport.AtBottom()
 	yOffset := m.viewport.YOffset
 	m.viewport.SetContent(m.timeline.content())
@@ -464,8 +459,9 @@ func (m *Model) layout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
+	frameWidth := m.frameWidth()
 	inputHeight := inputHeightFor(m.input.LineCount())
-	inputWidth := m.width - composerHorizontalChrome
+	inputWidth := frameWidth - composerHorizontalChrome
 	if inputWidth < 1 {
 		inputWidth = 1
 	}
@@ -481,22 +477,30 @@ func (m *Model) layout() {
 	}
 	m.resizeSessionList(vpHeight)
 	if !m.ready {
-		m.viewport = viewport.New(m.width, vpHeight)
+		m.viewport = viewport.New(frameWidth, vpHeight)
 		m.ready = true
-		m.timeline.resize(m.width, m.renderTimelineItem)
+		m.timeline.resize(frameWidth, m.renderTimelineItem)
 		return
 	}
 
 	atBottom := m.viewport.AtBottom()
 	m.viewport.Height = vpHeight
-	if m.viewport.Width != m.width {
-		m.viewport.Width = m.width
-		m.timeline.resize(m.width, m.renderTimelineItem)
+	if m.viewport.Width != frameWidth {
+		m.viewport.Width = frameWidth
+		m.timeline.resize(frameWidth, m.renderTimelineItem)
 		return
 	}
 	if atBottom {
 		m.viewport.GotoBottom()
 	}
+}
+
+func (m Model) frameWidth() int {
+	w := m.width - frameSafetyColumns
+	if w < 1 {
+		return 1
+	}
+	return w
 }
 
 func inputHeightFor(n int) int {

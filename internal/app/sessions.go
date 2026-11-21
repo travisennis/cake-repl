@@ -40,7 +40,7 @@ func newSessionList() list.Model {
 }
 
 func (m *Model) resizeSessionList(viewportHeight int) {
-	w, h := m.width, browserBodyHeight(viewportHeight)
+	w, h := m.frameWidth(), browserBodyHeight(viewportHeight)
 	if m.sessionList.Width() == w && m.sessionList.Height() == h {
 		return
 	}

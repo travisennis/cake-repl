@@ -213,7 +213,7 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 		case msg.res.ExitCode != 0:
 			text := fmt.Sprintf("session replay failed with exit code %d", msg.res.ExitCode)
 			if msg.res.Stderr != "" {
-				text += "\n" + ui.TruncateOutput(msg.res.Stderr, m.cfg.OutputLimit)
+				text += "\n" + ui.TrimForDisplay(msg.res.Stderr, m.cfg.OutputLimit)
 			}
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: text})
 		}

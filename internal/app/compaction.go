@@ -220,7 +220,7 @@ func (m *Model) skipCompactionNotice(it ui.Item) {
 func compactionSkippedText(reason string, outputLimit int) string {
 	text := "context compaction skipped"
 	if reason = strings.TrimSpace(reason); reason != "" {
-		text += ": " + ui.TruncateOutput(reason, outputLimit)
+		text += ": " + ui.TrimForDisplay(reason, outputLimit)
 	}
 	return text
 }
@@ -270,7 +270,7 @@ func compactionFailureText(res compact.Result, outputLimit int) string {
 	case res.Err != nil:
 		text += ": " + res.Err.Error()
 	case res.Stderr != "":
-		text += ": " + ui.TruncateOutput(res.Stderr, outputLimit)
+		text += ": " + ui.TrimForDisplay(res.Stderr, outputLimit)
 	case res.ExitCode >= 0:
 		text += fmt.Sprintf(" (exit code %d)", res.ExitCode)
 	}

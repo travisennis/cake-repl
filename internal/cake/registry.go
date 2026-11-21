@@ -1,6 +1,10 @@
 package cake
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/travisennis/cake-repl/internal/childproc"
+)
 
 type Registry struct {
 	mu   sync.Mutex
@@ -81,7 +85,7 @@ func (r *Registry) ContinueAll() {
 }
 
 func (r *Registry) logFailure(action string, run *Run, err error) {
-	if err == nil || processGone(err) || r.logf == nil {
+	if err == nil || childproc.ProcessGone(err) || r.logf == nil {
 		return
 	}
 	r.logf("suspend: %s engine run %d failed: %v", action, run.pid.Load(), err)

@@ -124,7 +124,7 @@ func summarizeWrite(argsJSON string) string {
 	return s
 }
 
-func TruncateOutput(s string, limit int) string {
+func TrimForDisplay(s string, limit int) string {
 	s = strings.TrimRight(s, "\n")
 	if limit <= 0 {
 		limit = DefaultOutputLimit
@@ -135,12 +135,12 @@ func TruncateOutput(s string, limit int) string {
 	return cutAndMark(s, limit)
 }
 
-func CapOutputBytes(s string, limit int) string {
+func CapOwned(s string, limit int) string {
 	if limit <= 0 {
 		limit = DefaultOutputLimit
 	}
 	if len(s) <= limit {
-		return s
+		return strings.Clone(s)
 	}
 	return cutAndMark(s, limit)
 }

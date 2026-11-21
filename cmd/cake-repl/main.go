@@ -381,16 +381,6 @@ func shutdownAfterProgram(m tea.Model, children *childproc.Registry) (app.Model,
 	return app.Model{}, false, children.Shutdown(app.ChildTeardownTimeout)
 }
 
-type terminalProgram interface {
-	ReleaseTerminal() error
-	RestoreTerminal() error
-}
-
-type engineRuns interface {
-	StopAll()
-	ContinueAll()
-}
-
 func suspendLogf(w io.Writer) func(string, ...any) {
 	return func(format string, args ...any) {
 		if w != nil {

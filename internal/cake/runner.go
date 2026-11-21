@@ -6,12 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
-	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -54,10 +50,7 @@ type Options struct {
 	DebugLog     io.Writer
 	Registry     *Registry
 
-	afterWait  func()
-	afterStart func(*Run)
-	replay     bool
-	waitDelay  time.Duration
+	replay bool
 }
 
 type ReplayOptions struct {
@@ -157,18 +150,11 @@ const (
 	processStarting processPhase = iota
 	processRunning
 	processCancelRequested
-	processGraceArmed
-	processGroupKilled
 	processReaped
 )
 
 func (p processPhase) cancelRequested() bool {
-	switch p {
-	case processCancelRequested, processGraceArmed, processGroupKilled:
-		return true
-	default:
-		return false
-	}
+	return p == processCancelRequested
 }
 
 type Run struct {
@@ -178,9 +164,7 @@ type Run struct {
 	cancel context.CancelFunc
 	pid    atomic.Int64
 	phase  atomic.Uint32
-
-	mu         sync.Mutex
-	graceTimer *time.Timer
+	cmd    *childproc.Command
 }
 
 func (r *Run) currentPhase() processPhase {
@@ -210,30 +194,14 @@ func (r *Run) beginCancel() bool {
 	}
 }
 
-func (r *Run) armGrace() bool {
-	if r == nil {
-		return false
-	}
-	return r.phase.CompareAndSwap(uint32(processCancelRequested), uint32(processGraceArmed))
-}
-
-func (r *Run) markGroupKilled() bool {
-	if r == nil {
-		return false
-	}
-	return r.phase.CompareAndSwap(uint32(processGraceArmed), uint32(processGroupKilled))
-}
-
 func (r *Run) markReaped() {
 	if r == nil {
 		return
 	}
-	r.mu.Lock()
 	r.phase.Store(uint32(processReaped))
-	if r.graceTimer != nil {
-		r.graceTimer.Stop()
+	if r.cmd != nil {
+		r.cmd.Reaped()
 	}
-	r.mu.Unlock()
 }
 
 func (r *Run) Cancel() {
@@ -242,31 +210,6 @@ func (r *Run) Cancel() {
 	}
 }
 
-func (r *Run) armGroupKill(delay time.Duration, logf io.Writer) {
-	if r == nil {
-		return
-	}
-	pid := int(r.pid.Load())
-	if pid <= 0 || !r.armGrace() {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.currentPhase() == processReaped {
-		return
-	}
-	r.graceTimer = time.AfterFunc(delay, func() {
-		if !r.markGroupKilled() {
-			return
-		}
-		if err := killGroup(pid); err != nil && !processGone(err) && logf != nil {
-			fmt.Fprintf(logf, "cancel: killing process group %d failed: %v\n", pid, err)
-		}
-	})
-}
-
-const stderrLimit = 8 * 1024
-
 func Start(opts Options) (*Run, error) {
 	return start(context.Background(), opts)
 }
@@ -274,62 +217,34 @@ func Start(opts Options) (*Run, error) {
 func start(parent context.Context, opts Options) (*Run, error) {
 	ctx, cancel := context.WithCancel(parent)
 
-	cmd := exec.CommandContext(ctx, opts.Bin, opts.Args()...) // #nosec G204 -- opts.Bin intentionally comes from -cake-bin/config.
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
-	}
-	childproc.Isolate(cmd)
-
-	grace := opts.waitDelay
-	if grace <= 0 {
-		grace = 3 * time.Second
-	}
-	cmd.WaitDelay = grace + time.Second
-
+	grace := childproc.DefaultGrace
 	events := make(chan Event, 64)
 	result := make(chan Result, 1)
 	done := make(chan struct{})
 	run := &Run{Events: events, Result: result, Done: done, cancel: cancel}
 
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return errors.New("process has not started")
-		}
-		var err error
-		if runtime.GOOS == "windows" {
-			err = cmd.Process.Kill()
-		} else {
-			err = cmd.Process.Signal(syscall.SIGTERM)
-		}
-		if err != nil {
-			return err
-		}
-		if run.beginCancel() && runtime.GOOS != "windows" {
-			run.armGroupKill(grace, opts.DebugLog)
-		}
-		return nil
-	}
+	cmd := childproc.NewCommand(ctx, opts.Bin, opts.Args(), opts.Cwd, childproc.CommandOptions{
+		WaitDelay: grace + time.Second,
+		Grace:     grace,
+		OnCancel:  run.beginCancel,
+		DebugLog:  opts.DebugLog,
+	})
+	run.cmd = cmd
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("opening stdout pipe: %w", err)
 	}
-	stderr := childproc.NewTailBuffer(stderrLimit)
+	stderr := childproc.NewTailBuffer(childproc.DefaultStderr)
 	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("starting %s: %w", opts.Bin, err)
 	}
-	if opts.afterStart != nil {
-		opts.afterStart(run)
-	}
 	run.pid.Store(int64(cmd.Process.Pid))
 	run.markRunning()
-	if run.currentPhase() == processCancelRequested {
-		run.armGroupKill(grace, opts.DebugLog)
-	}
 	if opts.Registry != nil {
 		opts.Registry.Add(run)
 	}
@@ -382,10 +297,7 @@ func start(parent context.Context, opts Options) (*Run, error) {
 		if opts.Registry != nil {
 			opts.Registry.Remove(run)
 		}
-		if opts.afterWait != nil {
-			opts.afterWait()
-		}
-		outcome := childproc.Classify(cmd, waitErr, ctx.Err(), cancelRequested, stderr)
+		outcome := childproc.Classify(cmd.Cmd, waitErr, ctx.Err(), cancelRequested, stderr)
 		res := Result{
 			ExitCode: outcome.ExitCode,
 			Stderr:   outcome.Stderr,

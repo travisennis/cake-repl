@@ -21,7 +21,7 @@ func (m Model) View() string {
 	composer := ui.PromptComposer(
 		m.theme,
 		m.input.View(),
-		m.width,
+		m.frameWidth(),
 		p.activityLabel(),
 		m.input.LineCount(),
 		p.hint,
@@ -34,9 +34,10 @@ func (m Model) View() string {
 }
 
 func (m Model) browserView(p presentation) string {
+	width := m.frameWidth()
 	bodyHeight := browserBodyHeight(m.viewport.Height)
-	fill := lipgloss.NewStyle().Width(m.width).Height(bodyHeight).MaxWidth(m.width).MaxHeight(bodyHeight)
-	capBody := lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(bodyHeight)
+	fill := lipgloss.NewStyle().Width(width).Height(bodyHeight).MaxWidth(width).MaxHeight(bodyHeight)
+	capBody := lipgloss.NewStyle().MaxWidth(width).MaxHeight(bodyHeight)
 
 	var body string
 	switch m.browser.phase {
@@ -52,7 +53,7 @@ func (m Model) browserView(p presentation) string {
 	if m.viewport.Height <= 1 {
 		return body
 	}
-	hint := m.theme.PromptHint.MaxWidth(m.width).MaxHeight(1).Render(p.hint)
+	hint := m.theme.PromptHint.MaxWidth(width).MaxHeight(1).Render(p.hint)
 	return body + "\n" + hint
 }
 
@@ -81,7 +82,7 @@ func (m Model) statusLineFor(p presentation) string {
 		context = ui.ContextValue(c.Tokens, c.Window, c.Estimated)
 	}
 
-	return ui.StatusLine(m.theme, m.width, ui.Status{
+	return ui.StatusLine(m.theme, m.frameWidth(), ui.Status{
 		State:   state,
 		Session: session,
 		Next:    next,

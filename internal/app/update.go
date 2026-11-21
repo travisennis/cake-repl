@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -18,12 +19,10 @@ import (
 
 const maxEventsPerBatch = 10
 
-const settleDelay = 300 * time.Millisecond
-
 const maxRetainedToolOutputBytes = 1 << 20
 
 func capRetainedToolOutput(output string) string {
-	return ui.CapOutputBytes(output, maxRetainedToolOutputBytes)
+	return ui.CapOwned(output, maxRetainedToolOutputBytes)
 }
 
 type eventsMsg struct {
@@ -95,41 +94,8 @@ func (m Model) startSessionListLoad() (Model, tea.Cmd) {
 	}
 }
 
-type settleSweepMsg struct{}
-
-func settleSweepCmd() tea.Cmd {
-	return tea.Tick(settleDelay, func(time.Time) tea.Msg { return settleSweepMsg{} })
-}
-
-func settleSweepAtStartupCmd() tea.Cmd {
-	return func() tea.Msg { return settleSweepMsg{} }
-}
-
-func (m Model) settleSweep() (Model, tea.Cmd) {
-	next := settleSweepCmd()
-	if !m.ready || !m.contentChanged {
-		return m, next
-	}
-	m.contentChanged = false
-	if repaint := m.repaintCmd(); repaint != nil {
-		return m, tea.Batch(repaint, next)
-	}
-	return m, next
-}
-
-func (m Model) repaintCmd() tea.Cmd {
-	if m.width <= 0 || m.height <= 0 {
-		return nil
-	}
-	w, h := m.width, m.height
-	return func() tea.Msg { return tea.WindowSizeMsg{Width: w, Height: h} }
-}
-
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case settleSweepMsg:
-		return m.settleSweep()
-
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
@@ -221,7 +187,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sessionListCancel = nil
 		if msg.err != nil {
-			m.browser.failed(ui.TruncateOutput(msg.err.Error(), m.cfg.OutputLimit))
+			m.browser.failed(ui.TrimForDisplay(msg.err.Error(), m.cfg.OutputLimit))
 			m.resetSessionList()
 			return m, nil
 		}
@@ -244,10 +210,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		if msg.Paste {
+			model := m.handlePaste(string(msg.Runes))
+			model.syncViewport()
+			return model, nil
+		}
 		mm, cmd := m.handleKey(msg)
 		m = mm.(Model)
 		m.syncViewport()
-		m.contentChanged = true
 		return m, cmd
 	}
 
@@ -341,7 +311,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.input.Line() == 0 {
 			if text, ok := m.history.Prev(m.input.Value()); ok {
 				m.hideSuggestionForHistory()
-				m.input.SetValue(text)
+				m.setComposerValue(text)
 				m.layout()
 				return m, nil
 			}
@@ -351,7 +321,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.input.Line() == m.input.LineCount()-1 {
 			if text, ok := m.history.Next(); ok {
 				m.hideSuggestionForHistory()
-				m.input.SetValue(text)
+				m.setComposerValue(text)
 				m.layout()
 				return m, nil
 			}
@@ -370,6 +340,57 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.layout()
 	return m, cmd
+}
+
+func (m Model) handlePaste(text string) Model {
+	if m.exiting() || m.browser.open() || text == "" {
+		return m
+	}
+	m.hideSuggestion()
+	m.completionPrefix = ""
+	m.completionMatches = nil
+	m.completionIdx = 0
+	bounded, truncated := boundComposerText(text, m.input.LineCount())
+	if bounded != "" {
+		m.input.InsertString(bounded)
+	}
+	if truncated {
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: composerTruncationWarning()})
+	}
+	m.layout()
+	return m
+}
+
+func (m *Model) setComposerValue(text string) bool {
+	bounded, truncated := boundComposerText(text, 1)
+	m.input.SetValue(bounded)
+	return truncated
+}
+
+func boundComposerText(text string, currentLines int) (string, bool) {
+	truncated := false
+	if len(text) > maxComposerBytes {
+		cut := maxComposerBytes
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+		truncated = true
+	}
+	allowed := maxComposerLines - currentLines + 1
+	if allowed < 1 {
+		allowed = 1
+	}
+	if strings.Count(text, "\n")+1 > allowed {
+		lines := strings.Split(text, "\n")
+		text = strings.Join(lines[:allowed], "\n")
+		truncated = true
+	}
+	return text, truncated
+}
+
+func composerTruncationWarning() string {
+	return fmt.Sprintf("pasted text truncated at %d lines or %d MiB", maxComposerLines, maxComposerBytes>>20)
 }
 
 func (m Model) handleBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -429,10 +450,9 @@ func (m Model) toggleToolOutput() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) clipboardCmd(text string, sessionID bool) tea.Cmd {
-	write := m.clipboard
 	chars := utf8.RuneCountInString(text)
 	return func() tea.Msg {
-		return clipboardResultMsg{sessionID: sessionID, chars: chars, err: write(text)}
+		return clipboardResultMsg{sessionID: sessionID, chars: chars, err: clipboard.WriteAll(text)}
 	}
 }
 
@@ -959,7 +979,7 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 		result = outcomeFailure
 		text := fmt.Sprintf("cake exited with code %d", res.ExitCode)
 		if res.Stderr != "" {
-			text += "\n" + ui.TruncateOutput(res.Stderr, m.cfg.OutputLimit)
+			text += "\n" + ui.TrimForDisplay(res.Stderr, m.cfg.OutputLimit)
 		}
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: text})
 	case !m.sawComplete:
