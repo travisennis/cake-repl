@@ -327,6 +327,12 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
+	if err = freezeRelativeDataDir(cfg.Cwd); err != nil {
+		return err
+	}
+	if !explicit["config"] && !*f.noConfig {
+		cfg.ReloadProjectHelpers = projectHelpers
+	}
 
 	if *f.debugLog != "" {
 		var logFile *os.File
@@ -401,6 +407,37 @@ func suspendLogf(w io.Writer) func(string, ...any) {
 			fmt.Fprintf(w, format+"\n", args...)
 		}
 	}
+}
+
+func freezeRelativeDataDir(cwd string) error {
+	value, ok := os.LookupEnv("CAKE_DATA_DIR")
+	if !ok || value == "" || filepath.IsAbs(value) {
+		return nil
+	}
+	resolved, err := filepath.Abs(filepath.Join(cwd, value))
+	if err != nil {
+		return fmt.Errorf("resolving CAKE_DATA_DIR: %w", err)
+	}
+	return os.Setenv("CAKE_DATA_DIR", resolved)
+}
+
+func projectHelpers(cwd string) (app.ProjectHelpers, error) {
+	xdgPath, _ := config.DefaultPaths()
+	xdgCfg, err := config.Load(xdgPath)
+	if err != nil {
+		return app.ProjectHelpers{}, fmt.Errorf("loading XDG config %s: %w", xdgPath, err)
+	}
+	localCfg, _, err := config.LoadProject(filepath.Join(cwd, ".cake-repl.toml"))
+	if err != nil {
+		return app.ProjectHelpers{}, fmt.Errorf("loading project-local config: %w", err)
+	}
+	merged := config.Merge(xdgCfg, localCfg)
+	compaction := config.MergeCompaction(config.DefaultCompaction(), merged)
+	suggestions := config.MergeSuggestions(config.DefaultSuggestions(), merged)
+	return app.ProjectHelpers{
+		CompactionEnabled:  compaction.Enabled,
+		SuggestionsEnabled: suggestions.Enabled,
+	}, nil
 }
 
 func loadStartupConfig(configPath string, explicitConfig, noConfig bool, warnings io.Writer) (*config.Config, error) {
@@ -524,7 +561,7 @@ func resumeCommand(args []string, cwd, sessionID string) string {
 			}
 			continue
 		case resumeHintDisplayFlags[name]:
-			if !inlineValue && i+1 < len(args) {
+			if !inlineValue && resumeFlagTakesValue(name) && i+1 < len(args) {
 				i++
 			}
 			continue

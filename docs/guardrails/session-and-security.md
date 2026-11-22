@@ -52,7 +52,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   context from its `estimated_input.after_tokens`, always marked with `~`; a
   newer complete `turn_usage`, replayed or live, replaces it. A replay failure
   or unsupported cake binary produces a warning and leaves the explicit
-  `--resume <uuid>` pin unchanged so the user can continue.
+  `--resume <uuid>` pin unchanged so the user can continue. When the replay
+  restores the session's working directory, the safe helper opt-outs in that
+  directory's `.cake-repl.toml` are loaded before a suggestion or compaction
+  can start. A malformed restored project file disables both helpers and adds
+  one warning; it never aborts the resume.
 - **Startup session picker.** A bare `-resume` names no session, so it hydrates
   nothing: no replay is started and no pin is set. It opens the same idle
   browser `/sessions` opens, and the pick takes the `/resume <uuid>` transition,

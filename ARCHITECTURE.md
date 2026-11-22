@@ -197,16 +197,20 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   gate. One admission source and one presentation derivation serve submit,
   slash commands, Ctrl+C, the title, status line, and composer. See
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
-- **Config is startup-only.** Config files set stable REPL defaults before the
-  TUI starts, using hardcoded defaults < XDG config < project-local config <
-  CLI flags. The automatic project-local layer cannot set `cake-bin`: that key
-  is ignored with a startup warning, so executable selection comes only from
-  XDG config, explicit `-config`, or `-cake-bin`. Session-specific values stay
-  outside the persisted config shape. A fresh prompt passes the resolved
-  defaults to cake. Once the target is a resume, only explicitly set run
-  controls are passed; cake restores `session_meta.run_config` and the stored
-  working directory, so config-derived model/profile and the hardcoded sandbox
-  default do not override the session.
+- **Config is loaded at startup and refreshed once for a restored cwd.**
+  Config files set stable REPL defaults before the TUI starts, using hardcoded
+  defaults < XDG config < project-local config < CLI flags. The automatic
+  project-local layer cannot set `cake-bin`: that key is ignored with a startup
+  warning, so executable selection comes only from XDG config, explicit
+  `-config`, or `-cake-bin`. Session-specific values stay outside the persisted
+  config shape. A fresh prompt passes the resolved defaults to cake. Once the
+  target is a resume, only explicitly set run controls are passed; cake restores
+  `session_meta.run_config` and the stored working directory, so config-derived
+  model/profile and the hardcoded sandbox default do not override the session.
+  A startup resume that restores the working directory reloads that directory's
+  safe `.cake-repl.toml` helper opt-outs before suggestions or compaction can
+  start. A relative `CAKE_DATA_DIR` is frozen against the startup run directory
+  before replay, so both children use one store.
 - **One mutating cake run at a time.** Submitting while a task runs is rejected;
   the model tracks a single live `*cake.Run`. The read-only project-trust probe
   and session listing are separate bounded diagnostics; neither mutates a
@@ -222,8 +226,9 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   appends its whole-second age as a background indicator (`idle · suggesting
   3s`), refreshed from the spinner tick; the composer state and hint stay
   unchanged because the request never gates input. Its model/profile resolve
-  from `[suggestions]` first and then the turn selection; reasoning effort comes
-  from `[suggestions]` when set. A result is applied only
+  from `[suggestions]` first and then the effective turn selection (an explicit
+  `/model`/`/profile`, or the replayed session value on resume); reasoning
+  effort comes from `[suggestions]` when set. A result is applied only
   while the request identity, session pin, idle state, and empty composer all
   still match; one that arrives while compaction gates the composer is held and
   applied after the compactor settles. It appears as dim placeholder ghost text

@@ -632,7 +632,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.modelSelectionStatus()})
 		case "default":
 			m.selectModel("")
-			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt model: (cake default)"})
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.selectionClearedText("model")})
 		default:
 			m.selectModel(cmd.Arg)
 			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt model: " + cmd.Arg})
@@ -644,7 +644,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.profileSelectionStatus()})
 		case "default":
 			m.selectProfile("")
-			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt profile: (cake default)"})
+			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: m.selectionClearedText("profile")})
 		default:
 			m.selectProfile(cmd.Arg)
 			m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt profile: " + cmd.Arg})
@@ -661,14 +661,19 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 func (m *Model) selectModel(model string) {
 	m.turn.Model = model
 	m.turn.ModelExplicit = model != ""
-	m.session.Model = ""
+	if mode, _ := m.session.RunOptions(); mode != cake.RunResume {
+		m.session.Model = ""
+	}
 	m.session.Context = nil
 }
 
 func (m *Model) selectProfile(profile string) {
 	m.turn.Profile = profile
 	m.turn.ProfileExplicit = profile != ""
-	m.session.Model = ""
+	if mode, _ := m.session.RunOptions(); mode != cake.RunResume {
+		m.session.Model = ""
+		m.session.Profile = ""
+	}
 	m.session.Context = nil
 }
 
@@ -680,10 +685,17 @@ func (m Model) modelSelectionStatus() string {
 }
 
 func (m Model) profileSelectionStatus() string {
-	if m.turn.Profile != "" {
-		return "profile: " + m.turn.Profile
+	if profile := m.effectiveProfile(); profile != "" {
+		return "profile: " + profile
 	}
 	return "profile: (cake default)"
+}
+
+func (m Model) selectionClearedText(kind string) string {
+	if mode, _ := m.session.RunOptions(); mode == cake.RunResume {
+		return "next prompt " + kind + ": (stored session value)"
+	}
+	return "next prompt " + kind + ": (cake default)"
 }
 
 func (m Model) resumeSession(id string) (tea.Model, tea.Cmd) {
@@ -814,9 +826,15 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 				m.session.SessionID = e.SessionID
 			}
 			m.session.OnModel(e.ModelConfig, e.Model)
+			if e.RunConfig != nil && e.RunConfig.Profile != "" {
+				m.session.OnProfile(e.RunConfig.Profile)
+			} else {
+				m.session.OnProfile(e.Profile)
+			}
 			if m.cfg.RestoreCwd && e.Cwd != "" {
 				if info, err := os.Stat(e.Cwd); err == nil && info.IsDir() {
 					m.cfg.Cwd = e.Cwd
+					m.applyRestoredProjectHelpers(e.Cwd)
 					m.cfg.RestoreCwd = false
 					cwdRestored = true
 				} else {
@@ -958,6 +976,24 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 		m.logDebug("unknown event type: " + e.Type)
 	}
 	return cwdRestored
+}
+
+func (m *Model) applyRestoredProjectHelpers(cwd string) {
+	if m.cfg.ReloadProjectHelpers == nil {
+		return
+	}
+	helpers, err := m.cfg.ReloadProjectHelpers(cwd)
+	if err != nil {
+		m.cfg.Compaction.Enabled = false
+		m.cfg.Suggestions.Enabled = false
+		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "project config: " + err.Error()})
+		return
+	}
+	if m.cfg.NoSession {
+		return
+	}
+	m.cfg.Compaction.Enabled = helpers.CompactionEnabled
+	m.cfg.Suggestions.Enabled = helpers.SuggestionsEnabled
 }
 
 func (m *Model) logDebug(text string) {

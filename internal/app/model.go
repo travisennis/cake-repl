@@ -23,36 +23,37 @@ import (
 )
 
 type Config struct {
-	CakeBin          string
-	Cwd              string
-	RestoreCwd       bool
-	Explicit         map[string]bool
-	Model            string
-	Profile          string
-	Tools            string
-	NoTools          bool
-	AddDirs          []string
-	ToolboxDirs      []string
-	Sandbox          string
-	NoSkills         bool
-	Skills           string
-	SystemPrompt     string
-	Fork             bool
-	ForkID           string
-	NoSession        bool
-	InitialMode      cake.RunMode
-	ResumeID         string
-	StartupPicker    bool
-	DebugLog         io.Writer
-	Runs             *cake.Registry
-	Children         *childproc.Registry
-	HistoryFile      string
-	OutputLimit      int
-	MaxTimelineItems int
-	ToolColor        bool
-	Inline           bool
-	Compaction       CompactionConfig
-	Suggestions      SuggestionConfig
+	CakeBin              string
+	Cwd                  string
+	RestoreCwd           bool
+	Explicit             map[string]bool
+	ReloadProjectHelpers func(cwd string) (ProjectHelpers, error)
+	Model                string
+	Profile              string
+	Tools                string
+	NoTools              bool
+	AddDirs              []string
+	ToolboxDirs          []string
+	Sandbox              string
+	NoSkills             bool
+	Skills               string
+	SystemPrompt         string
+	Fork                 bool
+	ForkID               string
+	NoSession            bool
+	InitialMode          cake.RunMode
+	ResumeID             string
+	StartupPicker        bool
+	DebugLog             io.Writer
+	Runs                 *cake.Registry
+	Children             *childproc.Registry
+	HistoryFile          string
+	OutputLimit          int
+	MaxTimelineItems     int
+	ToolColor            bool
+	Inline               bool
+	Compaction           CompactionConfig
+	Suggestions          SuggestionConfig
 }
 
 type turnSelection struct {
@@ -60,6 +61,11 @@ type turnSelection struct {
 	Profile         string
 	ModelExplicit   bool
 	ProfileExplicit bool
+}
+
+type ProjectHelpers struct {
+	CompactionEnabled  bool
+	SuggestionsEnabled bool
 }
 
 type CompactionConfig struct {

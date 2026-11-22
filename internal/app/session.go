@@ -10,6 +10,7 @@ type sessionState struct {
 	ResumeID     string
 	LastComplete *cake.TaskComplete
 	Model        string
+	Profile      string
 	AnnouncedID  string
 	Context      *ContextUsage
 }
@@ -46,6 +47,12 @@ func (s *sessionState) OnModel(modelConfig, model string) {
 		s.Model = modelConfig
 	case model != "":
 		s.Model = model
+	}
+}
+
+func (s *sessionState) OnProfile(profile string) {
+	if profile != "" {
+		s.Profile = profile
 	}
 }
 
@@ -122,6 +129,7 @@ func (s *sessionState) UseResume(id string) {
 		s.TaskID = ""
 		s.AnnouncedID = ""
 		s.Model = ""
+		s.Profile = ""
 		s.Context = nil
 	}
 	s.NextMode = cake.RunResume

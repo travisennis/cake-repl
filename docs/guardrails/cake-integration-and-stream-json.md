@@ -30,11 +30,12 @@ consumes cake events. This is the project's core external contract.
   `usage`, `turn_usage` + `usage`, `compaction`, and `replay_error`) mirror
   cake's wire format.
   Field names and JSON tags are the contract; do not rename or repurpose them to
-  match cake's output. `session_meta` carries `working_directory` and the
-  optional model identity (`model` is the provider model ID, `model_config` the
-  `[[models]]` entry name); `task_start` gains the same optional pair with
-  cake#664, and `task_complete` decodes it ahead of any cake that reports it
-  there. These fields feed the status-line model under.
+  match cake's output. `session_meta` carries `working_directory`, the optional
+  model identity (`model` is the provider model ID, `model_config` the
+  `[[models]]` entry name), and the optional stored `run_config`; this client
+  reads `run_config.profile` for helper fallbacks. `task_start` gains the same
+  optional model pair with cake#664, and `task_complete` decodes it ahead of any
+  cake that reports it there. These fields feed the status-line model under.
 - **Per-turn usage (`turn_usage`).** Live and replayed streams emit a
   `turn_usage` record for every main-agent provider attempt that reports usage;
   summary and compaction attempts are not streamed as context measurements. It
@@ -99,7 +100,9 @@ consumes cake events. This is the project's core external contract.
   controlling terminal. The child inherits the REPL's environment and runs in
   the same `-cwd`, so `CAKE_DATA_DIR` selects the same root and a relative
   `-cake-bin` resolves in that directory; the REPL does not reimplement Cake's
-  data-directory layout.
+  data-directory layout. A relative `CAKE_DATA_DIR` is resolved against the
+  startup run directory before replay starts, so a later cwd restoration cannot
+  make replay and the live turn read different stores.
 - **External suggester (`internal/suggest`).** The opt-in prompt suggester is
   invoked only as
   `cake-suggest suggest -json [-cake-bin <path>] [-model <name>] [-profile <name>]
@@ -130,8 +133,11 @@ consumes cake events. This is the project's core external contract.
   timeout warns at most once per REPL process. The process uses the same
   subprocess discipline as a cake run: model-owned context, SIGTERM then
   `WaitDelay`, bounded stdout/stderr, `internal/childproc` isolation, and a
-  content-free debug-log line. Quit and the unobserved-exit teardown drain an
-  in-flight request, so its canceled child is reaped before the REPL returns.
+  content-free debug-log line. Its model/profile resolve from `[suggestions]`
+  first and then the effective turn selection: an explicit `/model`/`/profile`,
+  or the replayed session value on resume. Quit and the unobserved-exit teardown
+  drain an in-flight request, so its canceled child is reaped before the REPL
+  returns.
   It never reads or writes a session file.
 - **Engine isolation.** No reading cake session files, no parsing cake's
   human-readable output, no importing cake internals. The CLI (NDJSON streams

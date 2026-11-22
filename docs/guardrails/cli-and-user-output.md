@@ -119,17 +119,24 @@ renders it in plain text like every other surface.
   `--add-dir`/`--toolbox`/`--mcp-config` paths, tool and skill selections, an
   explicit `--system-prompt` path, and `--no-runtime-context`) and the stored
   working directory. The hardcoded sandbox default and config-derived
-  model/profile are fresh-session defaults only. An explicit empty value is
-  treated as unset and cannot clear a stored choice; start a new session to
-  change it permanently. The command `main` prints on exit echoes only the
+  model/profile are fresh-session defaults only. Restoring the directory also
+  reloads its safe `.cake-repl.toml` helper opt-outs before the replay can
+  start a suggestion or the next turn can start compaction. A relative
+  `CAKE_DATA_DIR` is resolved against the startup run directory before replay,
+  so replay and the live turn use the same store after cwd restoration. Empty
+  pass-through values are omitted and behave as unset, so they cannot clear a
+  stored choice; start a new session to change it permanently. Suggestions and
+  compaction use the same effective model/profile as the resumed turn, not
+  config defaults. The command `main` prints on exit echoes only the
   front-end controls needed to reproduce the REPL (`-config <path>` or
   `-no-config`, `-cake-bin` when it was explicit, and `-cwd` when it was
   explicit) plus any pass-through flag that was an explicit override. A plain
   `-resume <id>` is therefore the normal hint. Display-only flags (`-inline`,
   `-no-color`, `-debug-log`, `-history-file`, `-output-limit`,
-  `-max-timeline-items`, and `-tool-color`) are never emitted. The hint
-  reflects the startup controls; a later `/model` or `/profile` change is not
-  reflected.
+  `-max-timeline-items`, and `-tool-color`) are never emitted; boolean display
+  flags do not consume the following token while the hint is reconstructed. The
+  hint reflects the startup controls; a later `/model` or `/profile` change is
+  not reflected.
 - **Startup project-trust check.** During startup, one read-only
   `cake trust --status --json` probe inspects the effective working directory:
   the configured `-cwd`, or the session's stored working directory once a

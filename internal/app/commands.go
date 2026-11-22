@@ -129,10 +129,10 @@ const HelpText = `commands
   /session         show session id, task id, cwd, run mode, last result
   /session copy    copy the full session id to the clipboard
   /sessions        browse past sessions in this directory and pick one to resume
-  /model [name]    show or set the model for the next prompt
-                   (default clears to cake's default)
-  /profile [name]  show or set the profile for the next prompt
-                   (default clears to cake's default)
+  /model [name]    show or set the model override for the next prompt
+                   (default clears the override; a resumed session keeps its stored model)
+  /profile [name]  show or set the profile override for the next prompt
+                   (default clears the override; a resumed session keeps its stored profile)
   /clear           clear the timeline (session state is kept)
 
   /new, /resume, /sessions, /model, and /profile require an idle REPL

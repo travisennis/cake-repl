@@ -85,14 +85,19 @@ func (s *ReasoningSummary) UnmarshalJSON(data []byte) error {
 func (e Reasoning) EventType() string { return "reasoning" }
 
 type SessionMeta struct {
-	Type        string `json:"type"`
-	SessionID   string `json:"session_id"`
-	Cwd         string `json:"working_directory,omitempty"`
-	Model       string `json:"model,omitempty"`
-	ModelConfig string `json:"model_config,omitempty"`
-	Profile     string `json:"profile,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	UpdatedAt   string `json:"updated_at,omitempty"`
+	Type        string            `json:"type"`
+	SessionID   string            `json:"session_id"`
+	Cwd         string            `json:"working_directory,omitempty"`
+	Model       string            `json:"model,omitempty"`
+	ModelConfig string            `json:"model_config,omitempty"`
+	Profile     string            `json:"profile,omitempty"`
+	RunConfig   *SessionRunConfig `json:"run_config,omitempty"`
+	CreatedAt   string            `json:"created_at,omitempty"`
+	UpdatedAt   string            `json:"updated_at,omitempty"`
+}
+
+type SessionRunConfig struct {
+	Profile string `json:"profile,omitempty"`
 }
 
 func (e SessionMeta) EventType() string { return "session_meta" }

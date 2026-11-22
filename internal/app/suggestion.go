@@ -154,8 +154,8 @@ func (m Model) maybeStartSuggestion() (Model, tea.Cmd) {
 		Cwd:             m.cfg.Cwd,
 		SessionID:       sessionID,
 		CakeBin:         m.cfg.CakeBin,
-		Model:           firstNonEmpty(m.cfg.Suggestions.Model, m.turn.Model),
-		Profile:         firstNonEmpty(m.cfg.Suggestions.Profile, m.turn.Profile),
+		Model:           firstNonEmpty(m.cfg.Suggestions.Model, m.effectiveModel()),
+		Profile:         firstNonEmpty(m.cfg.Suggestions.Profile, m.effectiveProfile()),
 		ReasoningEffort: m.cfg.Suggestions.ReasoningEffort,
 		DebugLog:        m.cfg.DebugLog,
 	}

@@ -322,17 +322,24 @@ down. The status line and timeline only show it shortened.
   profile, sandbox policy, resolved `--add-dir`/`--toolbox`/`--mcp-config`
   paths, `--tools`/`--no-tools`, `--skills`/`--no-skills`, an explicit
   `--system-prompt` path, and `--no-runtime-context` — and the session's stored
-  working directory. The hint therefore echoes only the front-end controls
+  working directory. Restoring that directory also reloads its safe
+  `.cake-repl.toml` helper opt-outs before suggestions or compaction can start.
+  A relative `CAKE_DATA_DIR` is frozen against the startup run directory before
+  replay, so the replay and the live prompt use the same store. The hint
+  therefore echoes only the front-end controls
   needed to reproduce the REPL (`-config <path>` or `-no-config`, `-cake-bin`
   when it was explicit, and `-cwd` when it was explicit) plus any pass-through
   flag that was explicitly set as an override. Display-only startup flags
   (`-inline`, `-no-color`, `-debug-log`, `-history-file`, `-output-limit`,
-  `-max-timeline-items`, and `-tool-color`) are never echoed. Config-derived
-  model and profile defaults are not echoed and are ignored on resume unless
-  set explicitly. An explicit empty value is treated as unset and cannot clear
-  a stored choice; start a new session to change it permanently. The hint
-  reflects the startup controls; a later `/model` or `/profile` change is not
-  reflected.
+  `-max-timeline-items`, and `-tool-color`) are never echoed; boolean display
+  flags do not consume the flag that follows them. Config-derived model and
+  profile defaults are not echoed and are ignored on resume unless set
+  explicitly. Empty pass-through values are omitted, so `-tools ''` and
+  `-system-prompt ''` behave as unset and cannot clear a stored choice; start
+  a new session to change it permanently. Suggestions and compaction use the
+  same effective model/profile as the resumed turn, not config defaults. The
+  hint reflects the startup controls; a later `/model` or `/profile` change is
+  not reflected.
 
 ## Cake's native compaction
 
@@ -599,7 +606,10 @@ it may only disable compaction or suggestions.
 
 Pass `--config <path>` to use a single custom config file instead of the
 default paths. Pass `--no-config` to skip config file loading entirely.
-`--config` and `--no-config` are mutually exclusive.
+`--config` and `--no-config` are mutually exclusive. When a startup resume
+restores the session's working directory and the default config paths are in
+use, the safe helper opt-outs in that directory's `.cake-repl.toml` replace the
+invocation directory's helper opt-outs.
 
 The automatically loaded `.cake-repl.toml` cannot select the executable: its
 `cake-bin` key is ignored with a plain startup warning naming the file and key.

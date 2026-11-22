@@ -93,8 +93,25 @@ func (m Model) statusLineFor(p presentation) string {
 }
 
 func (m Model) displayModel() string {
-	if m.session.Model != "" {
+	return m.effectiveModel()
+}
+
+func (m Model) effectiveModel() string {
+	if m.turn.ModelExplicit {
+		return m.turn.Model
+	}
+	if mode, _ := m.session.RunOptions(); mode == cake.RunResume && m.session.Model != "" {
 		return m.session.Model
 	}
 	return m.turn.Model
+}
+
+func (m Model) effectiveProfile() string {
+	if m.turn.ProfileExplicit {
+		return m.turn.Profile
+	}
+	if mode, _ := m.session.RunOptions(); mode == cake.RunResume && m.session.Profile != "" {
+		return m.session.Profile
+	}
+	return m.turn.Profile
 }
