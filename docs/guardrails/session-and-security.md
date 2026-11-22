@@ -19,7 +19,10 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   because the REPL is interactive: `workspace-write-interactive` adds the macOS
   capabilities that let a command launch and automate other applications. An
   explicit empty `-sandbox ""` omits the flag, letting cake resolve its own
-  policy from `CAKE_SANDBOX` or its settings.
+  policy from `CAKE_SANDBOX` or its settings. On a resumed target the flag is
+  omitted only when cake reports a stored `run_config`; a fresh session created
+  in this process retains its creation sandbox and profile for follow-up turns
+  when an older engine cannot restore them.
 
 - **Session pinning (security boundary).** Once a session id has been
   announced, `sessionState` pins future prompts to `--resume <session-id>`.
@@ -54,9 +57,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   or unsupported cake binary produces a warning and leaves the explicit
   `--resume <uuid>` pin unchanged so the user can continue. When the replay
   restores the session's working directory, the safe helper opt-outs in that
-  directory's `.cake-repl.toml` are loaded before a suggestion or compaction
-  can start. A malformed restored project file disables both helpers and adds
-  one warning; it never aborts the resume.
+  directory's `.cake-repl.toml` are loaded and validated before a suggestion or
+  compaction can start. A malformed or invalid restored project file disables
+  both helpers and adds one warning; it never aborts the resume. An unavailable
+  stored working directory marks hydration warned, so the launch project cannot
+  start an automatic suggestion in its place.
 - **Startup session picker.** A bare `-resume` names no session, so it hydrates
   nothing: no replay is started and no pin is set. It opens the same idle
   browser `/sessions` opens, and the pick takes the `/resume <uuid>` transition,
@@ -215,9 +220,14 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   initialize the selection, and `default` clears it to cake's own resolution.
   The selection is runtime state: it persists across `/new`, `Ctrl+N`, and
   `/resume`, is never written to config, and is idle-only under the active-run
-  restriction above. Changing it drops the reported session model and context
-  figure so the status line reflects the new selection until the next run
-  reports its own.
+  restriction above. On resume, a stored `run_config` is the session's
+  selection. A stored profile that is absent is a known empty selection: the
+  config profile is not used by the live turn, `/profile`, suggestions, or
+  compaction. Changing the selection drops the reported session model and
+  context figure so the status line reflects the new selection until the next
+  run reports its own. The status model uses cake's reported identity for the
+  active turn, including the first fresh turn, rather than waiting for the
+  session to switch to resume mode.
 - **Secret handling.** Raw stream lines may contain prompts, tool output, and
   secrets. They go **only** to `-debug-log` (opened `0o600`; the mode applies
   at creation — an existing file's permissions are not narrowed), never to the

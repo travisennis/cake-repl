@@ -177,7 +177,10 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   `RunResume` target always carries a non-empty `ResumeID` while `RunFresh`
   carries none, and a non-empty `AnnouncedID` always equals `SessionID`. Replay
   hydration may name `SessionID` alone, which is display identity without pin
-  eligibility. See
+  eligibility. A fresh run also keeps its creation controls so a follow-up
+  turn can replay them when the engine does not report a stored `run_config`.
+  Replay records whether `run_config` was present and whether a stored profile
+  is a known empty selection. See
   [`docs/guardrails/session-and-security.md`](docs/guardrails/session-and-security.md).
 - **Lifecycle state is typed and generation-scoped.** The model owns one
   private state per operation (run, replay, compaction, suggestion, browser,
@@ -207,10 +210,13 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   target is a resume, only explicitly set run controls are passed; cake restores
   `session_meta.run_config` and the stored working directory, so config-derived
   model/profile and the hardcoded sandbox default do not override the session.
-  A startup resume that restores the working directory reloads that directory's
-  safe `.cake-repl.toml` helper opt-outs before suggestions or compaction can
-  start. A relative `CAKE_DATA_DIR` is frozen against the startup run directory
-  before replay, so both children use one store.
+  If a session created in this process has no reported `run_config`, its
+  creation controls are replayed on a follow-up turn; that keeps an older cake
+  binary on the same sandbox and profile. A startup resume that restores the
+  working directory reloads and validates that directory's safe
+  `.cake-repl.toml` helper opt-outs before suggestions or compaction can start.
+  A relative `CAKE_DATA_DIR` is frozen against the startup run directory before
+  replay, so both children use one store.
 - **One mutating cake run at a time.** Submitting while a task runs is rejected;
   the model tracks a single live `*cake.Run`. The read-only project-trust probe
   and session listing are separate bounded diagnostics; neither mutates a
@@ -228,7 +234,10 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   unchanged because the request never gates input. Its model/profile resolve
   from `[suggestions]` first and then the effective turn selection (an explicit
   `/model`/`/profile`, or the replayed session value on resume); reasoning
-  effort comes from `[suggestions]` when set. A result is applied only
+  effort comes from `[suggestions]` when set. A replayed `run_config` with no
+  profile is a known empty selection, not a fallback to config. A replay whose
+  working directory is unavailable is marked warned, so hydration cannot start
+  an automatic suggestion in the launch project. A result is applied only
   while the request identity, session pin, idle state, and empty composer all
   still match; one that arrives while compaction gates the composer is held and
   applied after the compactor settles. It appears as dim placeholder ghost text

@@ -17,7 +17,10 @@ consumes cake events. This is the project's core external contract.
   a resume, cake-repl omits every pass-through flag that was not explicitly
   set; cake restores the session's stored `session_meta.run_config` and working
   directory. The hardcoded `-sandbox` default and config-derived model/profile
-  are fresh-session defaults only. Read-only startup
+  are fresh-session defaults only. A session created in this process keeps its
+  creation controls and replays them on a follow-up turn until a replay reports
+  a stored `run_config`, so an older engine does not change sandbox or profile
+  on turn two. Read-only startup
   resume hydration runs the separate `cake --output-format stream-json replay
   <uuid>` command with no prompt. The other permitted invocations are the
   read-only, informational `cake sessions list --json`, run with the same
@@ -32,10 +35,12 @@ consumes cake events. This is the project's core external contract.
   Field names and JSON tags are the contract; do not rename or repurpose them to
   match cake's output. `session_meta` carries `working_directory`, the optional
   model identity (`model` is the provider model ID, `model_config` the
-  `[[models]]` entry name), and the optional stored `run_config`; this client
-  reads `run_config.profile` for helper fallbacks. `task_start` gains the same
-  optional model pair with cake#664, and `task_complete` decodes it ahead of any
-  cake that reports it there. These fields feed the status-line model under.
+  `[[models]]` entry name), and the optional stored `run_config`. A present
+  `run_config` makes restore support authoritative; an absent profile inside it
+  is a known empty selection, not a fallback to config. `task_start` gains the
+  same optional model pair with cake#664, and `task_complete` decodes it ahead
+  of any cake that reports it there. The status line uses the reported identity
+  as soon as `task_start` arrives, including during a fresh turn.
 - **Per-turn usage (`turn_usage`).** Live and replayed streams emit a
   `turn_usage` record for every main-agent provider attempt that reports usage;
   summary and compaction attempts are not streamed as context measurements. It

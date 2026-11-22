@@ -673,6 +673,7 @@ func (m *Model) selectProfile(profile string) {
 	if mode, _ := m.session.RunOptions(); mode != cake.RunResume {
 		m.session.Model = ""
 		m.session.Profile = ""
+		m.session.ProfileKnown = false
 	}
 	m.session.Context = nil
 }
@@ -737,6 +738,9 @@ func (m Model) runOptions(prompt string) cake.Options {
 		DebugLog:  m.cfg.DebugLog,
 		Registry:  m.cfg.Runs,
 	}
+	if restore && !m.session.RestoreKnown && m.session.Creation != nil {
+		m.session.Creation.apply(&opts)
+	}
 	if !restore || m.turn.ModelExplicit {
 		opts.Model = m.turn.Model
 	}
@@ -779,10 +783,14 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	m.runGeneration = 0
 	m.suggestion.hydrated = false
 	_, resumeID := m.session.RunOptions()
-	run, err := cake.Start(m.runOptions(prompt))
+	opts := m.runOptions(prompt)
+	run, err := cake.Start(opts)
 	if err != nil {
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
 		return m, nil
+	}
+	if opts.Mode == cake.RunFresh {
+		m.session.Creation = controlsFromOptions(opts)
 	}
 	m.trackChild("run", run.Cancel, run.Done)
 
@@ -826,11 +834,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 				m.session.SessionID = e.SessionID
 			}
 			m.session.OnModel(e.ModelConfig, e.Model)
-			if e.RunConfig != nil && e.RunConfig.Profile != "" {
-				m.session.OnProfile(e.RunConfig.Profile)
-			} else {
-				m.session.OnProfile(e.Profile)
-			}
+			m.session.OnStoredRunConfig(e.RunConfig, e.Profile)
 			if m.cfg.RestoreCwd && e.Cwd != "" {
 				if info, err := os.Stat(e.Cwd); err == nil && info.IsDir() {
 					m.cfg.Cwd = e.Cwd
@@ -838,6 +842,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 					m.cfg.RestoreCwd = false
 					cwdRestored = true
 				} else {
+					m.replay.warned = true
 					m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session working directory is unavailable: " + e.Cwd})
 				}
 			}

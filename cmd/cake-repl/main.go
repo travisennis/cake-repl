@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -434,6 +435,16 @@ func projectHelpers(cwd string) (app.ProjectHelpers, error) {
 	merged := config.Merge(xdgCfg, localCfg)
 	compaction := config.MergeCompaction(config.DefaultCompaction(), merged)
 	suggestions := config.MergeSuggestions(config.DefaultSuggestions(), merged)
+	var validationErrors []error
+	if err := compaction.Validate(); err != nil {
+		validationErrors = append(validationErrors, fmt.Errorf("compaction: %w", err))
+	}
+	if err := suggestions.Validate(); err != nil {
+		validationErrors = append(validationErrors, fmt.Errorf("suggestions: %w", err))
+	}
+	if err := errors.Join(validationErrors...); err != nil {
+		return app.ProjectHelpers{}, fmt.Errorf("validating project helper settings: %w", err)
+	}
 	return app.ProjectHelpers{
 		CompactionEnabled:  compaction.Enabled,
 		SuggestionsEnabled: suggestions.Enabled,

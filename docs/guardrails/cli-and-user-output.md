@@ -119,15 +119,21 @@ renders it in plain text like every other surface.
   `--add-dir`/`--toolbox`/`--mcp-config` paths, tool and skill selections, an
   explicit `--system-prompt` path, and `--no-runtime-context`) and the stored
   working directory. The hardcoded sandbox default and config-derived
-  model/profile are fresh-session defaults only. Restoring the directory also
-  reloads its safe `.cake-repl.toml` helper opt-outs before the replay can
-  start a suggestion or the next turn can start compaction. A relative
-  `CAKE_DATA_DIR` is resolved against the startup run directory before replay,
-  so replay and the live turn use the same store after cwd restoration. Empty
-  pass-through values are omitted and behave as unset, so they cannot clear a
-  stored choice; start a new session to change it permanently. Suggestions and
-  compaction use the same effective model/profile as the resumed turn, not
-  config defaults. The command `main` prints on exit echoes only the
+  model/profile are fresh-session defaults only. For a session created in this
+  process, the creation controls are retained and replayed on a follow-up turn
+  until a replay reports a stored `run_config`; an older cake binary keeps the
+  same sandbox and profile instead of falling back to config. Restoring the
+  directory also reloads and validates its safe `.cake-repl.toml` helper
+  opt-outs before the replay can start a suggestion or the next turn can start
+  compaction. An unavailable replayed working directory marks the hydration
+  warned and suppresses an automatic suggestion. A relative `CAKE_DATA_DIR` is
+  resolved against the startup run directory before replay, so replay and the
+  live turn use the same store after cwd restoration. Empty pass-through values
+  are omitted and behave as unset, so they cannot clear a stored choice; start
+  a new session to change it permanently. Suggestions and compaction use the
+  same effective model/profile as the resumed turn, not config defaults. A
+  stored `run_config` with no profile is a known empty selection, not a reason
+  to fall back to the config profile. The command `main` prints on exit echoes only the
   front-end controls needed to reproduce the REPL (`-config <path>` or
   `-no-config`, `-cake-bin` when it was explicit, and `-cwd` when it was
   explicit) plus any pass-through flag that was an explicit override. A plain
@@ -169,10 +175,11 @@ renders it in plain text like every other surface.
   `loading history`, `stopping history`, `browsing sessions`, or `exiting`,
   followed by labeled session, next-run, optional
   model, optional context, and cwd context; the model is the identity cake
-  reported on the stream once available (the `[[models]]` entry name, falling
-  back to the provider model ID), else the current `/model` selection
-  (initialized from `-model`/config), and a new session, resume switch, or
-  `/model`/`/profile` change drops the reported identity.
+  reported on the stream once available, including the first fresh turn while
+  it runs (the `[[models]]` entry name, falling back to the provider model ID),
+  else the current `/model` selection (initialized from `-model`/config). A new
+  session, resume switch, or `/model`/`/profile` change drops the reported
+  identity.
   While the external prompt suggester runs, the status state appends its
   whole-second age (`[ idle · suggesting 3s ]`, or
   `[ <spinner> compacting 4s · suggesting 3s ]` when an automatic compaction

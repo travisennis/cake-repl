@@ -234,7 +234,11 @@ down. The status line and timeline only show it shortened.
   resume, cake-repl passes only the run controls that were explicitly set on
   the command line or changed with `/model`/`/profile`; cake restores the rest
   from the session's stored `run_config`. Config-derived model and profile
-  defaults therefore apply to new sessions, not to a resumed session.
+  defaults therefore apply to new sessions, not to a resumed session. For a
+  session created in this process, the creation controls are retained and used
+  for a follow-up turn until a replay reports a stored `run_config`; an older
+  cake binary therefore keeps the same sandbox and profile on turn two instead
+  of falling back to config defaults.
 - The status-line model comes from the stream when cake reports one: replay
   hydration reads `session_meta.model_config` (falling back to
   `session_meta.model`), and a newer cake reports the same optional identity on
@@ -337,9 +341,11 @@ down. The status line and timeline only show it shortened.
   explicitly. Empty pass-through values are omitted, so `-tools ''` and
   `-system-prompt ''` behave as unset and cannot clear a stored choice; start
   a new session to change it permanently. Suggestions and compaction use the
-  same effective model/profile as the resumed turn, not config defaults. The
-  hint reflects the startup controls; a later `/model` or `/profile` change is
-  not reflected.
+  same effective model/profile as the resumed turn, not config defaults. A
+  resumed session whose stored `run_config` has no profile keeps no profile;
+  the config profile is not a fallback there, and `/profile` reports cake's
+  default. The hint reflects the startup controls; a later `/model` or
+  `/profile` change is not reflected.
 
 ## Cake's native compaction
 
@@ -562,8 +568,12 @@ cake-suggest-bin = "cake-suggest"
   explicit draft or session actions discard it.
 - A clean startup `-resume <uuid>` replay that ends at a completed, non-errored
   turn starts one suggestion after hydration settles. A failed, canceled,
-  incomplete, or warned replay does not. A bare `-resume` picker hydrates
-  nothing and keeps the no-suggestion-until-first-turn behavior.
+  incomplete, or warned replay does not. An unavailable replayed working
+  directory marks the replay warned, so the launch project cannot trigger an
+  automatic suggestion. A bare `-resume` picker hydrates nothing and keeps the
+  no-suggestion-until-first-turn behavior. Reloaded project helper settings
+  are validated before either helper is enabled; invalid thresholds or
+  reasoning effort disable both with one warning.
 - A suggestion starts alongside an automatic context compaction from the same
   turn instead of waiting for the compactor. Cake replay is read-only and
   tolerates a trailing partial record, so the suggester safely reads the

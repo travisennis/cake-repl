@@ -11,8 +11,49 @@ type sessionState struct {
 	LastComplete *cake.TaskComplete
 	Model        string
 	Profile      string
+	ProfileKnown bool
+	RestoreKnown bool
+	Creation     *runControls
 	AnnouncedID  string
 	Context      *ContextUsage
+}
+
+type runControls struct {
+	Profile      string
+	Sandbox      string
+	AddDirs      []string
+	ToolboxDirs  []string
+	Tools        string
+	NoTools      bool
+	NoSkills     bool
+	Skills       string
+	SystemPrompt string
+}
+
+func controlsFromOptions(opts cake.Options) *runControls {
+	return &runControls{
+		Profile:      opts.Profile,
+		Sandbox:      opts.Sandbox,
+		AddDirs:      append([]string(nil), opts.AddDirs...),
+		ToolboxDirs:  append([]string(nil), opts.ToolboxDirs...),
+		Tools:        opts.Tools,
+		NoTools:      opts.NoTools,
+		NoSkills:     opts.NoSkills,
+		Skills:       opts.Skills,
+		SystemPrompt: opts.SystemPrompt,
+	}
+}
+
+func (c *runControls) apply(opts *cake.Options) {
+	opts.Profile = c.Profile
+	opts.Sandbox = c.Sandbox
+	opts.AddDirs = append([]string(nil), c.AddDirs...)
+	opts.ToolboxDirs = append([]string(nil), c.ToolboxDirs...)
+	opts.Tools = c.Tools
+	opts.NoTools = c.NoTools
+	opts.NoSkills = c.NoSkills
+	opts.Skills = c.Skills
+	opts.SystemPrompt = c.SystemPrompt
 }
 
 func newSessionState(next cake.RunMode, resumeID string) sessionState {
@@ -51,8 +92,18 @@ func (s *sessionState) OnModel(modelConfig, model string) {
 }
 
 func (s *sessionState) OnProfile(profile string) {
+	s.Profile = profile
+	s.ProfileKnown = true
+}
+
+func (s *sessionState) OnStoredRunConfig(runConfig *cake.SessionRunConfig, profile string) {
+	if runConfig != nil {
+		s.RestoreKnown = true
+		s.OnProfile(runConfig.Profile)
+		return
+	}
 	if profile != "" {
-		s.Profile = profile
+		s.OnProfile(profile)
 	}
 }
 
@@ -130,6 +181,9 @@ func (s *sessionState) UseResume(id string) {
 		s.AnnouncedID = ""
 		s.Model = ""
 		s.Profile = ""
+		s.ProfileKnown = false
+		s.RestoreKnown = false
+		s.Creation = nil
 		s.Context = nil
 	}
 	s.NextMode = cake.RunResume
