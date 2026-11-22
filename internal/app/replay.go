@@ -159,6 +159,7 @@ func (m Model) finishReplayStart(msg replayStartedMsg) (tea.Model, tea.Cmd) {
 		}
 		m.replay.settle(msg.key)
 		m.replay.clear()
+		trustCmd := m.startDeferredTrustProbeIfIdle()
 		if current {
 			err := msg.err
 			if err == nil {
@@ -168,7 +169,11 @@ func (m Model) finishReplayStart(msg replayStartedMsg) (tea.Model, tea.Cmd) {
 			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session replay unavailable: " + err.Error()})
 			m.syncViewport()
 		}
-		return m.afterPresentationChange()
+		next, cmd := m.afterPresentationChange()
+		if trustCmd != nil {
+			cmd = tea.Batch(cmd, trustCmd)
+		}
+		return next, cmd
 	}
 
 	m.replay.run = msg.run
@@ -182,15 +187,25 @@ func (m Model) handleReplayEvents(msg replayEventsMsg) (tea.Model, tea.Cmd) {
 	if m.replay.run == nil || m.replay.op.key != msg.key {
 		return m, nil
 	}
+	cwdRestored := false
 	if m.replay.phase() == replayLoading &&
 		msg.key.generation == m.session.Generation() &&
 		msg.key.sessionID == m.session.ResumeID {
 		for _, ev := range msg.evs {
-			m.applyReplayEvent(ev)
+			if m.applyReplayEvent(ev) {
+				cwdRestored = true
+			}
 		}
 		m.syncViewport()
 	}
-	return m, waitForReplay(m.replay.run, msg.key)
+	cmd := waitForReplay(m.replay.run, msg.key)
+	if cwdRestored {
+		cmd = tea.Batch(cmd, m.titleCmd())
+		if trustCmd := m.startDeferredTrustProbe(); trustCmd != nil {
+			cmd = tea.Batch(cmd, trustCmd)
+		}
+	}
+	return m, cmd
 }
 
 func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
@@ -198,10 +213,15 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 		return m.maybeQuit()
 	}
 	m.replay.clear()
+	trustCmd := m.startDeferredTrustProbeIfIdle()
 	current := msg.key.generation == m.session.Generation() &&
 		msg.key.sessionID == m.session.ResumeID
 	if !current {
-		return m.afterPresentationChange()
+		next, cmd := m.afterPresentationChange()
+		if trustCmd != nil {
+			cmd = tea.Batch(cmd, trustCmd)
+		}
+		return next, cmd
 	}
 
 	if !m.replay.warned {
@@ -227,6 +247,9 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 	m.finishPendingTools()
 	m.syncViewport()
 	next, cmd := m.afterPresentationChange()
+	if trustCmd != nil {
+		cmd = tea.Batch(cmd, trustCmd)
+	}
 	if !hydratedCompletion {
 		return next, cmd
 	}

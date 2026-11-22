@@ -119,6 +119,13 @@ func validateFlags(showVersion bool, resume, fork optionalString, args []string,
 	return nil
 }
 
+func resolveExecutablePath(path, base string) string {
+	if path == "" || filepath.IsAbs(path) || !strings.ContainsRune(path, filepath.Separator) {
+		return path
+	}
+	return filepath.Join(base, path)
+}
+
 func resolveCwd(cwd string) (string, error) {
 	dir := cwd
 	if dir == "" {
@@ -221,6 +228,7 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 	cfg := app.Config{
 		CakeBin:          *f.cakeBin,
 		Cwd:              dir,
+		RestoreCwd:       f.resume.set && f.resume.value != "" && !explicit["cwd"],
 		Model:            *f.model,
 		Profile:          *f.profile,
 		Tools:            *f.tools,
@@ -277,6 +285,10 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		Profile:         suggestions.Profile,
 		ReasoningEffort: suggestions.ReasoningEffort,
 	}
+
+	cfg.CakeBin = resolveExecutablePath(cfg.CakeBin, dir)
+	cfg.Compaction.Bin = resolveExecutablePath(cfg.Compaction.Bin, dir)
+	cfg.Suggestions.Bin = resolveExecutablePath(cfg.Suggestions.Bin, dir)
 
 	if f.resume.set {
 		if f.resume.value == "" {
@@ -477,27 +489,73 @@ func applyConfigFile(cfg *app.Config, cfgFile *config.Config, explicit map[strin
 	}
 }
 
+var resumeHintDisplayFlags = map[string]bool{
+	"inline":             true,
+	"no-color":           true,
+	"tool-color":         true,
+	"version":            true,
+	"debug-log":          true,
+	"history-file":       true,
+	"output-limit":       true,
+	"max-timeline-items": true,
+}
+
 func resumeCommand(args []string, cwd, sessionID string) string {
 	parts := []string{"cake-repl"}
-	for _, arg := range args {
+	cwdExplicit := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--" {
 			break
 		}
-		if isResumeControlArg(arg) {
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			parts = append(parts, shellQuote(arg))
+			continue
+		}
+		name, inlineValue := resumeFlagName(arg)
+		switch {
+		case name == "resume" || name == "fork":
+			continue
+		case name == "cwd":
+			cwdExplicit = true
+			if !inlineValue && i+1 < len(args) {
+				i++
+			}
+			continue
+		case resumeHintDisplayFlags[name]:
+			if !inlineValue && i+1 < len(args) {
+				i++
+			}
 			continue
 		}
 		parts = append(parts, shellQuote(arg))
+		if !inlineValue && resumeFlagTakesValue(name) && i+1 < len(args) {
+			i++
+			parts = append(parts, shellQuote(args[i]))
+		}
 	}
-	parts = append(parts, "-cwd", shellQuote(cwd), "-resume", shellQuote(sessionID))
+	if cwdExplicit {
+		parts = append(parts, "-cwd", shellQuote(cwd))
+	}
+	parts = append(parts, "-resume", shellQuote(sessionID))
 	return strings.Join(parts, " ")
 }
 
-func isResumeControlArg(arg string) bool {
+func resumeFlagName(arg string) (string, bool) {
 	name := strings.TrimLeft(arg, "-")
 	if i := strings.IndexByte(name, '='); i >= 0 {
-		name = name[:i]
+		return name[:i], true
 	}
-	return name == "resume" || name == "fork" || name == "cwd"
+	return name, false
+}
+
+func resumeFlagTakesValue(name string) bool {
+	switch name {
+	case "no-session", "no-tools", "no-skills", "inline", "no-color", "version", "no-config", "tool-color":
+		return false
+	default:
+		return true
+	}
 }
 
 func shellQuote(s string) string {

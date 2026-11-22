@@ -25,6 +25,7 @@ import (
 type Config struct {
 	CakeBin          string
 	Cwd              string
+	RestoreCwd       bool
 	Model            string
 	Profile          string
 	Tools            string
@@ -115,7 +116,8 @@ type Model struct {
 	run    *cake.Run
 	runSeq uint64
 
-	replay replayState
+	replay        replayState
+	trustDeferred bool
 
 	sawComplete   bool
 	runOutcome    outcome
@@ -180,6 +182,7 @@ func New(cfg Config) Model {
 		toolOutputMode:  ui.ToolOutputHidden,
 		session:         newSessionState(cfg.InitialMode, cfg.ResumeID),
 		turn:            turnSelection{Model: cfg.Model, Profile: cfg.Profile},
+		trustDeferred:   cfg.RestoreCwd,
 	}
 	if cfg.ResumeID != "" {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -316,8 +319,10 @@ func (m Model) Init() tea.Cmd {
 		textarea.Blink,
 		m.titleCmd(),
 	}
-	if cmd := startTrustProbeCmd(m.cfg); cmd != nil {
-		cmds = append(cmds, cmd)
+	if !m.trustDeferred {
+		if cmd := startTrustProbeCmd(m.cfg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 	if m.startupCmd != nil {
 		cmds = append(cmds, m.startupCmd)

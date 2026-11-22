@@ -764,11 +764,12 @@ func (m *Model) applyEvent(ev cake.Event) {
 	m.applyEventMode(ev, false)
 }
 
-func (m *Model) applyReplayEvent(ev cake.Event) {
-	m.applyEventMode(ev, true)
+func (m *Model) applyReplayEvent(ev cake.Event) bool {
+	return m.applyEventMode(ev, true)
 }
 
-func (m *Model) applyEventMode(ev cake.Event, replay bool) {
+func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
+	cwdRestored := false
 	switch e := ev.(type) {
 	case cake.TaskStart:
 		m.session.OnTaskStart(e)
@@ -784,6 +785,15 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 				m.session.SessionID = e.SessionID
 			}
 			m.session.OnModel(e.ModelConfig, e.Model)
+			if m.cfg.RestoreCwd && e.Cwd != "" {
+				if info, err := os.Stat(e.Cwd); err == nil && info.IsDir() {
+					m.cfg.Cwd = e.Cwd
+					m.cfg.RestoreCwd = false
+					cwdRestored = true
+				} else {
+					m.appendItem(ui.Item{Kind: ui.KindWarning, Text: "session working directory is unavailable: " + e.Cwd})
+				}
+			}
 		}
 
 	case cake.PromptContext:
@@ -918,6 +928,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) {
 	case cake.Unknown:
 		m.logDebug("unknown event type: " + e.Type)
 	}
+	return cwdRestored
 }
 
 func (m *Model) logDebug(text string) {

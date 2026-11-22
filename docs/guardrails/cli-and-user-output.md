@@ -104,25 +104,32 @@ renders it in plain text like every other surface.
 - **Startup resume.** `-resume <uuid>` first invokes the read-only
   `cake --output-format stream-json replay <uuid>` command. It hydrates the
   visible timeline before the first prompt; failures show a warning and keep
-  the explicit resume pin usable. A clean hydration that ends at a completed,
-  non-errored turn starts one prompt suggestion when the feature is enabled
-  a failed, canceled, incomplete, or warned replay does not. A bare
+  the explicit resume pin usable. The replayed `session_meta.working_directory`
+  replaces the invocation directory unless `-cwd` was explicit, and the
+  startup trust probe waits for that choice. A clean hydration that ends at a
+  completed, non-errored turn starts one prompt suggestion when the feature is
+  enabled; a failed, canceled, incomplete, or warned replay does not. A bare
   `-resume` hydrates nothing: it opens the startup session picker, pins nothing
-  until a row is picked, and leaves the REPL fresh when the picker is closed. The command `main` prints on exit
-  reuses the effective startup run controls (`-cwd`, `-config <path>` or
-  `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
-  `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`,
-  and `-cake-bin` when it was set explicitly or is non-default) after `-resume
-  <id>`, so a pasted resume does not silently drop the sandbox policy or model
-  the original run was started with. An explicit override that clears or
-  defaults a value (`-sandbox ""`, `-model ""`, `-profile ""`, or `-cake-bin
-  cake`) is re-emitted — for example `-sandbox ''` — so reloading the config on
-  resume cannot reintroduce a value the original run suppressed. The hint
-  reflects the startup controls; a later `/model` or `/profile` change is not
-  reflected.
+  until a row is picked, and leaves the REPL fresh when the picker is closed.
+  The command `main` prints on exit reuses the effective startup run controls
+  after `-resume <id>`, so a pasted resume does not silently drop the sandbox
+  policy or model the original run was started with. `-cwd` is emitted only
+  when it was explicit; display-only flags (`-inline`, `-no-color`,
+  `-debug-log`, `-history-file`, `-output-limit`, `-max-timeline-items`, and
+  `-tool-color`) are never emitted. The remaining run controls are `-config
+  <path>` or `-no-config`, plus any of `-sandbox`, `-model`, `-profile`,
+  `-add-dir`, `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`,
+  `-system-prompt`, and non-default `-cake-bin`. An explicit override that
+  clears or defaults a value (`-sandbox ""`, `-model ""`, `-profile ""`, or
+  `-cake-bin cake`) is re-emitted — for example `-sandbox ''` — so reloading
+  the config on resume cannot reintroduce a value the original run suppressed.
+  The hint reflects the startup controls; a later `/model` or `/profile` change
+  is not reflected.
 - **Startup project-trust check.** During startup, one read-only
-  `cake trust --status --json` probe inspects the configured `-cwd`. When it
-  returns, an `untrusted`, `changed`, `invalid`, or unrecognized state adds one
+  `cake trust --status --json` probe inspects the effective working directory:
+  the configured `-cwd`, or the session's stored working directory once a
+  startup resume restores it. When it returns, an `untrusted`, `changed`,
+  `invalid`, or unrecognized state adds one
   warning naming the state, authority-bearing files or changes, canonical
   project root, and the `cake trust` command that resolves it. `trusted` and
   `not_required` are silent. The warning is advisory and never gates input, so

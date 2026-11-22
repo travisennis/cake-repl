@@ -108,7 +108,10 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
 - **Replay stays read-only.** Startup `-resume <uuid>` hydrates the timeline from
   cake's supported replay stream before accepting a new prompt. Replay runs in a
   separate hydration state, so it does not appear as a live task; failures warn
-  and preserve the explicit `--resume <uuid>` next-run pin. A bare `-resume`
+  and preserve the explicit `--resume <uuid>` next-run pin. Unless `-cwd` was
+  explicit, the replayed `session_meta.working_directory` replaces the
+  invocation directory before the first prompt, and the startup trust probe
+  waits for that choice. A bare `-resume`
   never reaches this path: it opens the session picker, which runs only the
   read-only session listing, so no replay runs before the first prompt. A
   session containing a context checkpoint renders one `compaction` marker at the

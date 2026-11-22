@@ -218,7 +218,10 @@ down. The status line and timeline only show it shortened.
   `cake --output-format stream-json replay <uuid>` command and hydrates the
   visible timeline from its ordered events. Replay metadata is not shown as
   transcript text, while replayed user and assistant messages, tools, task
-  boundaries, and completion records are shown.
+  boundaries, and completion records are shown. Unless `-cwd` was explicit,
+  the replayed `session_meta.working_directory` replaces the invocation
+  directory before the first prompt, so the session's project wins over where
+  the resume command was typed.
 - Replay failures (including an older cake binary without replay support) show a
   non-fatal warning. The input remains available, and the first new prompt still
   uses `cake --resume <uuid>`.
@@ -308,14 +311,16 @@ down. The status line and timeline only show it shortened.
   cancel it first (Ctrl+C), or use `Ctrl+N` to cancel and start a new session in
   one action; the retarget stays refused until the canceled child has been
   reaped.
-- On exit, cake-repl prints the command that resumes the session. The hint
-  reproduces the effective startup run controls — `-cwd`, `-config <path>` or
-  `-no-config`, plus any of `-sandbox`, `-model`, `-profile`, `-add-dir`,
-  `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
-  `-system-prompt`, plus `-cake-bin` when it was set explicitly or is not the
-  default `cake` — after `-resume <id>`, so a pasted resume keeps the sandbox and
-  model the original run used instead of silently falling back to the startup
-  defaults. An explicit override that clears or defaults a value — `-sandbox ""`,
+- On exit, cake-repl prints the command that resumes the session. A plain
+  `-resume <id>` restores the session's stored working directory, so `-cwd` is
+  echoed only when it was explicit at startup. Display-only startup flags
+  (`-inline`, `-no-color`, `-debug-log`, `-history-file`, `-output-limit`,
+  `-max-timeline-items`, and `-tool-color`) are never echoed. The remaining
+  startup run controls — `-config <path>` or `-no-config`, plus any of
+  `-sandbox`, `-model`, `-profile`, `-add-dir`, `-toolbox`, `-tools`,
+  `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`, and non-default
+  `-cake-bin` — are still echoed until cake records and restores them. An
+  explicit override that clears or defaults a value — `-sandbox ""`,
   `-model ""`, `-profile ""`, or `-cake-bin cake` — is re-emitted (for example
   `-sandbox ''`), so reloading the config cannot reintroduce a value the original
   run suppressed. The hint reflects the startup controls; a later `/model` or

@@ -61,7 +61,9 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   cancellable, `WaitDelay`-bounded operation as a `/sessions` listing,
   and a failed listing is a non-fatal warning that leaves the prompt usable.
 - **Project trust preflight is read-only and advisory.** During startup, one
-  `cake trust --status --json` probe inspects the configured `-cwd`. When it
+  `cake trust --status --json` probe inspects the effective working directory,
+  which a startup `-resume <uuid>` may replace with the session's stored
+  `working_directory`. The probe waits for that choice. When it
   returns, an `untrusted`, `changed`, `invalid`, or unrecognized state appends
   one warning naming the authority-bearing files or changes, canonical project
   root, and the `cake trust` command; `trusted` and `not_required` are silent.

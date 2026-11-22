@@ -24,6 +24,21 @@ func projectTrustOverridden() bool {
 		os.Getenv("CAKE_PROJECT_CONFIG") == "off"
 }
 
+func (m *Model) startDeferredTrustProbe() tea.Cmd {
+	if !m.trustDeferred {
+		return nil
+	}
+	m.trustDeferred = false
+	return startTrustProbeCmd(m.cfg)
+}
+
+func (m *Model) startDeferredTrustProbeIfIdle() tea.Cmd {
+	if m.replay.phase() == replayLoading {
+		return nil
+	}
+	return m.startDeferredTrustProbe()
+}
+
 func startTrustProbeCmd(cfg Config) tea.Cmd {
 	if cfg.CakeBin == "" || projectTrustOverridden() {
 		return nil
