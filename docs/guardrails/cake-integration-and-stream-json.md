@@ -13,7 +13,11 @@ consumes cake events. This is the project's core external contract.
   `--tools <names>` / `--no-tools`, `--no-skills` /
   `--skills <names>`, and `--system-prompt <path>`. An initial fresh prompt
   may additionally use `--fork [<uuid>]`; once cake reports the forked session
-  ID, later prompts use only its pinned `--resume <uuid>`. Read-only startup
+  ID, later prompts use only its pinned `--resume <uuid>`. When the target is
+  a resume, cake-repl omits every pass-through flag that was not explicitly
+  set; cake restores the session's stored `session_meta.run_config` and working
+  directory. The hardcoded `-sandbox` default and config-derived model/profile
+  are fresh-session defaults only. Read-only startup
   resume hydration runs the separate `cake --output-format stream-json replay
   <uuid>` command with no prompt. The other permitted invocations are the
   read-only, informational `cake sessions list --json`, run with the same

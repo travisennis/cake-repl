@@ -202,7 +202,11 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   CLI flags. The automatic project-local layer cannot set `cake-bin`: that key
   is ignored with a startup warning, so executable selection comes only from
   XDG config, explicit `-config`, or `-cake-bin`. Session-specific values stay
-  outside the persisted config shape.
+  outside the persisted config shape. A fresh prompt passes the resolved
+  defaults to cake. Once the target is a resume, only explicitly set run
+  controls are passed; cake restores `session_meta.run_config` and the stored
+  working directory, so config-derived model/profile and the hardcoded sandbox
+  default do not override the session.
 - **One mutating cake run at a time.** Submitting while a task runs is rejected;
   the model tracks a single live `*cake.Run`. The read-only project-trust probe
   and session listing are separate bounded diagnostics; neither mutates a

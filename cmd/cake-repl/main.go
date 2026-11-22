@@ -229,6 +229,7 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		CakeBin:          *f.cakeBin,
 		Cwd:              dir,
 		RestoreCwd:       f.resume.set && f.resume.value != "" && !explicit["cwd"],
+		Explicit:         explicit,
 		Model:            *f.model,
 		Profile:          *f.profile,
 		Tools:            *f.tools,

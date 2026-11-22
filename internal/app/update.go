@@ -660,12 +660,14 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 
 func (m *Model) selectModel(model string) {
 	m.turn.Model = model
+	m.turn.ModelExplicit = model != ""
 	m.session.Model = ""
 	m.session.Context = nil
 }
 
 func (m *Model) selectProfile(profile string) {
 	m.turn.Profile = profile
+	m.turn.ProfileExplicit = profile != ""
 	m.session.Model = ""
 	m.session.Context = nil
 }
@@ -708,6 +710,54 @@ func (m Model) persistHistory(text string) (oversized bool) {
 	return false
 }
 
+func (m Model) runOptions(prompt string) cake.Options {
+	mode, resumeID := m.session.RunOptions()
+	restore := mode == cake.RunResume
+	opts := cake.Options{
+		Bin:       m.cfg.CakeBin,
+		Cwd:       m.cfg.Cwd,
+		Prompt:    prompt,
+		Mode:      mode,
+		ResumeID:  resumeID,
+		Fork:      m.cfg.Fork,
+		ForkID:    m.cfg.ForkID,
+		NoSession: m.cfg.NoSession,
+		DebugLog:  m.cfg.DebugLog,
+		Registry:  m.cfg.Runs,
+	}
+	if !restore || m.turn.ModelExplicit {
+		opts.Model = m.turn.Model
+	}
+	if !restore || m.turn.ProfileExplicit {
+		opts.Profile = m.turn.Profile
+	}
+	if !restore || m.cfg.Explicit["add-dir"] {
+		opts.AddDirs = m.cfg.AddDirs
+	}
+	if !restore || m.cfg.Explicit["toolbox"] {
+		opts.ToolboxDirs = m.cfg.ToolboxDirs
+	}
+	if !restore || m.cfg.Explicit["sandbox"] {
+		opts.Sandbox = m.cfg.Sandbox
+	}
+	if !restore || m.cfg.Explicit["tools"] {
+		opts.Tools = m.cfg.Tools
+	}
+	if !restore || m.cfg.Explicit["no-tools"] {
+		opts.NoTools = m.cfg.NoTools
+	}
+	if !restore || m.cfg.Explicit["no-skills"] {
+		opts.NoSkills = m.cfg.NoSkills
+	}
+	if !restore || m.cfg.Explicit["skills"] {
+		opts.Skills = m.cfg.Skills
+	}
+	if !restore || m.cfg.Explicit["system-prompt"] {
+		opts.SystemPrompt = m.cfg.SystemPrompt
+	}
+	return opts
+}
+
 func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	if m.exiting() || m.runBusy() || m.compactionBusy() {
 		return m, nil
@@ -716,29 +766,8 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	m.runOutcome = outcomeNone
 	m.runGeneration = 0
 	m.suggestion.hydrated = false
-	mode, resumeID := m.session.RunOptions()
-	run, err := cake.Start(cake.Options{
-		Bin:          m.cfg.CakeBin,
-		Cwd:          m.cfg.Cwd,
-		Prompt:       prompt,
-		Mode:         mode,
-		ResumeID:     resumeID,
-		Model:        m.turn.Model,
-		Profile:      m.turn.Profile,
-		Tools:        m.cfg.Tools,
-		NoTools:      m.cfg.NoTools,
-		AddDirs:      m.cfg.AddDirs,
-		ToolboxDirs:  m.cfg.ToolboxDirs,
-		Sandbox:      m.cfg.Sandbox,
-		NoSkills:     m.cfg.NoSkills,
-		Skills:       m.cfg.Skills,
-		SystemPrompt: m.cfg.SystemPrompt,
-		Fork:         m.cfg.Fork,
-		ForkID:       m.cfg.ForkID,
-		NoSession:    m.cfg.NoSession,
-		DebugLog:     m.cfg.DebugLog,
-		Registry:     m.cfg.Runs,
-	})
+	_, resumeID := m.session.RunOptions()
+	run, err := cake.Start(m.runOptions(prompt))
 	if err != nil {
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
 		return m, nil

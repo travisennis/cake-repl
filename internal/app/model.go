@@ -26,6 +26,7 @@ type Config struct {
 	CakeBin          string
 	Cwd              string
 	RestoreCwd       bool
+	Explicit         map[string]bool
 	Model            string
 	Profile          string
 	Tools            string
@@ -55,8 +56,10 @@ type Config struct {
 }
 
 type turnSelection struct {
-	Model   string
-	Profile string
+	Model           string
+	Profile         string
+	ModelExplicit   bool
+	ProfileExplicit bool
 }
 
 type CompactionConfig struct {
@@ -181,8 +184,13 @@ func New(cfg Config) Model {
 		pendingCalls:    map[string]*ui.ToolBlock{},
 		toolOutputMode:  ui.ToolOutputHidden,
 		session:         newSessionState(cfg.InitialMode, cfg.ResumeID),
-		turn:            turnSelection{Model: cfg.Model, Profile: cfg.Profile},
-		trustDeferred:   cfg.RestoreCwd,
+		turn: turnSelection{
+			Model:           cfg.Model,
+			Profile:         cfg.Profile,
+			ModelExplicit:   cfg.Explicit["model"] && cfg.Model != "",
+			ProfileExplicit: cfg.Explicit["profile"] && cfg.Profile != "",
+		},
+		trustDeferred: cfg.RestoreCwd,
 	}
 	if cfg.ResumeID != "" {
 		ctx, cancel := context.WithCancel(context.Background())

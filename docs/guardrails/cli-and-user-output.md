@@ -23,8 +23,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   pinning, so the two optional-value flags share one parse path.
   `-sandbox` defaults to
   `workspace-write-interactive`, not cake's own `workspace-write`, because a
-  REPL is interactive; an explicit empty value omits `--sandbox` so cake
-  resolves its own policy.
+  REPL is interactive. That default applies to a fresh session; on a resumed
+  target an unset `-sandbox` is omitted so cake restores the session's stored
+  policy. An explicit empty value is omitted too and is treated as unset, so it
+  cannot clear a stored policy.
   `-version` prints the release version followed by the embedded
   `vcs.revision` and `vcs.time` when available; a dirty build is marked
   `(modified)`.
@@ -111,20 +113,23 @@ renders it in plain text like every other surface.
   enabled; a failed, canceled, incomplete, or warned replay does not. A bare
   `-resume` hydrates nothing: it opens the startup session picker, pins nothing
   until a row is picked, and leaves the REPL fresh when the picker is closed.
-  The command `main` prints on exit reuses the effective startup run controls
-  after `-resume <id>`, so a pasted resume does not silently drop the sandbox
-  policy or model the original run was started with. `-cwd` is emitted only
-  when it was explicit; display-only flags (`-inline`, `-no-color`,
-  `-debug-log`, `-history-file`, `-output-limit`, `-max-timeline-items`, and
-  `-tool-color`) are never emitted. The remaining run controls are `-config
-  <path>` or `-no-config`, plus any of `-sandbox`, `-model`, `-profile`,
-  `-add-dir`, `-toolbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`,
-  `-system-prompt`, and non-default `-cake-bin`. An explicit override that
-  clears or defaults a value (`-sandbox ""`, `-model ""`, `-profile ""`, or
-  `-cake-bin cake`) is re-emitted — for example `-sandbox ''` — so reloading
-  the config on resume cannot reintroduce a value the original run suppressed.
-  The hint reflects the startup controls; a later `/model` or `/profile` change
-  is not reflected.
+  On a resumed target, cake-repl passes only the run controls that were
+  explicitly set on the command line or changed with `/model`/`/profile`; cake
+  restores the session's stored `run_config` (profile, sandbox policy, resolved
+  `--add-dir`/`--toolbox`/`--mcp-config` paths, tool and skill selections, an
+  explicit `--system-prompt` path, and `--no-runtime-context`) and the stored
+  working directory. The hardcoded sandbox default and config-derived
+  model/profile are fresh-session defaults only. An explicit empty value is
+  treated as unset and cannot clear a stored choice; start a new session to
+  change it permanently. The command `main` prints on exit echoes only the
+  front-end controls needed to reproduce the REPL (`-config <path>` or
+  `-no-config`, `-cake-bin` when it was explicit, and `-cwd` when it was
+  explicit) plus any pass-through flag that was an explicit override. A plain
+  `-resume <id>` is therefore the normal hint. Display-only flags (`-inline`,
+  `-no-color`, `-debug-log`, `-history-file`, `-output-limit`,
+  `-max-timeline-items`, and `-tool-color`) are never emitted. The hint
+  reflects the startup controls; a later `/model` or `/profile` change is not
+  reflected.
 - **Startup project-trust check.** During startup, one read-only
   `cake trust --status --json` probe inspects the effective working directory:
   the configured `-cwd`, or the session's stored working directory once a

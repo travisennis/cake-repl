@@ -158,13 +158,14 @@ Flags:
 | `-tool-color` | keep ANSI color in tool output instead of stripping it (default: strip) |
 | `-version` | print version, embedded revision, and commit time, then exit |
 
-cake-repl runs cake with the `workspace-write-interactive` sandbox policy by
-default, unlike cake's own `workspace-write` default, because a REPL is
+A fresh session runs cake with the `workspace-write-interactive` sandbox policy
+by default, unlike cake's own `workspace-write` default, because a REPL is
 interactive and that profile adds the macOS capabilities that let a command
 launch and automate other applications. Pass `-sandbox <policy>` to choose
 another policy (`read-only`, `workspace-write`, `workspace-write-interactive`, or
-`danger-full-access`), or `-sandbox ""` to let cake resolve its own policy from
-`CAKE_SANDBOX` or its settings.
+`danger-full-access`). On a resumed session, an unset `-sandbox` is omitted so
+cake restores the stored policy; an explicit policy overrides it. An explicit
+empty value is treated as unset and cannot clear a stored policy.
 
 ## Keybindings
 
@@ -229,6 +230,11 @@ down. The status line and timeline only show it shortened.
   `--resume <id>`, so another cake process creating a newer session in the
   same directory cannot hijack the conversation. If a task succeeds or fails
   without reporting a session id, the current run mode is left unchanged.
+  A fresh prompt uses the effective startup run controls. Once the target is a
+  resume, cake-repl passes only the run controls that were explicitly set on
+  the command line or changed with `/model`/`/profile`; cake restores the rest
+  from the session's stored `run_config`. Config-derived model and profile
+  defaults therefore apply to new sessions, not to a resumed session.
 - The status-line model comes from the stream when cake reports one: replay
   hydration reads `session_meta.model_config` (falling back to
   `session_meta.model`), and a newer cake reports the same optional identity on
@@ -312,19 +318,21 @@ down. The status line and timeline only show it shortened.
   one action; the retarget stays refused until the canceled child has been
   reaped.
 - On exit, cake-repl prints the command that resumes the session. A plain
-  `-resume <id>` restores the session's stored working directory, so `-cwd` is
-  echoed only when it was explicit at startup. Display-only startup flags
+  `-resume <id>` is enough: cake restores the session's stored run choices —
+  profile, sandbox policy, resolved `--add-dir`/`--toolbox`/`--mcp-config`
+  paths, `--tools`/`--no-tools`, `--skills`/`--no-skills`, an explicit
+  `--system-prompt` path, and `--no-runtime-context` — and the session's stored
+  working directory. The hint therefore echoes only the front-end controls
+  needed to reproduce the REPL (`-config <path>` or `-no-config`, `-cake-bin`
+  when it was explicit, and `-cwd` when it was explicit) plus any pass-through
+  flag that was explicitly set as an override. Display-only startup flags
   (`-inline`, `-no-color`, `-debug-log`, `-history-file`, `-output-limit`,
-  `-max-timeline-items`, and `-tool-color`) are never echoed. The remaining
-  startup run controls — `-config <path>` or `-no-config`, plus any of
-  `-sandbox`, `-model`, `-profile`, `-add-dir`, `-toolbox`, `-tools`,
-  `-no-tools`, `-no-skills`, `-skills`, `-system-prompt`, and non-default
-  `-cake-bin` — are still echoed until cake records and restores them. An
-  explicit override that clears or defaults a value — `-sandbox ""`,
-  `-model ""`, `-profile ""`, or `-cake-bin cake` — is re-emitted (for example
-  `-sandbox ''`), so reloading the config cannot reintroduce a value the original
-  run suppressed. The hint reflects the startup controls; a later `/model` or
-  `/profile` change is not reflected.
+  `-max-timeline-items`, and `-tool-color`) are never echoed. Config-derived
+  model and profile defaults are not echoed and are ignored on resume unless
+  set explicitly. An explicit empty value is treated as unset and cannot clear
+  a stored choice; start a new session to change it permanently. The hint
+  reflects the startup controls; a later `/model` or `/profile` change is not
+  reflected.
 
 ## Cake's native compaction
 
