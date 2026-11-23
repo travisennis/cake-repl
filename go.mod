@@ -12,7 +12,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/cellbuf v0.0.15
 	github.com/muesli/termenv v0.16.0
-	github.com/yuin/goldmark v1.8.6
+	github.com/yuin/goldmark v1.8.7
 	golang.org/x/sys v0.47.0
 )
 
