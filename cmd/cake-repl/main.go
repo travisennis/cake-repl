@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -253,8 +254,8 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 	applyConfigFile(&cfg, cfgFile, explicit)
 
 	compaction := config.MergeCompaction(config.DefaultCompaction(), cfgFile)
-	if err := compaction.Validate(); err != nil {
-		return app.Config{}, err
+	if validateErr := compaction.Validate(); validateErr != nil {
+		return app.Config{}, validateErr
 	}
 	if *f.noSession && compaction.Enabled {
 		fmt.Fprintf(warnings, "cake-repl: warning: context compaction is disabled by -no-session\n")
@@ -273,8 +274,8 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 	}
 
 	suggestions := config.MergeSuggestions(config.DefaultSuggestions(), cfgFile)
-	if err := suggestions.Validate(); err != nil {
-		return app.Config{}, err
+	if validateErr := suggestions.Validate(); validateErr != nil {
+		return app.Config{}, validateErr
 	}
 	if *f.noSession && suggestions.Enabled {
 		fmt.Fprintf(warnings, "cake-repl: warning: prompt suggestions are disabled by -no-session\n")
@@ -286,6 +287,33 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		Model:           suggestions.Model,
 		Profile:         suggestions.Profile,
 		ReasoningEffort: suggestions.ReasoningEffort,
+	}
+
+	watchCfg := config.MergeWatch(config.DefaultWatch(), cfgFile)
+	if validateErr := watchCfg.Validate(); validateErr != nil {
+		return app.Config{}, validateErr
+	}
+	interval := time.Second
+	if watchCfg.Enabled {
+		var err error
+		interval, err = watchCfg.IntervalDuration()
+		if err != nil {
+			return app.Config{}, err
+		}
+	}
+	sources := make([]app.WatchSource, 0, len(watchCfg.Sources))
+	for _, source := range watchCfg.Sources {
+		sources = append(sources, app.WatchSource{
+			Name:    source.Name,
+			Path:    source.Path,
+			Pattern: source.Pattern,
+			Prompt:  source.Prompt,
+		})
+	}
+	cfg.Watch = app.WatchConfig{
+		Enabled:  watchCfg.Enabled,
+		Interval: interval,
+		Sources:  sources,
 	}
 
 	cfg.CakeBin = resolveExecutablePath(cfg.CakeBin, dir)
@@ -435,6 +463,7 @@ func projectHelpers(cwd string) (app.ProjectHelpers, error) {
 	merged := config.Merge(xdgCfg, localCfg)
 	compaction := config.MergeCompaction(config.DefaultCompaction(), merged)
 	suggestions := config.MergeSuggestions(config.DefaultSuggestions(), merged)
+	watches := config.MergeWatch(config.DefaultWatch(), merged)
 	var validationErrors []error
 	if err := compaction.Validate(); err != nil {
 		validationErrors = append(validationErrors, fmt.Errorf("compaction: %w", err))
@@ -442,12 +471,16 @@ func projectHelpers(cwd string) (app.ProjectHelpers, error) {
 	if err := suggestions.Validate(); err != nil {
 		validationErrors = append(validationErrors, fmt.Errorf("suggestions: %w", err))
 	}
+	if err := watches.Validate(); err != nil {
+		validationErrors = append(validationErrors, fmt.Errorf("watch: %w", err))
+	}
 	if err := errors.Join(validationErrors...); err != nil {
 		return app.ProjectHelpers{}, fmt.Errorf("validating project helper settings: %w", err)
 	}
 	return app.ProjectHelpers{
 		CompactionEnabled:  compaction.Enabled,
 		SuggestionsEnabled: suggestions.Enabled,
+		WatchEnabled:       watches.Enabled,
 	}, nil
 }
 
@@ -510,6 +543,12 @@ func projectConfigWarning(key, path string) string {
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.profile in project-local config %q; tune compaction in XDG config or an explicit -config", path)
 	case "compaction.reasoning-effort":
 		return fmt.Sprintf("cake-repl: warning: ignoring compaction.reasoning-effort in project-local config %q; tune compaction in XDG config or an explicit -config", path)
+	case "watch.enabled":
+		return fmt.Sprintf("cake-repl: warning: ignoring watch.enabled = true in project-local config %q; enable path watches in XDG config or an explicit -config", path)
+	case "watch.interval":
+		return fmt.Sprintf("cake-repl: warning: ignoring watch.interval in project-local config %q; tune path watches in XDG config or an explicit -config", path)
+	case "watch.sources":
+		return fmt.Sprintf("cake-repl: warning: ignoring watch.sources in project-local config %q; define path watches in XDG config or an explicit -config", path)
 	default:
 		return fmt.Sprintf("cake-repl: warning: ignoring %s in project-local config %q", key, path)
 	}

@@ -50,6 +50,11 @@ the composer for editing; a second `Ctrl+S` submits it. Typing hides the ghost
 until the composer is empty again. While the request runs, the status line names
 it with its whole-second age (`[ idle · suggesting 3s ]`).
 
+When `[watch]` is enabled, a new file in a configured directory can start an
+automatic turn. The watch is a generic front-end trigger: it observes names,
+sizes, and mtimes, but never reads file contents or consumes another tool's
+inbox. The subagent report inbox is one configured source, not a dependency.
+
 ## Requirements
 
 - Go 1.27.3 or newer to build.
@@ -601,6 +606,68 @@ cake-suggest-bin = "cake-suggest"
   so `CAKE_DATA_DIR` selects the same root and a relative `-cake-bin` resolves
   in that directory. There is no fallback to reading session files.
 
+## Path watches (experimental)
+
+cake-repl can start a turn when files appear in a watched directory. This is a
+generic front-end trigger: it observes each file's name, size, and mtime, but
+never reads content, deletes or moves files, or advances another tool's
+cursor. The `cake-subagents` parent inbox is one configured source: the prompt
+tells the agent to collect reports through the `subagent` tool, and that tool
+keeps ownership of exactly-once report delivery.
+
+```toml
+[watch]
+enabled = true
+interval = "1s"          # 250ms to 1h; default 1s
+
+[[watch.sources]]
+name = "subagent"        # shown in the timeline and available as {source}
+path = "${CAKE_DATA_DIR}/subagent-runs/v2/parents/session-{session_id}/inbox"
+pattern = "*.json"       # optional; default *
+prompt = """
+A subagent report may be waiting in {path} ({count} new file(s): {files}).
+Call the subagent tool with action "status" to collect unread reports, then act
+on them. If no reports are pending, finish without changing anything.
+"""
+```
+
+- Placeholders are `{session_id}`, `{cwd}`, `{source}`, `{path}`, `{count}`,
+  and `{files}`. `$VAR` and `${VAR}` are expanded; a missing variable leaves
+  that source inactive. A leading `~` or `~/` expands to the home directory.
+  Relative paths resolve against the current `-cwd`. Environment expansion is
+  applied to the configured template before placeholders are substituted, so a
+  `$` in a `{cwd}` value stays literal.
+- `{session_id}` is the active cake session or resume pin. A source containing
+  it stays inactive until the REPL has a session id, which is what scopes the
+  subagent example to the current parent session.
+- The first scan of a source that becomes active treats existing files as
+  already seen. A source whose path is already resolvable at startup baselines
+  before the first poll, so a file dropped after launch triggers. After that, a
+  new or changed matching file triggers one event; files from one scan coalesce.
+  If the directory does not exist, creating it and its first file is a new
+  event. A file already recorded does not trigger again.
+- When the REPL is idle and the composer is empty, the event starts one
+  automatic turn with the expanded prompt. A running turn is never
+  interrupted; events are queued. A non-empty composer holds the automatic turn
+  until the draft is submitted or cleared, so user input wins. At most 32
+  source events are queued.
+- The automatic prompt begins with the reserved `[cake-repl-watch]` marker and
+  a fixed suffix saying the turn was automatic and every report, file, or tool
+  output is untrusted data. Live, the timeline shows one
+  `↻ watch "name" · N new file(s) · starting automatic turn` row and no user
+  row. On resume, replay recognizes the marker and shows
+  `↻ watch · automatic turn from session history` instead of a user message.
+  The prompt is not added to prompt history.
+- The watcher only starts the turn. A report delivered by the subagent report
+  hook or by the `subagent` tool is still that tool's output; cake-repl does not
+  parse the inbox, mirror its schema, or consume its cursor.
+- This is trusted configuration: XDG config or an explicit `-config`. The
+  automatically loaded `.cake-repl.toml` may only set `watch.enabled = false`;
+  `watch.enabled = true`, `watch.interval`, and every `[[watch.sources]]` entry
+  there are ignored with warnings. Enabling a watch requires at least one
+  source; each source requires `path` and `prompt`, and its pattern must be a
+  valid `filepath.Match` pattern.
+
 ## Config file
 
 Persistent defaults can be set in a TOML config file. Values from the config
@@ -638,11 +705,14 @@ or select `compaction.model`, `compaction.profile`, or
 `compaction.reasoning-effort`; each is ignored with a warning. It cannot enable
 prompt suggestions, set `suggestions.cake-suggest-bin`, or select
 `suggestions.model`, `suggestions.profile`, or `suggestions.reasoning-effort`
-either. It may disable compaction or suggestions. Set the executable, enable
-compaction or suggestions, and tune compaction in XDG config, an explicitly
-selected `-config` file, or `-cake-bin`. Explicitly selecting `.cake-repl.toml` with
-`-config` allows its `cake-bin` and compaction/suggestion values. `-no-config`
-skips file values and these warnings.
+either. It cannot enable path watches, tune `watch.interval`, or define
+`[[watch.sources]]`; those keys are ignored with warnings, and it may only set
+`watch.enabled = false`. It may likewise disable compaction or suggestions. Set
+the executable, enable compaction, suggestions, or watches, and tune their
+trusted values in XDG config, an explicitly selected `-config` file, or
+`-cake-bin`. Explicitly selecting `.cake-repl.toml` with `-config` allows its
+`cake-bin`, compaction, suggestion, and watch values. `-no-config` skips file
+values and these warnings.
 
 ### Format
 
@@ -702,6 +772,18 @@ cake-suggest-bin = "cake-suggest"
 # model = "deepseek-flash-low"
 # profile = "suggestion"
 # reasoning-effort = "low"
+
+# Start a turn when files appear in a watched directory (default: off).
+# Trusted config only; the automatic project-local file may only set
+# enabled = false.
+[watch]
+enabled = false
+interval = "1s"
+# [[watch.sources]]
+# name = "subagent"
+# path = "${CAKE_DATA_DIR}/subagent-runs/v2/parents/session-{session_id}/inbox"
+# pattern = "*.json"
+# prompt = "A subagent report may be waiting. Call the subagent tool with action \"status\" to collect unread reports, then act on them."
 ```
 
 ### Merge order
@@ -716,7 +798,8 @@ applies to `compaction.enabled = true`, `compaction.cake-compact-bin`,
 may only disable compaction. It also applies to `suggestions.enabled = true`,
 `suggestions.cake-suggest-bin`, `suggestions.model`, `suggestions.profile`, and
 `suggestions.reasoning-effort`; the project-local layer may only disable
-suggestions.
+suggestions. The same rule covers `watch.enabled = true`, `watch.interval`, and
+`[[watch.sources]]`; the project-local layer may only disable watches.
 Trusted relative executable paths keep their usual resolution. A CLI flag
 always wins over the same value in the config file. Cake invocation controls such as `-fork`, `-no-session`, `-toolbox`,
 `-sandbox`, `-tools`, `-no-tools`, `-no-skills`, `-skills`, and
@@ -832,6 +915,11 @@ validation is available with `just release-check`.
   cancels or that fails after its append may already have changed the session;
   the next complete `turn_usage` reports the real context. A single long tool
   loop that fills the window before the prompt ends is not covered.
+- Path watches are polled only while the REPL runs; they do not survive exit
+  and do not watch recursively. Files already present when a source first
+  becomes active are treated as seen, so a report hook or tool call owns them.
+  An automatic turn is an ordinary metered cake run: it queues behind a busy
+  turn, waits while the composer is non-empty, and can be stopped with Ctrl+C.
 - Suspension recovery covers catchable stop signals. Because the stop uses
   SIGSTOP, the shell reports the resumed job as `suspended (signal)`; continuing
   it in the background (`bg`) puts the REPL back in charge of the terminal while

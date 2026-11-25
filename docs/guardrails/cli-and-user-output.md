@@ -37,8 +37,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   `tool-color`, the opt-in `[compaction]` policy table (`enabled`,
   `cake-compact-bin`, `max-context-tokens`, `trigger-tokens`,
   `threshold-percent`, `keep-tokens`, and the summary's `model`, `profile`,
-  `reasoning-effort`), and the opt-in `[suggestions]` table (`enabled`,
-  `cake-suggest-bin`, `model`, `profile`, `reasoning-effort`). The absolute
+  `reasoning-effort`), the opt-in `[suggestions]` table (`enabled`,
+  `cake-suggest-bin`, `model`, `profile`, `reasoning-effort`), and the opt-in
+  `[watch]` table (`enabled`, `interval`, and `sources[]` with `name`, `path`,
+  `pattern`, `prompt`). The absolute
   trigger values are
   between-turn targets, not live caps: the REPL checks them only after a
   completed turn, from the newest complete `turn_usage`, so a long invocation
@@ -54,6 +56,14 @@ commands or help text (`internal/app/commands.go`), key bindings
   enable suggestions, set `suggestions.cake-suggest-bin`, or select
   `suggestions.model`/`suggestions.profile`/`suggestions.reasoning-effort`;
   each is ignored with a warning, while `enabled = false` still applies.
+  The same rule covers `watch.enabled = true`, `watch.interval`, and
+  `[[watch.sources]]`; the automatic project-local layer may only disable
+  watches. A watch source requires `path` and `prompt`; `pattern` defaults to
+  `*`; `interval` is a duration between 250ms and 1h and defaults to `1s`.
+  `path` expands `{session_id}`, `{cwd}`, `$VAR`/`${VAR}`, and a leading `~`;
+  a missing environment variable leaves that source inactive. The first scan
+  of an active source records existing entries as seen. Only XDG config or an
+  explicit `-config` may define sources, enable watches, or tune the interval.
   Explicit `-config` may
   select the project file; `-no-config` skips file values and warnings. Other
   project-local keys retain their existing behavior.
@@ -170,8 +180,12 @@ renders it in plain text like every other surface.
   as a single muted `(thinking)` marker per reasoning burst: consecutive
   `reasoning` events coalesce, any other event ends the burst, and the payload
   (e.g. a `summary`) is never shown because providers differ in what they emit.
-  Reasoning and tool output remain secondary, while task starts, info,
-  completions, warnings, and errors use distinct compact markers. The one-line
+  A path-watch trigger renders as one `↻` info-styled row,
+  `watch "name" · N new file(s) · starting automatic turn`, never as a user
+  row. A resumed user message beginning with the reserved `[cake-repl-watch]`
+  marker renders as `↻ watch · automatic turn from session history` instead of
+  a user row. Reasoning and tool output remain secondary, while task starts,
+  info, completions, warnings, and errors use distinct compact markers. The one-line
   status display leads with a bracketed operational state: `idle`, `running`,
   `compacting <elapsed>`, `stopping task`, `stopping compaction`,
   `loading history`, `stopping history`, `browsing sessions`, or `exiting`,
@@ -359,6 +373,12 @@ renders it in plain text like every other surface.
 ## Verification focus
 
 - `just ci` for any change to flags, commands, key bindings, or render kinds.
+- For a path-watch change, drive the REPL with a temporary watched directory,
+  a temporary explicit `-config`, and a fake or real cake engine: assert the
+  first-scan baseline, an idle automatic turn, a report arriving during a run
+  is queued without interruption, a composer draft holds the auto-turn, the
+  timeline shows `↻` and no user row, and a `-resume` replay of a marked
+  prompt renders the watch provenance row.
 - For UI/output changes, capture a terminal screenshot for the handoff with the
   [`drive-tui`](../../.agents/skills/drive-tui/SKILL.md) skill: it launches the
   built binary in a headless tmux pane, so the procedure is repeatable.
@@ -381,6 +401,17 @@ renders it in plain text like every other surface.
   guardrail, and `AGENTS.md`. Slash commands and key bindings
   must agree across `README.md`, the `HelpText` constant in `commands.go`, and
   `AGENTS.md`/routing. Update the applicable surfaces together.
+- **Coupling a watch to one tool's inbox.** A path watch observes only names,
+  sizes, and mtimes. Do not read file contents, parse a report schema, delete
+  or move files, or advance a tool's cursor in cake-repl; that duplicates the
+  owner's delivery and can lose or replay reports. The subagent inbox is one
+  configured source, not a hard dependency. Start the configured turn and let
+  the tool or its hook deliver.
+- **Starting a watch turn over user input.** Start only while idle, with an
+  empty composer and no live or draining run, replay, or compaction. Queue a
+  busy arrival and never interrupt the running turn; a draft holds the
+  automatic turn. Skipping these gates spends quota and takes control away
+  from the user.
 - **Color assumptions.** Don't hardcode escape codes; go through `internal/ui`
   theme/lipgloss so `-no-color` (termenv `Ascii`) still works.
 - **Width/layout regressions.** The timeline owner keeps the items and their

@@ -166,7 +166,9 @@ consumes cake events. This is the project's core external contract.
   Replay failures are structured `replay_error` records and non-zero exits:
   input errors use exit 3; corrupt, unsupported-format, and permission errors
   use exit 1. Older cake binaries that do not support replay must degrade to a
-  non-fatal warning.
+  non-fatal warning. The opt-in path watcher is front-end state only: it lists
+  directory entries and starts an ordinary app turn; it never invokes cake,
+  reads a cake session file, or consumes another tool's inbox.
 - **Read-only session listing.** `cake sessions list --json` returns the
   envelope `{schema_version, command, status, summary, data.sessions[]}` where
   each session carries `session_id`, `first_prompt`, and `timestamp` (cake 0.1.0,

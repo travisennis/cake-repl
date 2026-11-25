@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -20,6 +21,7 @@ type Config struct {
 	ToolColorSet     bool        `toml:"-"`
 	Compaction       Compaction  `toml:"compaction"`
 	Suggestions      Suggestions `toml:"suggestions"`
+	Watch            Watch       `toml:"watch"`
 }
 
 type Compaction struct {
@@ -46,11 +48,28 @@ type Suggestions struct {
 	ReasoningEffort string `toml:"reasoning-effort"`
 }
 
+type Watch struct {
+	Enabled    bool          `toml:"enabled"`
+	EnabledSet bool          `toml:"-"`
+	Interval   string        `toml:"interval"`
+	Sources    []WatchSource `toml:"sources"`
+}
+
+type WatchSource struct {
+	Name    string `toml:"name"`
+	Path    string `toml:"path"`
+	Pattern string `toml:"pattern"`
+	Prompt  string `toml:"prompt"`
+}
+
 const (
 	DefaultCakeCompactBin             = "cake-compact"
 	DefaultCakeSuggestBin             = "cake-suggest"
 	DefaultCompactionThresholdPercent = 80
 	DefaultCompactionKeepTokens       = 20_000
+	DefaultWatchInterval              = "1s"
+	minWatchInterval                  = 250 * time.Millisecond
+	maxWatchInterval                  = time.Hour
 )
 
 func DefaultCompaction() Compaction {
@@ -63,6 +82,74 @@ func DefaultCompaction() Compaction {
 
 func DefaultSuggestions() Suggestions {
 	return Suggestions{CakeSuggestBin: DefaultCakeSuggestBin}
+}
+
+func DefaultWatch() Watch {
+	return Watch{Interval: DefaultWatchInterval}
+}
+
+func (w Watch) Normalize() Watch {
+	w.Sources = append([]WatchSource(nil), w.Sources...)
+	if w.Interval == "" {
+		w.Interval = DefaultWatchInterval
+	}
+	for i := range w.Sources {
+		if w.Sources[i].Pattern == "" {
+			w.Sources[i].Pattern = "*"
+		}
+		w.Sources[i].Name = strings.TrimSpace(w.Sources[i].Name)
+		if w.Sources[i].Name == "" {
+			w.Sources[i].Name = fmt.Sprintf("source-%d", i+1)
+		}
+	}
+	return w
+}
+
+func (w Watch) IntervalDuration() (time.Duration, error) {
+	d, err := time.ParseDuration(w.Interval)
+	if err != nil {
+		return 0, fmt.Errorf("watch.interval must be a duration, got %q", w.Interval)
+	}
+	if d < minWatchInterval || d > maxWatchInterval {
+		return 0, fmt.Errorf("watch.interval must be between %s and %s, got %s", minWatchInterval, maxWatchInterval, d)
+	}
+	return d, nil
+}
+
+func (w Watch) Validate() error {
+	if !w.Enabled {
+		return nil
+	}
+	if _, err := w.IntervalDuration(); err != nil {
+		return err
+	}
+	if len(w.Sources) == 0 {
+		return errors.New("watch.sources must name at least one path when watch.enabled is true")
+	}
+	names := make(map[string]bool, len(w.Sources))
+	for i, source := range w.Sources {
+		if strings.TrimSpace(source.Path) == "" {
+			return fmt.Errorf("watch.sources[%d].path must not be empty", i)
+		}
+		if strings.TrimSpace(source.Prompt) == "" {
+			return fmt.Errorf("watch.sources[%d].prompt must not be empty", i)
+		}
+		if source.Pattern == "" {
+			source.Pattern = "*"
+		}
+		if _, err := filepath.Match(source.Pattern, "x"); err != nil {
+			return fmt.Errorf("watch.sources[%d].pattern is invalid: %w", i, err)
+		}
+		name := strings.TrimSpace(source.Name)
+		if name == "" {
+			name = fmt.Sprintf("source-%d", i+1)
+		}
+		if names[name] {
+			return fmt.Errorf("watch.sources[%d].name %q is duplicated", i, name)
+		}
+		names[name] = true
+	}
+	return nil
 }
 
 func (s Suggestions) Validate() error {
@@ -202,6 +289,19 @@ func LoadProject(path string) (cfg *Config, ignored []string, err error) {
 		ignored = append(ignored, "compaction.reasoning-effort")
 		cfg.Compaction.ReasoningEffort = ""
 	}
+	if definedFold(meta, "watch", "enabled") && cfg.Watch.Enabled {
+		ignored = append(ignored, "watch.enabled")
+		cfg.Watch.Enabled = false
+		cfg.Watch.EnabledSet = false
+	}
+	if definedFold(meta, "watch", "interval") {
+		ignored = append(ignored, "watch.interval")
+		cfg.Watch.Interval = ""
+	}
+	if definedFold(meta, "watch", "sources") {
+		ignored = append(ignored, "watch.sources")
+		cfg.Watch.Sources = nil
+	}
 	return cfg, ignored, nil
 }
 
@@ -217,6 +317,7 @@ func load(path string) (*Config, toml.MetaData, error) {
 	cfg.ToolColorSet = definedFold(meta, "tool-color")
 	cfg.Compaction.EnabledSet = definedFold(meta, "compaction", "enabled")
 	cfg.Suggestions.EnabledSet = definedFold(meta, "suggestions", "enabled")
+	cfg.Watch.EnabledSet = definedFold(meta, "watch", "enabled")
 	return cfg, meta, nil
 }
 
@@ -264,6 +365,7 @@ func Merge(dst, src *Config) *Config {
 	}
 	mergeCompaction(&dst.Compaction, src.Compaction)
 	mergeSuggestions(&dst.Suggestions, src.Suggestions)
+	mergeWatch(&dst.Watch, src.Watch)
 	return dst
 }
 
@@ -321,6 +423,26 @@ func mergeSuggestions(dst *Suggestions, src Suggestions) {
 	}
 	if src.ReasoningEffort != "" {
 		dst.ReasoningEffort = src.ReasoningEffort
+	}
+}
+
+func MergeWatch(base Watch, file *Config) Watch {
+	if file != nil {
+		mergeWatch(&base, file.Watch)
+	}
+	return base.Normalize()
+}
+
+func mergeWatch(dst *Watch, src Watch) {
+	if src.EnabledSet {
+		dst.Enabled = src.Enabled
+		dst.EnabledSet = true
+	}
+	if src.Interval != "" {
+		dst.Interval = src.Interval
+	}
+	if len(src.Sources) > 0 {
+		dst.Sources = append([]WatchSource(nil), src.Sources...)
 	}
 }
 

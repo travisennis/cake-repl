@@ -79,6 +79,8 @@ internal/compact/        External compactor: one documented subprocess and its r
   compact.go             Args, Compact: bounded subprocess lifecycle + document decoding.
 internal/suggest/        External prompt suggester: one documented subprocess and its result document.
   suggest.go             Args, Suggest: bounded subprocess lifecycle + document decoding.
+internal/watch/          Generic path-watch tracker for opt-in automatic turns.
+  watch.go               Source paths, first-scan baseline, new-file events, prompt expansion.
 internal/app/            Bubble Tea state machine (the REPL itself).
   model.go               Model struct, layout, viewport wiring.
   timeline.go            Timeline owner: items, cached rendered rows, cap trim, dirty state.
@@ -91,16 +93,18 @@ internal/app/            Bubble Tea state machine (the REPL itself).
   history.go             In-memory prompt history.
   sessions.go            /sessions browser state, rows, and layout.
   trust.go               Startup project-trust probe result and advisory warning.
+  watch.go               Path-watch tick, coalescing queue, and automatic-turn start.
   view.go                Top-level View composition.
 internal/ui/             Pure rendering: timeline, status line, tool blocks, theme.
 internal/version/        Binary version plus embedded revision and commit time.
 ```
 
 Dependency direction is one-way: `app` depends on `cake`, `compact`,
-`suggest`, `childproc`, and `ui`; `cake`, `compact`, `suggest`, and `ui` depend
-on neither `app` nor each other. `cake`, `compact`, and `suggest` also use the
-leaf `internal/childproc` package for the shared session boundary, process
-outcome classification, and bounded stdout/stderr buffers. Keep it that way.
+`suggest`, `watch`, `childproc`, and `ui`; `cake`, `compact`, `suggest`,
+`watch`, and `ui` depend on neither `app` nor each other. `cake`, `compact`,
+and `suggest` also use the leaf `internal/childproc` package for the shared
+session boundary, process outcome classification, and bounded stdout/stderr
+buffers. `watch` is a pure filesystem tracker. Keep it that way.
 
 ## Architectural invariants
 
@@ -269,6 +273,26 @@ outcome classification, and bounded stdout/stderr buffers. Keep it that way.
   warns. The REPL never reads session files; `-no-session` disables the
   feature; the untrusted project-local config layer cannot enable it, choose
   its executable, or tune any threshold, including the absolute fields.
+- **Path watches are generic, trusted, and non-consuming.** An opt-in
+  `[watch]` table maps one or more directory sources to prompt templates. On a
+  poll tick, `internal/watch` lists matching entries and emits one coalesced
+  event for new or changed names; it never reads file contents, moves files,
+  or advances another tool's cursor. The first scan of a source that becomes
+  active records existing entries as seen; a source whose path contains
+  `{session_id}` stays inactive until the session id exists. The app queues at
+  most 32 source events, starts one automatic turn only while idle and the
+  composer is empty, and never interrupts a running turn. A queued event waits
+  through a user turn, and a queued watch event suppresses starting a new
+  prompt suggestion, so user input wins. The automatic prompt carries the
+  reserved `[cake-repl-watch]`
+  marker and an untrusted-data suffix; live rendering uses one `KindWatch`
+  provenance row rather than a user row, and replay recognizes the marker so
+  resumed history does not present the automatic prompt as a user message. The
+  feature has no subagent schema or cursor coupling: the subagent inbox is one
+  configured source, and its report hook or tool owns delivery. Only XDG
+  config or an explicit `-config` may define sources or enable/tune the
+  feature; the automatic project-local layer may only disable it. The watcher
+  runs no subprocess and scans directories in the update loop.
 - **Child processes are detached from the REPL terminal.** On POSIX, every live
   prompt, replay, session listing, project-trust probe, opt-in compaction, and
   prompt suggestion starts in its own session with

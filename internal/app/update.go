@@ -107,6 +107,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, nil
 
+	case watchTickMsg:
+		return m.handleWatchTick()
+
 	case spinner.TickMsg:
 		if !m.runBusy() && !m.compactionBusy() && !m.suggestionInFlight() {
 			return m, nil
@@ -421,6 +424,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.clearSuggestion()
 	busy := m.runBusy() || m.replayBusy() || m.compactionBusy()
 	m.session.Reset()
+	m.watch.queue = nil
 	if m.runBusy() {
 		m.cancelRun()
 	}
@@ -610,6 +614,7 @@ func (m Model) execCommand(cmd Command) (tea.Model, tea.Cmd) {
 	case CmdNew:
 		m.clearSuggestion()
 		m.session.Reset()
+		m.watch.queue = nil
 		m.native.reset()
 		m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt starts a fresh cake session"})
 
@@ -702,6 +707,7 @@ func (m Model) selectionClearedText(kind string) string {
 func (m Model) resumeSession(id string) (tea.Model, tea.Cmd) {
 	m.clearSuggestion()
 	m.session.UseResume(id)
+	m.watch.queue = nil
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "next prompt resumes session " + id})
 	return m, nil
 }
@@ -778,14 +784,14 @@ func (m Model) runOptionsFor(mode cake.RunMode, resumeID, prompt string) cake.Op
 	return opts
 }
 
-func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
+func (m Model) startRun(prompt string) (Model, tea.Cmd) {
 	if m.exiting() || m.runBusy() || m.compactionBusy() {
 		return m, nil
 	}
 	return m.startRunCmd(prompt, m.runOptions(prompt), true)
 }
 
-func (m Model) startRunCmd(prompt string, opts cake.Options, record bool) (tea.Model, tea.Cmd) {
+func (m Model) startRunCmd(prompt string, opts cake.Options, record bool) (Model, tea.Cmd) {
 	m.sawComplete = false
 	m.runOutcome = outcomeNone
 	m.runGeneration = 0
@@ -842,7 +848,8 @@ func (m Model) retryFork(sourceID string) (tea.Model, tea.Cmd) {
 		Text: "session context changed — retrying as a fork of " + ui.ShortID(sourceID),
 	})
 	m.syncViewport()
-	return m.startRunCmd(m.runPrompt, m.forkRetryOptions(sourceID), false)
+	next, cmd := m.startRunCmd(m.runPrompt, m.forkRetryOptions(sourceID), false)
+	return next, cmd
 }
 
 func (m *Model) applyEvent(ev cake.Event) {
@@ -911,7 +918,11 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 			}
 		case "user":
 			if replay && strings.TrimSpace(e.Content) != "" {
-				m.appendItem(ui.Item{Kind: ui.KindUser, Text: e.Content})
+				if text, ok := replayWatchNotice(e.Content); ok {
+					m.appendItem(ui.Item{Kind: ui.KindWatch, Text: text})
+				} else {
+					m.appendItem(ui.Item{Kind: ui.KindUser, Text: e.Content})
+				}
 			}
 		default:
 			m.logDebug(fmt.Sprintf("%s message: %s", e.Role, e.Content))
@@ -1035,6 +1046,10 @@ func (m *Model) applyRestoredProjectHelpers(cwd string) {
 	}
 	m.cfg.Compaction.Enabled = helpers.CompactionEnabled
 	m.cfg.Suggestions.Enabled = helpers.SuggestionsEnabled
+	m.cfg.Watch.Enabled = helpers.WatchEnabled
+	if !m.cfg.Watch.Enabled {
+		m.watch.queue = nil
+	}
 }
 
 func (m *Model) logDebug(text string) {
@@ -1124,7 +1139,7 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 	}
 
 	var cmds []tea.Cmd
-	if m.completedTurn() {
+	if m.completedTurn() && !m.watchQueued() {
 		next, cmd := m.maybeStartSuggestion()
 		m = next
 		if cmd != nil {
@@ -1133,6 +1148,13 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 	}
 	if m.shouldCompactAfter() {
 		next, cmd := m.startCompaction()
+		m = next
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if !m.compactionBusy() && !m.exiting() {
+		next, cmd := m.maybeStartWatchTurn()
 		m = next
 		if cmd != nil {
 			cmds = append(cmds, cmd)

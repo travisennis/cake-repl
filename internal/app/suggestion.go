@@ -135,6 +135,9 @@ func (m Model) canSuggest() bool {
 	if !m.completedTurn() && !m.suggestion.hydrated {
 		return false
 	}
+	if m.watchQueued() {
+		return false
+	}
 	mode, sessionID := m.session.RunOptions()
 	return mode == cake.RunResume && sessionID != ""
 }

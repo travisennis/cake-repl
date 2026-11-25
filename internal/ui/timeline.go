@@ -16,6 +16,7 @@ const (
 	KindReasoning
 	KindTool
 	KindHook
+	KindWatch
 	KindTaskStart
 	KindComplete
 	KindError
@@ -82,6 +83,8 @@ func RenderItem(th Theme, it Item, width int, outputLimit int, toolOutputMode To
 		return renderTool(th, it.Tool, width, outputLimit, toolOutputMode)
 	case KindHook:
 		return wrap(th.Hook, "⚑ "+it.Text)
+	case KindWatch:
+		return wrap(th.Info, "↻ "+it.Text)
 	case KindTaskStart:
 		return wrap(th.Debug, "→ "+it.Text)
 	case KindComplete:

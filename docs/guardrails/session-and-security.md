@@ -170,6 +170,28 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   `cake-suggest-bin`, or select
   `suggestions.model`/`suggestions.profile`/`suggestions.reasoning-effort`; it
   may only disable it.
+- **Path watches are opt-in, trusted, and non-consuming.** The `[watch]` table
+  starts an automatic cake turn when a configured directory gains a new or
+  changed matching file. The watcher is an in-process poll over
+  `os.ReadDir`; it never reads file contents, moves or deletes entries,
+  advances a subagent inbox cursor, or spawns a child. Each source's first
+  scan records existing entries as seen, so a report hook or tool call owns
+  those; a source whose path contains `{session_id}` stays inactive until the
+  session exists. At most 32 source events are coalesced in memory. An
+  automatic turn starts only while idle with an empty composer and no live or
+  draining run, replay, or compaction; it never interrupts a turn, waits
+  behind a submitted user turn, and is suppressed while a watch event is
+  queued so a prompt suggestion cannot compete. The automatic prompt starts
+  with the reserved `[cake-repl-watch]` marker and an untrusted-data suffix;
+  live rendering uses a `KindWatch` row, replay recognizes the marker, and the
+  prompt is not written to prompt history. Only XDG config or an explicit
+  `-config` may enable or tune watches or define sources; the automatic
+  project-local `.cake-repl.toml` may only set `watch.enabled = false`, and
+  `enabled = true`, `interval`, and every source there are ignored with a
+  warning. Source paths, names, patterns, and prompt templates are never read
+  from an untrusted project layer. The feature has no subagent schema or
+  cursor dependency; the subagent parent inbox is one configured source, and
+  that tool or its hook still owns delivery.
 - **Unobserved-exit shutdown.** `main` owns a process-level
   `childproc.Registry`; the app registers the live run, a startup replay that may
   still be starting, the project-trust probe, the compactor, the suggester, and
@@ -359,6 +381,11 @@ or anything touching `-debug-log` or what is written to disk/terminal.
 - `just vuln` (govulncheck) when changing dependencies that touch process or I/O.
 - Terminal behavior around a suspend needs a driven session in
   [cli-and-user-output.md](cli-and-user-output.md), in both render modes.
+- For path watches, drive the REPL with a temporary watched directory and an
+  explicit `-config`: confirm first-scan baseline, an idle automatic turn, a
+  busy arrival queued without interruption, a non-empty composer holding the
+  turn, and no report content read or cursor advanced by cake-repl. A replay
+  of a marked automatic prompt must render the watch provenance row.
 
 ## Common failure modes
 
@@ -394,6 +421,19 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   the session without the user opting in. Key presence must be matched
   case-insensitively, as TOML decoding does; a case-sensitive metadata lookup
   misses `[Compaction] Enabled = true` and lets it through.
+- **Letting a project file start metered turns.** The automatically loaded
+  `.cake-repl.toml` may only disable path watches. `watch.enabled = true`,
+  `watch.interval`, and `[[watch.sources]]` must be ignored with warnings; a
+  cloned repository must not be able to start model turns or point the REPL at
+  arbitrary directories. Key presence must be matched case-insensitively, as
+  the TOML decoder does.
+- **Consuming or parsing a watched inbox.** Advancing a subagent cursor,
+  deleting or moving inbox files, or decoding its report schema in cake-repl
+  duplicates the owner's delivery and can lose or replay reports. The watch
+  emits a path-change event; it does not read the file.
+- **Starting an automatic turn over the user.** A watch event must not
+  interrupt a run, bypass the idle/composer gate, or start while the session
+  browser is open. Queue it and let the user's submitted turn finish first.
 - **Leaking secrets.** Sending raw stream lines to the timeline, stdout, or a
   world-readable file; widening `-debug-log` permissions.
 - **Reopening terminal injection.** Adding a render path that bypasses

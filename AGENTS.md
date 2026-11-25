@@ -144,7 +144,8 @@ Preserve session-hijack prevention and never leak raw stream content.
 
 ### Core Runtime, UI, And Implementation Quality
 
-Use for `internal/app` logic, `internal/ui` rendering, and code style.
+Use for `internal/app` logic, `internal/watch` path tracking, `internal/ui`
+rendering, and code style.
 
 Consult:
 

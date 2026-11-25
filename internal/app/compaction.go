@@ -173,8 +173,16 @@ func (m Model) finishCompaction(msg compactionDoneMsg) (Model, tea.Cmd) {
 	if m.exiting() {
 		return m.maybeQuit()
 	}
-	m.applyPendingSuggestion()
-	return m, m.titleCmd()
+	if m.watchQueued() {
+		m.suggestion.dropHeld()
+	} else {
+		m.applyPendingSuggestion()
+	}
+	next, cmd := m.maybeStartWatchTurn()
+	if cmd != nil {
+		return next, cmd
+	}
+	return next, next.titleCmd()
 }
 
 func (m *Model) applyCompactionDocument(sessionID string, doc compact.Document) {

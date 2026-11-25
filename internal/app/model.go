@@ -54,6 +54,7 @@ type Config struct {
 	Inline               bool
 	Compaction           CompactionConfig
 	Suggestions          SuggestionConfig
+	Watch                WatchConfig
 }
 
 type turnSelection struct {
@@ -66,6 +67,7 @@ type turnSelection struct {
 type ProjectHelpers struct {
 	CompactionEnabled  bool
 	SuggestionsEnabled bool
+	WatchEnabled       bool
 }
 
 type CompactionConfig struct {
@@ -86,6 +88,19 @@ type SuggestionConfig struct {
 	Model           string
 	Profile         string
 	ReasoningEffort string
+}
+
+type WatchConfig struct {
+	Enabled  bool
+	Interval time.Duration
+	Sources  []WatchSource
+}
+
+type WatchSource struct {
+	Name    string
+	Path    string
+	Pattern string
+	Prompt  string
 }
 
 const (
@@ -142,6 +157,7 @@ type Model struct {
 	compactionSeq     uint64
 	native            nativeCompactionState
 	suggestion        suggestionState
+	watch             watchState
 
 	session        sessionState
 	turn           turnSelection
@@ -198,8 +214,10 @@ func New(cfg Config) Model {
 			ModelExplicit:   cfg.Explicit["model"] && cfg.Model != "",
 			ProfileExplicit: cfg.Explicit["profile"] && cfg.Profile != "",
 		},
+		watch:         newWatchState(cfg.Watch),
 		trustDeferred: cfg.RestoreCwd,
 	}
+	m.watch.prime(m.watchSessionID(), m.cfg.Cwd)
 	if cfg.ResumeID != "" {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -342,6 +360,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.startupCmd != nil {
 		cmds = append(cmds, m.startupCmd)
+	}
+	if m.watchEnabled() {
+		cmds = append(cmds, watchTickCmd(m.cfg.Watch.Interval))
 	}
 	if m.replay.phase() == replayLoading {
 		cmds = append(cmds, startReplayCmd(m.cfg, m.replay.op.key, m.replay.ctx, m.replay.done))
