@@ -862,10 +862,13 @@ func (m *Model) applyReplayEvent(ev cake.Event) bool {
 
 func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 	cwdRestored := false
+	displayOnly := replay && m.replay.sourceFork
 	switch e := ev.(type) {
 	case cake.TaskStart:
-		m.session.OnTaskStart(e)
-		m.session.OnModel(e.ModelConfig, e.Model)
+		if !displayOnly {
+			m.session.OnTaskStart(e)
+			m.session.OnModel(e.ModelConfig, e.Model)
+		}
 		m.appendItem(ui.Item{Kind: ui.KindTaskStart, Text: "task started · session " + ui.ShortID(e.SessionID)})
 		if replay {
 			m.sawComplete = false
@@ -873,11 +876,13 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 
 	case cake.SessionMeta:
 		if replay {
-			if e.SessionID != "" {
-				m.session.SessionID = e.SessionID
+			if !displayOnly {
+				if e.SessionID != "" {
+					m.session.SessionID = e.SessionID
+				}
+				m.session.OnModel(e.ModelConfig, e.Model)
+				m.session.OnStoredRunConfig(e.RunConfig, e.Profile)
 			}
-			m.session.OnModel(e.ModelConfig, e.Model)
-			m.session.OnStoredRunConfig(e.RunConfig, e.Profile)
 			if m.cfg.RestoreCwd && e.Cwd != "" {
 				if info, err := os.Stat(e.Cwd); err == nil && info.IsDir() {
 					m.cfg.Cwd = e.Cwd
@@ -892,7 +897,7 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 		}
 
 	case cake.PromptContext:
-		if replay {
+		if replay && !displayOnly {
 			if e.SessionID != "" {
 				m.session.SessionID = e.SessionID
 			}
@@ -964,11 +969,15 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 		}
 
 	case cake.TurnUsage:
-		m.session.OnTurnUsage(e)
+		if !displayOnly {
+			m.session.OnTurnUsage(e)
+		}
 
 	case cake.Compaction:
 		if replay {
-			m.session.OnCompaction(e)
+			if !displayOnly {
+				m.session.OnCompaction(e)
+			}
 			m.appendItem(ui.Item{
 				Kind: ui.KindInfo,
 				Text: compactionMarker(e.EstimatedInput.BeforeTokens, e.EstimatedInput.AfterTokens, e.RetainedCount),
@@ -992,8 +1001,10 @@ func (m *Model) applyEventMode(ev cake.Event, replay bool) bool {
 		}
 
 	case cake.TaskComplete:
-		m.session.OnTaskComplete(e)
-		m.session.OnModel(e.ModelConfig, e.Model)
+		if !displayOnly {
+			m.session.OnTaskComplete(e)
+			m.session.OnModel(e.ModelConfig, e.Model)
+		}
 		m.sawComplete = true
 		if e.IsError {
 			text := "task failed"

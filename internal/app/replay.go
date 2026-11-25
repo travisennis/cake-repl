@@ -19,12 +19,13 @@ const (
 )
 
 type replayState struct {
-	op     pendingOperation
-	seq    uint64
-	ctx    context.Context
-	done   chan struct{}
-	run    *cake.Run
-	warned bool
+	op         pendingOperation
+	seq        uint64
+	ctx        context.Context
+	done       chan struct{}
+	run        *cake.Run
+	warned     bool
+	sourceFork bool
 }
 
 func (r replayState) phase() replayPhase {
@@ -38,7 +39,7 @@ func (r replayState) phase() replayPhase {
 	}
 }
 
-func (r *replayState) begin(ctx context.Context, generation sessionGeneration, sessionID string, cancel context.CancelFunc, done chan struct{}) operationKey {
+func (r *replayState) begin(ctx context.Context, generation sessionGeneration, sessionID string, sourceFork bool, cancel context.CancelFunc, done chan struct{}) operationKey {
 	r.seq++
 	key := operationKey{generation: generation, request: r.seq, sessionID: sessionID}
 	r.op.begin(key, cancel, done)
@@ -46,6 +47,7 @@ func (r *replayState) begin(ctx context.Context, generation sessionGeneration, s
 	r.done = done
 	r.run = nil
 	r.warned = false
+	r.sourceFork = sourceFork
 	return key
 }
 
@@ -152,7 +154,7 @@ func (m Model) finishReplayStart(msg replayStartedMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	current := msg.key.generation == m.session.Generation() &&
-		msg.key.sessionID == m.session.ResumeID
+		msg.key.sessionID == m.cfg.HydrateID
 	if msg.err != nil || msg.run == nil {
 		if msg.run != nil {
 			msg.run.Cancel()
@@ -190,7 +192,7 @@ func (m Model) handleReplayEvents(msg replayEventsMsg) (tea.Model, tea.Cmd) {
 	cwdRestored := false
 	if m.replay.phase() == replayLoading &&
 		msg.key.generation == m.session.Generation() &&
-		msg.key.sessionID == m.session.ResumeID {
+		msg.key.sessionID == m.cfg.HydrateID {
 		for _, ev := range msg.evs {
 			if m.applyReplayEvent(ev) {
 				cwdRestored = true
@@ -215,7 +217,7 @@ func (m Model) finishReplay(msg replayDoneMsg) (tea.Model, tea.Cmd) {
 	m.replay.clear()
 	trustCmd := m.startDeferredTrustProbeIfIdle()
 	current := msg.key.generation == m.session.Generation() &&
-		msg.key.sessionID == m.session.ResumeID
+		msg.key.sessionID == m.cfg.HydrateID
 	if !current {
 		next, cmd := m.afterPresentationChange()
 		if trustCmd != nil {

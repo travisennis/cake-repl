@@ -40,6 +40,8 @@ type Config struct {
 	SystemPrompt         string
 	Fork                 bool
 	ForkID               string
+	HydrateID            string
+	HydrateFork          bool
 	NoSession            bool
 	InitialMode          cake.RunMode
 	ResumeID             string
@@ -218,10 +220,10 @@ func New(cfg Config) Model {
 		trustDeferred: cfg.RestoreCwd,
 	}
 	m.watch.prime(m.watchSessionID(), m.cfg.Cwd)
-	if cfg.ResumeID != "" {
+	if cfg.HydrateID != "" {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
-		m.replay.begin(ctx, m.session.Generation(), cfg.ResumeID, cancel, done)
+		m.replay.begin(ctx, m.session.Generation(), cfg.HydrateID, cfg.HydrateFork, cancel, done)
 		m.trackChild("replay", cancel, done)
 	}
 	m.appendItem(ui.Item{Kind: ui.KindInfo, Text: "cake-repl — /help for commands"})

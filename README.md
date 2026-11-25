@@ -59,9 +59,10 @@ inbox. The subagent report inbox is one configured source, not a dependency.
 
 - Go 1.27.3 or newer to build.
 - `cake` installed and on `PATH`, or point at a binary with `-cake-bin`.
-  Startup `-resume <uuid>` history hydration requires cake 0.1.0 or a newer build
-  that supports `cake --output-format stream-json replay <uuid>`. The startup
-  project-trust check requires a build that supports
+  Startup `-resume <uuid>` and `-fork [<uuid>]` history hydration require a
+  cake build that supports `cake --output-format stream-json replay <uuid>`; a
+  bare `-fork` also uses `sessions list --json` to find the source session. The
+  startup project-trust check requires a build that supports
   `cake trust --status --json`; older builds skip it silently.
 - `cake-suggest` installed and on `PATH` (or named by
   `suggestions.cake-suggest-bin`) when prompt suggestions are enabled.
@@ -96,8 +97,8 @@ to confirm the active binary; a build with local modifications is marked
 
 ```bash
 cake-repl                                     # fresh session on first prompt
-cake-repl -fork                               # fork the latest session on the first prompt
-cake-repl -fork <uuid>                        # fork a specific session on the first prompt
+cake-repl -fork                               # replay history, then fork the latest session on the first prompt
+cake-repl -fork <uuid>                        # replay history, then fork a specific session on the first prompt
 cake-repl -resume                             # pick a past session to resume at startup
 cake-repl -resume <uuid>                      # replay history, then resume a specific session
 cake-repl -cake-bin ../cake/target/debug/cake
@@ -138,7 +139,7 @@ Flags:
 | Flag | Meaning |
 |---|---|
 | `-cake-bin <path>` | cake executable to run (default `cake`) |
-| `-fork [<uuid>]` | fork the latest session, or a specific session UUID, on the first prompt |
+| `-fork [<uuid>]` | replay the visible history of the latest session, or a specific session UUID, then fork it on the first prompt |
 | `-resume [<uuid>]` | with a UUID: replay visible history when supported, then resume that cake session on the first prompt; without one: pick this directory's past sessions at startup |
 | `-no-session` | do not save the cake session to disk |
 | `-model <name>` | initial model for the first prompt; `/model` changes it |
@@ -231,6 +232,19 @@ down. The status line and timeline only show it shortened.
 - Replay failures (including an older cake binary without replay support) show a
   non-fatal warning. The input remains available, and the first new prompt still
   uses `cake --resume <uuid>`.
+- `-fork [<uuid>]` hydrates the visible timeline the same way, from the session
+  that will be forked. That hydration is display-only: it never adopts the
+  source session's id, task id, model, profile, stored run controls, or context
+  measurement, it never replaces the invocation working directory, and it never
+  pins the source session. The first prompt is still a fresh
+  `cake --fork [<uuid>]` invocation, and the id it reports is pinned for later
+  prompts. A bare `-fork` resolves the newest session for the invocation
+  directory with the read-only `cake sessions list --json` at startup and forks
+  exactly that id, so the history shown is the history forked; when the listing
+  fails the prompt stays available with a startup warning and cake resolves the
+  latest session itself at the first prompt. Fork hydration never starts the
+  post-hydration prompt suggestion, because the forked session does not exist
+  yet.
 - Once cake reports a session id, future prompts are pinned to that session via
   `--resume <id>`, so another cake process creating a newer session in the
   same directory cannot hijack the conversation. If a task succeeds or fails
@@ -818,12 +832,14 @@ validation is available with `just release-check`.
 
 ## Known limitations
 
-- Startup `-resume <uuid>` history hydration requires a cake binary that
-  supports `replay`; if replay is unavailable, cake-repl shows a warning and
-  still lets you continue the session. The session picker — `/sessions`, and a
-  bare `-resume` at startup — needs a cake binary that supports
-  `sessions list --json`; without it the picker shows a non-fatal warning and
-  the prompt stays available. The startup project-trust warning needs
+- Startup `-resume <uuid>` and `-fork [<uuid>]` history hydration require a
+  cake binary that supports `replay`; if replay is unavailable, cake-repl shows
+  a warning and still lets you continue the session or fork. A bare `-fork`
+  also needs `sessions list --json`; without it, cake-repl warns and cake
+  resolves the latest session at the first prompt. The session picker —
+  `/sessions`, and a bare `-resume` at startup — needs a cake binary that
+  supports `sessions list --json`; without it the picker shows a non-fatal
+  warning and the prompt stays available. The startup project-trust warning needs
   `trust --status --json`; with an older cake the preflight is silent and the
   first prompt still reports cake's exit-3 trust error as a generic run failure.
 - Tool output is hidden by default: each tool call shows its header and argument

@@ -27,11 +27,19 @@ consumes cake events. This is the project's core external contract.
   a stored `run_config`, so an older engine does not change sandbox or profile
   on turn two. Read-only startup
   resume hydration runs the separate `cake --output-format stream-json replay
-  <uuid>` command with no prompt. The other permitted invocations are the
-  read-only, informational `cake sessions list --json`, run with the same
-  working directory as a live prompt to list that directory's sessions, and the
-  read-only `cake trust --status --json` startup preflight described below.
-  `--` must stay so a prompt beginning with `-` is never parsed as a flag.
+  <uuid>` command with no prompt. The same command hydrates a `-fork` source at
+  startup, and that hydration is presentation-only: it must not pin the source,
+  move the run mode to resume, or adopt the source's id, task id, model,
+  profile, stored run config, context usage, or working directory, so the first
+  prompt remains a fresh `cake --fork [<uuid>]` invocation. A bare `-fork`
+  resolves this working directory's newest session with the permitted
+  `sessions list --json` invocation at startup and passes that exact UUID to
+  `--fork`, so the hydrated history is the fork source. The other permitted
+  invocations are the read-only, informational `cake sessions list --json`, run
+  with the same working directory as a live prompt to list that directory's
+  sessions, and the read-only `cake trust --status --json` startup preflight
+  described below. `--` must stay so a prompt beginning with `-` is never
+  parsed as a flag.
 - **Context-mismatch fork fallback.** `Result.ContextMismatch` is the one
   place that reads cake's human text: exit code 3, no cancellation or process
   error, the stderr marker
@@ -234,6 +242,14 @@ consumes cake events. This is the project's core external contract.
   strict-drift failure, or `-no-session` must keep the ordinary error and pin.
   The retry itself is a fresh run, so it must never retry again; the resume
   operation key, not the fork source, gates eligibility.
+- **Treating fork hydration as a resume.** `-fork [<uuid>]` replays the source
+  session only to render it. Its `session_meta`, `task_start`, `task_complete`,
+  `turn_usage`, and `compaction` records must not set the session pin, run
+  mode, model, profile, stored run controls, context measurement, or working
+  directory; the first prompt is still `--fork`, and no post-hydration
+  suggestion may start because the forked session has no id yet. A bare `-fork`
+  resolves its source once, with the read-only listing, and forks that id
+  instead of leaving cake to choose a different latest session at prompt time.
 - **Mislabeling cancellation.** Cancellation is derived by the shared
   `childproc.Classify` from whether `cmd.Cancel` successfully signaled the
   process (the run's cancel-requested phase) plus signal-terminated process

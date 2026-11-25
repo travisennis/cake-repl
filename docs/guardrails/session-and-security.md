@@ -62,6 +62,17 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   both helpers and adds one warning; it never aborts the resume. An unavailable
   stored working directory marks hydration warned, so the launch project cannot
   start an automatic suggestion in its place.
+- **Fork-source hydration is display-only.** `-fork [<uuid>]` replays the
+  session that will be forked so its transcript is visible, but nothing from
+  that session becomes current state: the source session and task ids, model,
+  profile, stored run controls, context measurement, and working directory stay
+  unset, no pin is taken, and no post-hydration suggestion starts because the
+  forked session has no id yet. The first prompt remains a fresh
+  `cake --fork [<uuid>]` invocation, and a replay failure leaves that pending
+  fork unchanged. A bare `-fork` resolves this directory's newest session with
+  the read-only listing before hydration and forks that exact id; a listing
+  failure warns, starts no replay, and leaves cake's own bare `--fork`
+  resolution to the first prompt.
 - **Startup session picker.** A bare `-resume` names no session, so it hydrates
   nothing: no replay is started and no pin is set. It opens the same idle
   browser `/sessions` opens, and the pick takes the `/resume <uuid>` transition,
@@ -214,7 +225,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   until its result is settled; `/resume` sets the next mode explicitly. A bare `-resume`
   starts at `RunFresh` and only the picked row moves it to `RunResume`. An initial
   `--fork` is consumed by its first fresh prompt, then the resulting session
-  is pinned with `--resume`. The same flag is the one-shot fallback for a
+  is pinned with `--resume`; its startup history hydration never moves the mode
+  to resume or pins the source. The same flag is the one-shot fallback for a
   resumed run that cake refuses with the exit-3 context-mismatch preflight:
   the retry repeats the same prompt without a second user timeline row or
   history entry, and the pin stays on the old target until the fork announces
@@ -243,7 +255,8 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   a mismatched pair, and `UseResume` ignores an empty id), and a non-empty
   `AnnouncedID` always equals `SessionID`. Only `OnTaskStart` and
   `OnTaskComplete` announce an id; replay hydration may set `SessionID` alone,
-  which is display identity without pin eligibility.
+  which is display identity without pin eligibility, and fork-source hydration
+  sets neither.
   Keep session transitions pure and I/O-free so they stay testable.
 - **Turn selection.** `/model` and `/profile` set the model and profile the next
   prompt passes to cake. The startup `-model`/`-profile` or config values

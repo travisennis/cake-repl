@@ -3,10 +3,13 @@
 `cake-repl` is a single-binary Go terminal REPL (Bubble Tea TUI) that drives the
 external [`cake`](https://github.com/travisennis/cake) CLI as an engine. Each
 submitted prompt spawns one `cake --output-format stream-json` subprocess and
-renders its NDJSON event stream live. When startup receives `-resume <uuid>`, a
-read-only replay stream hydrates the local timeline before the first prompt; a
-bare `-resume` opens a picker of this directory's sessions instead, and hydrates
-nothing until one is chosen. When opted in, a completed turn over its context
+renders its NDJSON event stream live. When startup receives `-resume <uuid>` or
+`-fork [<uuid>]`, a read-only replay stream hydrates the local timeline before
+the first prompt; the fork form hydrates the source session for display only and
+never adopts or pins it. A bare `-resume` opens a picker of this directory's
+sessions instead, and hydrates nothing until one is chosen; a bare `-fork`
+resolves this directory's newest session with the read-only listing and forks
+that exact id. When opted in, a completed turn over its context
 threshold is followed by one external `cake-compact` run that appends an
 in-place checkpoint to the same session, and a completed turn may
 also ask the external `cake-suggest` binary for the next prompt and show it as
@@ -26,13 +29,14 @@ It communicates only through:
 
 - `cake --output-format stream-json` (NDJSON records on stdout),
 - `cake --output-format stream-json replay <uuid>` for read-only transcript
-  hydration,
+  hydration of a resume target or a fork source,
 - `cake sessions list --json` for read-only session listing (versioned JSON
   envelope),
 - `cake trust --status --json` for the read-only startup project-trust check
   (versioned diagnostic document),
 - `--resume <uuid>` session selection, with initial `--fork [<uuid>]` support and
-  a bare `--resume` selecting the session interactively at startup,
+  a bare `--resume` selecting the session interactively at startup, while a
+  bare `--fork` resolves its source with `cake sessions list --json`,
 - `--no-session`, `--model` / `--profile` pass-through flags,
 - `--add-dir <dir>` read-only sandbox directories (repeatable),
 - `--toolbox <dir>` user-defined tool directories (repeatable),
@@ -113,18 +117,22 @@ buffers. `watch` is a pure filesystem tracker. Keep it that way.
 - **Forward-compatible decoding.** Unknown event types decode to `Unknown` and
   unknown fields are ignored, so a newer cake never breaks the stream. Malformed
   lines surface as synthetic `ParseError` events; the stream keeps flowing.
-- **Replay stays read-only.** Startup `-resume <uuid>` hydrates the timeline from
-  cake's supported replay stream before accepting a new prompt. Replay runs in a
-  separate hydration state, so it does not appear as a live task; failures warn
-  and preserve the explicit `--resume <uuid>` next-run pin. Unless `-cwd` was
-  explicit, the replayed `session_meta.working_directory` replaces the
-  invocation directory before the first prompt, and the startup trust probe
-  waits for that choice. A bare `-resume`
-  never reaches this path: it opens the session picker, which runs only the
-  read-only session listing, so no replay runs before the first prompt. A
-  session containing a context checkpoint renders one `compaction` marker at the
-  record's physical position and never expands the checkpoint's retained tail
-  into duplicate timeline items.
+- **Replay stays read-only.** Startup `-resume <uuid>` or `-fork [<uuid>]`
+  hydrates the timeline from cake's supported replay stream before accepting a
+  new prompt. Replay runs in a separate hydration state, so it does not appear
+  as a live task; failures warn and preserve the explicit `--resume <uuid>`
+  next-run pin or the pending fork. Unless `-cwd` was explicit, a resumed
+  replay's `session_meta.working_directory` replaces the invocation directory
+  before the first prompt, and the startup trust probe waits for that choice.
+  Fork-source hydration is display-only: it must not adopt the source id, task
+  id, model, profile, stored run controls, or context measurement, must not
+  replace the working directory, and must not pin the source session, so the
+  first prompt remains the fresh `--fork` invocation the flag asked for. A bare
+  `-resume` never reaches this path: it opens the session picker, which runs
+  only the read-only session listing, so no replay runs before the first
+  prompt. A session containing a context checkpoint renders one `compaction`
+  marker at the record's physical position and never expands the checkpoint's
+  retained tail into duplicate timeline items.
 - **Session listing is read-only.** `cake sessions list --json` is invoked only
   from `internal/cake`, with the same working directory as a live prompt, to list
   that directory's sessions. It is informational (list and select, never

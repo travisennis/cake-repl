@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,6 +24,8 @@ import (
 )
 
 const defaultSandbox = "workspace-write-interactive"
+
+const forkSourceTimeout = 10 * time.Second
 
 type syncWriter struct {
 	mu sync.Mutex
@@ -186,7 +189,7 @@ func bindFlags(fs *flag.FlagSet) *startupFlags {
 	f := &startupFlags{}
 	f.cakeBin = fs.String("cake-bin", "cake", "cake executable to run")
 	fs.Var(&f.resume, "resume", "resume a specific cake session and reload its visible history, or pick one at startup when no UUID is given")
-	fs.Var(&f.fork, "fork", "fork the latest cake session, or the specified session UUID")
+	fs.Var(&f.fork, "fork", "fork the latest cake session, or the specified session UUID, and replay its visible history")
 	f.noSession = fs.Bool("no-session", false, "do not save the cake session to disk")
 	f.model = fs.String("model", "", "model name passed through to cake")
 	f.profile = fs.String("profile", "", "behavior profile passed through to cake")
@@ -244,6 +247,8 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		SystemPrompt:     *f.systemPrompt,
 		Fork:             f.fork.set,
 		ForkID:           f.fork.value,
+		HydrateID:        f.fork.value,
+		HydrateFork:      f.fork.set,
 		NoSession:        *f.noSession,
 		HistoryFile:      *f.historyFile,
 		OutputLimit:      *f.outputLimit,
@@ -326,6 +331,7 @@ func effectiveConfig(f *startupFlags, explicit map[string]bool, warnings io.Writ
 		} else {
 			cfg.InitialMode = cake.RunResume
 			cfg.ResumeID = f.resume.value
+			cfg.HydrateID = f.resume.value
 		}
 	}
 	return cfg, nil
@@ -377,6 +383,8 @@ func run() (err error) {
 		cfg.DebugLog = &syncWriter{w: logFile}
 	}
 
+	resolveForkSource(&cfg, os.Stderr)
+
 	logf := suspendLogf(cfg.DebugLog)
 	runs := cake.NewRegistry(logf)
 	cfg.Runs = runs
@@ -420,6 +428,34 @@ func run() (err error) {
 		}
 	}
 	return nil
+}
+
+func resolveForkSource(cfg *app.Config, warnings io.Writer) {
+	if !cfg.Fork || cfg.ForkID != "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), forkSourceTimeout)
+	defer cancel()
+	sessions, err := cake.ListSessions(ctx, cake.SessionsOptions{
+		Bin:      cfg.CakeBin,
+		Cwd:      cfg.Cwd,
+		DebugLog: cfg.DebugLog,
+	})
+	if err != nil {
+		fmt.Fprintf(warnings, "cake-repl: warning: fork history unavailable: %v\n", err)
+		return
+	}
+	if len(sessions) == 0 {
+		return
+	}
+	latest := sessions[0]
+	for _, session := range sessions[1:] {
+		if session.Timestamp.After(latest.Timestamp) {
+			latest = session
+		}
+	}
+	cfg.ForkID = latest.SessionID
+	cfg.HydrateID = latest.SessionID
 }
 
 func shutdownAfterProgram(m tea.Model, children *childproc.Registry) (app.Model, bool, error) {
