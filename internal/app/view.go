@@ -20,7 +20,7 @@ func (m Model) View() string {
 	}
 	composer := ui.PromptComposer(
 		m.theme,
-		m.input.View(),
+		m.composerView(),
 		m.frameWidth(),
 		p.activityLabel(),
 		m.input.LineCount(),

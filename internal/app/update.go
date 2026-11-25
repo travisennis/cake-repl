@@ -207,6 +207,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress &&
 			(msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
+			if m.composerHit(msg.Y) {
+				delta := composerWheelLines
+				if msg.Button == tea.MouseButtonWheelUp {
+					delta = -delta
+				}
+				m.scrollComposer(delta)
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
@@ -225,7 +233,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	before := m.input.Length()
 	m.input, cmd = m.input.Update(msg)
+	if m.input.Length() != before {
+		m.layout()
+		m.followComposerCursor()
+	}
 	return m, cmd
 }
 
@@ -293,6 +306,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Reset()
 		m.suggestion.filledText = ""
 		m.layout()
+		m.followComposerCursor()
 		m.hideSuggestion()
 		return m, nil
 
@@ -316,6 +330,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.hideSuggestionForHistory()
 				m.setComposerValue(text)
 				m.layout()
+				m.followComposerCursor()
 				return m, nil
 			}
 		}
@@ -326,6 +341,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.hideSuggestionForHistory()
 				m.setComposerValue(text)
 				m.layout()
+				m.followComposerCursor()
 				return m, nil
 			}
 		}
@@ -337,11 +353,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.completionIdx = 0
 
 	var cmd tea.Cmd
+	line, col, length := m.input.Line(), composerCursorColumn(m.input), m.input.Length()
 	m.input, cmd = m.input.Update(msg)
+	moved := m.input.Line() != line || composerCursorColumn(m.input) != col || m.input.Length() != length
 	if m.suggestion.filledText != "" && !m.filledSuggestion() {
 		m.suggestion.filledText = ""
 	}
 	m.layout()
+	if moved {
+		m.followComposerCursor()
+	}
 	return m, cmd
 }
 
@@ -361,6 +382,7 @@ func (m Model) handlePaste(text string) Model {
 		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: composerTruncationWarning()})
 	}
 	m.layout()
+	m.followComposerCursor()
 	return m
 }
 
@@ -514,6 +536,7 @@ func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
 		if len(matches) == 1 {
 			m.input.SetValue(matches[0])
 			m.layout()
+			m.followComposerCursor()
 			return m, nil
 		}
 		m.completionPrefix = input
@@ -521,6 +544,7 @@ func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
 		m.completionIdx = 0
 		m.input.SetValue(matches[0])
 		m.layout()
+		m.followComposerCursor()
 		return m, nil
 	}
 
@@ -531,11 +555,13 @@ func (m Model) handleTabComplete() (next tea.Model, cmd tea.Cmd) {
 		m.completionMatches = nil
 		m.completionIdx = 0
 		m.layout()
+		m.followComposerCursor()
 		return m, nil
 	}
 
 	m.input.SetValue(m.completionMatches[m.completionIdx])
 	m.layout()
+	m.followComposerCursor()
 	return m, nil
 }
 
@@ -561,6 +587,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			m.clearSuggestion()
 			m.layout()
+			m.followComposerCursor()
 			if err != nil {
 				m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
 				return m, nil
@@ -825,6 +852,7 @@ func (m Model) startRunCmd(prompt string, opts cake.Options, record bool) (Model
 	}
 	m.clearSuggestion()
 	m.layout()
+	m.followComposerCursor()
 	return m, tea.Batch(m.spin.Tick, waitForRun(run, key), m.titleCmd())
 }
 

@@ -87,6 +87,7 @@ internal/watch/          Generic path-watch tracker for opt-in automatic turns.
   watch.go               Source paths, first-scan baseline, new-file events, prompt expansion.
 internal/app/            Bubble Tea state machine (the REPL itself).
   model.go               Model struct, layout, viewport wiring.
+  composer.go            Composer scroll window: display-row measurement, cursor follow, and crop.
   timeline.go            Timeline owner: items, cached rendered rows, cap trim, dirty state.
   update.go              Event/key/command handling (the Update loop).
   session.go             sessionState: pure run-mode state machine.
@@ -165,6 +166,15 @@ buffers. `watch` is a pure filesystem tracker. Keep it that way.
   only tool rows. The viewport is a separate widget that receives the joined
   payload once per Update. Rendering itself stays in side-effect-free
   `internal/ui`, which takes data in and returns strings.
+- **Composer scrolling is app-owned.** `internal/app/composer.go` keeps the
+  textarea tall enough to render every display row and crops the visible window
+  itself, so the wheel moves the composer window without moving the text cursor.
+  Display rows and the cursor row are measured on a copy of the textarea; the
+  visible model is untouched. The textarea's own viewport stays at the top: when
+  an edit grows the content past its height, the composer is re-set from its
+  value with the cursor restored before the height is raised. Any text or cursor
+  change re-reveals the cursor. Wheel hit-testing is alternate-screen only
+  because the inline frame has no fixed screen origin.
 - **Pending tool calls hold stable blocks.** `pendingCalls` maps a cake call id
   to the `*ui.ToolBlock`, not a timeline index. Trimming, insertion, removal,
   and cap eviction move the item slice; they cannot retarget a late function

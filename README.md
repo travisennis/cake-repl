@@ -187,7 +187,7 @@ empty value is treated as unset and cannot clear a stored policy.
 | `Ctrl+Y` | copy the last assistant response (markdown) to the clipboard |
 | `Up` / `Down` | recall prompt history (at the input's first/last line) |
 | `PgUp` / `PgDn` | scroll timeline |
-| `Mouse wheel` | scroll timeline |
+| `Mouse wheel` | scroll the timeline, or the composer when the pointer is over it |
 
 While the `/sessions` browser is open, `Up`/`Down`, `PgUp`/`PgDn`, and
 `Home`/`End` move the selection, `Enter` resumes the highlighted session, and
@@ -948,4 +948,6 @@ validation is available with `just release-check`.
   conversation is scrolled with `PgUp`/`PgDn`. Mouse reporting stays on, so
   the wheel scrolls the timeline and terminal history is reachable through the
   terminal's own scrollback keys (Shift+PgUp / Shift+wheel, terminal-
-  dependent).
+  dependent). Composer wheel scrolling is alternate-screen only: the inline
+  frame has no fixed screen origin, so a wheel position cannot be mapped to the
+  composer and the wheel keeps scrolling the timeline.

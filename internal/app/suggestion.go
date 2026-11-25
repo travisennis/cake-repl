@@ -304,6 +304,7 @@ func (m *Model) fillSuggestion() {
 	}
 	m.suggestion.filledText = text
 	m.layout()
+	m.followComposerCursor()
 }
 
 func (m Model) filledSuggestion() bool {

@@ -132,11 +132,13 @@ type Model struct {
 	height int
 	ready  bool
 
-	input     textarea.Model
-	viewport  viewport.Model
-	timeline  timeline
-	noticeSeq uint64
-	spin      spinner.Model
+	input          textarea.Model
+	viewport       viewport.Model
+	composerScroll int
+	composerCursor int
+	timeline       timeline
+	noticeSeq      uint64
+	spin           spinner.Model
 
 	runOp  pendingOperation
 	run    *cake.Run
@@ -510,7 +512,7 @@ func (m *Model) layout() {
 		inputWidth = 1
 	}
 	m.input.SetWidth(inputWidth)
-	m.input.SetHeight(inputHeight)
+	m.resizeComposer()
 
 	vpHeight := m.height - inputHeight - composerVerticalChrome - statusHeight
 	if m.cfg.Inline {

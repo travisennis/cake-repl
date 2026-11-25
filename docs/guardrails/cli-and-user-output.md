@@ -96,9 +96,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   when the input is empty; otherwise submit), `Ctrl+C`
   (cancel/quit), `Ctrl+N` (new session), `Ctrl+U` (clear input), `Ctrl+O` (cycle all tool output
   through truncated/full/hidden, starting from hidden), `Ctrl+Y` (copy the last assistant response's raw markdown to the system clipboard), `Up`/`Down` (history), `PgUp`/`PgDn`
-  (scroll). `Ctrl+C` cancels a running task or compaction, cancels hydration
-  and exits, and quits only when idle; `Ctrl+N` cancels a run, hydration, or
-  compaction and starts a new session. A canceled run remains
+  (scroll). The mouse wheel scrolls the timeline, or the composer when the
+  pointer is over it in the alternate screen. `Ctrl+C` cancels a running task
+  or compaction, cancels hydration and exits, and quits only when idle;
+  `Ctrl+N` cancels a run, hydration, or compaction and starts a new session. A canceled run remains
   resource-busy until its result is settled. While the `/sessions` browser is open its keys are modal:
   `Up`/`Down`, `PgUp`/`PgDn`, and `Home`/`End` move the selection, `Enter`
   resumes the highlighted session, and `Esc`, `q`, or `Ctrl+C` close it.
@@ -369,7 +370,9 @@ renders it in plain text like every other surface.
   title reset — so the timeline region, the resume message, and the shell
   prompt are adjacent. The alternate screen remains the default. Mouse
   reporting stays on, so the wheel scrolls the timeline and terminal history is
-  reachable through the terminal's own scrollback keys. An external suspend
+  reachable through the terminal's own scrollback keys. Composer wheel
+  scrolling is alternate-screen only: the inline frame has no fixed screen
+  origin, so a wheel position cannot be mapped to the composer. An external suspend
   parks the suspension on the alternate screen, so the shell's own
   job-control output never lands in the live region and the resumed frame is
   rewritten in place; the consequence is that shell output produced while the
