@@ -16,9 +16,11 @@ Compatibility surfaces — preserve unless the task explicitly changes them:
   add-dir, toolbox, sandbox, no-skills, skills, and system-prompt flags, or the
   supported read-only `replay <uuid>`, `sessions list --json`, and
   `trust --status --json` commands; never read cake session files, parse its
-  human text, or import its internals. The startup trust probe is advisory: it
-  decodes only cake's versioned diagnostic document, never writes a trust
-  record, and is silent on any failure.
+  human text, or import its internals. The one human-text exception is the
+  exit-3 context-mismatch preflight marker that selects the one-shot `--fork`
+  retry. The startup trust probe is advisory: it decodes only cake's versioned
+  diagnostic document, never writes a trust record, and is silent on any
+  failure.
 - **compaction contract**: the opt-in between-turn compactor is run only through
   `internal/compact` as `cake-compact compact -json -threshold … <session-id>`,
   with exactly one threshold mode: `-threshold-tokens` for the absolute

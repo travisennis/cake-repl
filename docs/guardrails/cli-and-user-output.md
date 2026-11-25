@@ -18,8 +18,10 @@ commands or help text (`internal/app/commands.go`), key bindings
   `-config`/`-no-config`, uuid shape, positional args rejected) are
   user-facing. The cake pass-through flags must stay aligned with the cake
   contract. `-fork` applies to the initial fresh prompt; later prompts use
-  the pinned session when one is reported. A bare `-resume` names no session:
-  it opens the startup session picker (below) instead of hydrating or
+  the pinned session when one is reported. A resume refused with the exit-3
+  context-mismatch preflight is separately retried once as `--fork <source>`,
+  which does not change the `-fork` flag's meaning. A bare `-resume` names no
+  session: it opens the startup session picker (below) instead of hydrating or
   pinning, so the two optional-value flags share one parse path.
   `-sandbox` defaults to
   `workspace-write-interactive`, not cake's own `workspace-write`, because a

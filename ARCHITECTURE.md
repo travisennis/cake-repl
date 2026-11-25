@@ -41,6 +41,10 @@ It communicates only through:
 - `--no-skills` / `--skills <names>`, and `--system-prompt <path>`,
 - `--` to terminate flag parsing before the prompt argument.
 
+The `--fork` path is also the one-shot fallback when a resumed run is refused
+by cake's exit-3 context-mismatch preflight, so the conversation continues
+under a new session id instead of stopping at the error.
+
 One non-cake executable is also part of the boundary: the opt-in
 `cake-compact compact -json -threshold … <session-id>` compactor. The REPL never
 passes `-fork`, never reads or writes the session file, and decodes only the

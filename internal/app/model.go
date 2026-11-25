@@ -125,6 +125,8 @@ type Model struct {
 	run    *cake.Run
 	runSeq uint64
 
+	runPrompt string
+
 	replay        replayState
 	trustDeferred bool
 

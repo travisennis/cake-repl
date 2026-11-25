@@ -13,10 +13,15 @@ consumes cake events. This is the project's core external contract.
   `--tools <names>` / `--no-tools`, `--no-skills` /
   `--skills <names>`, and `--system-prompt <path>`. An initial fresh prompt
   may additionally use `--fork [<uuid>]`; once cake reports the forked session
-  ID, later prompts use only its pinned `--resume <uuid>`. When the target is
-  a resume, cake-repl omits every pass-through flag that was not explicitly
-  set; cake restores the session's stored `session_meta.run_config` and working
-  directory. The hardcoded `-sandbox` default and config-derived model/profile
+  ID, later prompts use only its pinned `--resume <uuid>`. A resumed run that
+  cake refuses with its exit-3 context-mismatch preflight is retried exactly
+  once as `--fork <uuid>` with the same prompt; the fork is a fresh invocation,
+  so it carries the fresh-session controls plus an explicit model and any known
+  stored profile rather than the resume pass-through omissions. The retry
+  never runs for a canceled run, `-no-session`, or a non-mismatch exit 3. When
+  the target is a resume, cake-repl omits every pass-through flag that was not
+  explicitly set; cake restores the session's stored `session_meta.run_config`
+  and working directory. The hardcoded `-sandbox` default and config-derived model/profile
   are fresh-session defaults only. A session created in this process keeps its
   creation controls and replays them on a follow-up turn until a replay reports
   a stored `run_config`, so an older engine does not change sandbox or profile
@@ -27,6 +32,16 @@ consumes cake events. This is the project's core external contract.
   working directory as a live prompt to list that directory's sessions, and the
   read-only `cake trust --status --json` startup preflight described below.
   `--` must stay so a prompt beginning with `-` is never parsed as a flag.
+- **Context-mismatch fork fallback.** `Result.ContextMismatch` is the one
+  place that reads cake's human text: exit code 3, no cancellation or process
+  error, the stderr marker
+  `Session context mismatch: context for session `, and no
+  `--strict-context-drift`. Exit code 3 alone is not a trigger (it also covers
+  invalid flags, models, and configuration), and the strict-drift message is
+  excluded because it reports a user-requested check. If cake rewords the
+  message the fallback does not run and the ordinary exit-3 error is shown.
+  The fork source is the resume target of the failed invocation, and the retry
+  records no second user timeline row and no second history entry.
 - **stream-json schema.** The typed events in `events.go` (`task_start`,
   `session_meta`, `prompt_context`, `message`, `reasoning`, `function_call`,
   `function_call_output`, `hook_event`, `skill_activated`, `task_complete` +
@@ -212,6 +227,11 @@ consumes cake events. This is the project's core external contract.
 - **Dropping malformed lines silently.** Invalid JSON lines become synthetic
   `ParseError` events; the reader keeps going. Don't abort the stream on one bad
   line, and don't use `bufio.Scanner` (long tool-output lines overflow it).
+- **Forking on every exit 3.** Only the exit-3 context-mismatch marker may
+  start the one-shot fork retry. A generic input error, a canceled run, a
+  strict-drift failure, or `-no-session` must keep the ordinary error and pin.
+  The retry itself is a fresh run, so it must never retry again; the resume
+  operation key, not the fork source, gates eligibility.
 - **Mislabeling cancellation.** Cancellation is derived by the shared
   `childproc.Classify` from whether `cmd.Cancel` successfully signaled the
   process (the run's cancel-requested phase) plus signal-terminated process

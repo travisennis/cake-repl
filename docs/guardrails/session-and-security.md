@@ -192,8 +192,16 @@ or anything touching `-debug-log` or what is written to disk/terminal.
   until its result is settled; `/resume` sets the next mode explicitly. A bare `-resume`
   starts at `RunFresh` and only the picked row moves it to `RunResume`. An initial
   `--fork` is consumed by its first fresh prompt, then the resulting session
-  is pinned with `--resume`. **Retargeting drops the identity of the session
-  left behind.** `/resume <uuid>` and the `/sessions` browser's `Enter` are one
+  is pinned with `--resume`. The same flag is the one-shot fallback for a
+  resumed run that cake refuses with the exit-3 context-mismatch preflight:
+  the retry repeats the same prompt without a second user timeline row or
+  history entry, and the pin stays on the old target until the fork announces
+  its own id. A canceled run, a non-mismatch exit 3, and `-no-session` never
+  retry. The retry is a fresh invocation, so it uses the fresh-session run
+  controls, an explicit model, and a known stored profile; cake does not
+  restore a stored `run_config` on a fork.
+  **Retargeting drops the identity of the session left behind.**
+  `/resume <uuid>` and the `/sessions` browser's `Enter` are one
   shared transition: when the target actually changes, the reported session id,
   task id, announced id, and reported model are cleared, so the status line's
   session field, `/session`, `/session copy`, and the exit hint can only name

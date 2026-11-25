@@ -239,6 +239,15 @@ down. The status line and timeline only show it shortened.
   for a follow-up turn until a replay reports a stored `run_config`; an older
   cake binary therefore keeps the same sandbox and profile on turn two instead
   of falling back to config defaults.
+- If cake refuses a resumed prompt because the session's stored context identity
+  no longer matches the current system prompt, tool catalog, sandbox, or
+  project root, it exits with input error 3 before running. cake-repl then
+  retries that same prompt once as `cake --fork <session-id>`, which seeds a new
+  session from the old transcript. The timeline shows one warning before the
+  retry, the prompt is not duplicated, and the new session id cake reports is
+  pinned for later prompts. The retry is a fresh invocation, so it uses the
+  fresh-session run controls instead of a stored `run_config`; a canceled run,
+  a different exit-3 failure, and `-no-session` do not retry.
 - The status-line model comes from the stream when cake reports one: replay
   hydration reads `session_meta.model_config` (falling back to
   `session_meta.model`), and a newer cake reports the same optional identity on

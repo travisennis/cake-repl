@@ -725,6 +725,10 @@ func (m Model) persistHistory(text string) (oversized bool) {
 
 func (m Model) runOptions(prompt string) cake.Options {
 	mode, resumeID := m.session.RunOptions()
+	return m.runOptionsFor(mode, resumeID, prompt)
+}
+
+func (m Model) runOptionsFor(mode cake.RunMode, resumeID, prompt string) cake.Options {
 	restore := mode == cake.RunResume
 	opts := cake.Options{
 		Bin:       m.cfg.CakeBin,
@@ -778,12 +782,15 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	if m.exiting() || m.runBusy() || m.compactionBusy() {
 		return m, nil
 	}
+	return m.startRunCmd(prompt, m.runOptions(prompt), true)
+}
+
+func (m Model) startRunCmd(prompt string, opts cake.Options, record bool) (tea.Model, tea.Cmd) {
 	m.sawComplete = false
 	m.runOutcome = outcomeNone
 	m.runGeneration = 0
 	m.suggestion.hydrated = false
-	_, resumeID := m.session.RunOptions()
-	opts := m.runOptions(prompt)
+	m.runPrompt = prompt
 	run, err := cake.Start(opts)
 	if err != nil {
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: err.Error()})
@@ -794,19 +801,48 @@ func (m Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	}
 	m.trackChild("run", run.Cancel, run.Done)
 
+	resumeID := ""
+	if opts.Mode == cake.RunResume {
+		resumeID = opts.ResumeID
+	}
 	m.runSeq++
 	key := operationKey{generation: m.session.Generation(), request: m.runSeq, sessionID: resumeID}
 	m.runOp.begin(key, run.Cancel, run.Done)
 	m.run = run
 	m.cfg.Fork = false
-	if m.history.Add(prompt) && m.persistHistory(prompt) {
-		m.appendItem(ui.Item{Kind: ui.KindWarning, Text: historyTooLargeWarning()})
+	if record {
+		if m.history.Add(prompt) && m.persistHistory(prompt) {
+			m.appendItem(ui.Item{Kind: ui.KindWarning, Text: historyTooLargeWarning()})
+		}
+		m.appendItem(ui.Item{Kind: ui.KindUser, Text: prompt})
+		m.input.Reset()
 	}
-	m.appendItem(ui.Item{Kind: ui.KindUser, Text: prompt})
-	m.input.Reset()
 	m.clearSuggestion()
 	m.layout()
 	return m, tea.Batch(m.spin.Tick, waitForRun(run, key), m.titleCmd())
+}
+
+func (m Model) forkRetryOptions(sourceID string) cake.Options {
+	opts := m.runOptionsFor(cake.RunFresh, "", m.runPrompt)
+	opts.Fork = true
+	opts.ForkID = sourceID
+	opts.NoSession = false
+	if !m.turn.ModelExplicit {
+		opts.Model = ""
+	}
+	if m.turn.ProfileExplicit || m.session.ProfileKnown {
+		opts.Profile = m.effectiveProfile()
+	}
+	return opts
+}
+
+func (m Model) retryFork(sourceID string) (tea.Model, tea.Cmd) {
+	m.appendItem(ui.Item{
+		Kind: ui.KindWarning,
+		Text: "session context changed — retrying as a fork of " + ui.ShortID(sourceID),
+	})
+	m.syncViewport()
+	return m.startRunCmd(m.runPrompt, m.forkRetryOptions(sourceID), false)
 }
 
 func (m *Model) applyEvent(ev cake.Event) {
@@ -1056,6 +1092,13 @@ func (m Model) finishRunKey(key operationKey, res cake.Result) (tea.Model, tea.C
 	case res.Err != nil:
 		result = outcomeFailure
 		m.appendItem(ui.Item{Kind: ui.KindError, Text: "cake failed: " + res.Err.Error()})
+	case res.ContextMismatch() && key.sessionID != "" && !m.cfg.NoSession:
+		m.session.OnRunEnded()
+		m.syncViewport()
+		if m.exiting() {
+			return m.maybeQuit()
+		}
+		return m.retryFork(key.sessionID)
 	case res.ExitCode != 0:
 		result = outcomeFailure
 		text := fmt.Sprintf("cake exited with code %d", res.ExitCode)

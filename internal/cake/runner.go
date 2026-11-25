@@ -137,6 +137,16 @@ type Result struct {
 	Err      error
 }
 
+const inputErrorExitCode = 3
+
+const contextMismatchStderr = "Session context mismatch: context for session "
+
+func (r Result) ContextMismatch() bool {
+	return r.ExitCode == inputErrorExitCode && !r.Canceled && r.Err == nil &&
+		strings.Contains(r.Stderr, contextMismatchStderr) &&
+		!strings.Contains(r.Stderr, "--strict-context-drift")
+}
+
 type ParseError struct {
 	Line string
 	Err  error
